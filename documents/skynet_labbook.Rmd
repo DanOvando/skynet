@@ -301,6 +301,7 @@ library(viridis)
 library(compiler)
 library(TMB)
 library(bigrquery)
+library(stringr)
 
 ebs_trawl <-
   FishData::download_catch_rates(survey = "EBSBTS", species_set = 50) %>%
@@ -477,7 +478,7 @@ knots <- alaska_pollock_densities %>%
   select(knot,e_km,n_km) %>% 
   unique()
 
-nearest_knot <- nn2(knots %>% select(-knot), utm_coords, k = 1)
+nearest_knot <- RANN::nn2(knots %>% select(-knot), utm_coords, k = 1)
 
 ebs$knot <- knots$knot[nearest_knot$nn.idx]
 
