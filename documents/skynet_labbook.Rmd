@@ -1,0 +1,539 @@
+---
+title: "Skynet Lab Notebook"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(eval = F)
+```
+
+
+  * Talk with Dawn about their pollock work 
+
+  * Measuring productivity as a potential latent variable 
+
+  * Illegal guys turn it off selection problem 
+
+  * Check out [this work on mapping effort](https://bluehub.jrc.ec.europa.eu/webgis_fish/)
+
+
+# Practice Scraping GFW
+
+Goal here is to work up a script querying GFW to get eastern bering sea data. 
+
+The eastern bering sea (EBS) is located roughly within the bounding box of 175w to 155w, and 50n and 58 n. These correspond to 
+
+
+```{r}
+library(tidyverse)
+library(bigrquery)
+library(lubridate)
+library(tmap)
+library(leaflet)
+library(rgdal)
+library(FishData)
+library(ggmap)
+
+data("World")
+
+project <- "ucsb-gfw"
+
+library(bigrquery)
+
+fishing_connection <- src_bigquery(project, "eastern_bering_sea") # This function initiliazes a connection with a BQ dataset
+
+summer <- 6:8
+
+ebs <- fishing_connection %>% 
+  tbl("ebs") %>% 
+  mutate(y_m_d = date(timestamp)) %>% 
+  mutate(obs_year = year(y_m_d),
+         obs_month = month(y_m_d),
+         round_lat = round(lat, as.integer(1)),
+         round_lon = round(lon, as.integer(1))) %>% 
+  filter(obs_month %in% summer) %>% 
+  group_by(round_lat,round_lon,obs_year) %>% 
+  summarise(fishing_hours = sum(hours * measure_new_score),
+            mean_dist_from_shore = mean(distance_from_shore),
+            mean_dist_from_port = mean(distance_from_port)) %>% 
+  collect() %>% 
+  rename(year = obs_year)
+
+
+
+
+```
+
+Let's make a mep
+
+```{r}
+
+m <-  ebs %>% 
+  leaflet() %>% 
+  addTiles %>% 
+  fitBounds(-175,65,-155,50) %>% 
+  addCircleMarkers(~round_lon, ~round_lat)
+
+coords <- SpatialPoints(ebs %>% dplyr::select(round_lon, round_lat) %>% ungroup())  
+
+ebs_map <- SpatialPointsDataFrame(coords, ebs %>% ungroup())
+
+proj4string(ebs_map) <- CRS("+proj=longlat +datum=WGS84")
+
+# proj4string(World) <- CRS("+proj=longlat +datum=WGS84")
+
+# ebs_border <- bbox(ebs_map)
+
+# ebs_hdf <- get_map(location = c(lon = -170, lat = 55),zoom = 5)
+
+alaska <- read_shape('~/Box Sync/Databases/alaska_coastline/alaska_coastline.shp')
+# 
+# ebs <- meow[meow$ECOREGION == 'Eastern Bering Sea',]
+
+alaska <-  crop_shape(alaska, ebs_map)
+
+
+ebs_map <- spTransform(ebs_map,crs(alaska))
+
+# plot(alaska)
+# plot(ebs_map, add = T)
+
+gfw_ebs_map <- tm_shape(alaska)  +
+  tm_lines(col = 'black') + 
+  tm_shape(ebs_map) + 
+  tm_bubbles(size = 'fishing_hours', col = 'fishing_hours',
+             palette = c('blue','red'),
+             legend.size.show = F) + 
+    tm_legend(legend.outside.position = c("right"),
+  legend.outside = TRUE) #format legend
+
+save_tmap(gfw_ebs_map, filename = paste('../',run_dir,'/gfw_ebs_map.pdf', sep = ''))
+
+# ebs_gfw_raster <- ebs %>% 
+#   ungroup() %>% 
+#   dplyr::select(round_lat, round_lon, fishing_hours) %>% 
+#   spread(round_lon, fishing_hours) %>% 
+#   dplyr::select(-round_lat) %>% 
+#   as.matrix() %>% 
+#   raster()
+# extent(ebs_gfw_raster) <- extent(ebs_map)
+# proj4string(ebs_gfw_raster)
+
+# gfw_ebs_map_plot <- ggmap(ebs_hdf) + 
+#   geom_point(data = ebs,size = .1, aes(round_lon, round_lat, color = log(fishing_hours))) + 
+#   scale_color_continuous(low = 'blue',high = 'red') +
+#     labs(title = 'GFW Fishing Hours')
+
+
+gfw_ebs_map_plot
+
+
+```
+
+
+
+Now, let's try and get some fishviz data. 
+
+```{r}
+
+ebs_trawl <-  FishData::download_catch_rates( survey="EBSBTS", species_set=20 ) %>% 
+  as_data_frame()
+
+ebs_trawl_summary <- ebs_trawl %>% 
+  set_names(tolower(colnames(.))) %>% 
+  mutate(round_lat = round(lat,1),
+         round_lon = round(long,1)) %>% 
+  group_by(year,round_lat, round_lon) %>% 
+  summarise(total_weight = sum(wt, na.rm = T)) %>% 
+  mutate(log_total_weight = log(total_weight))
+
+coords <- SpatialPoints(ebs_trawl_summary %>% ungroup() %>%  dplyr::select(round_lon, round_lat))  
+
+fviz_ebs <- SpatialPointsDataFrame(coords, ebs_trawl_summary %>% ungroup())
+
+proj4string(fviz_ebs) <- CRS("+proj=longlat +datum=WGS84")
+
+
+# ebs_fviz_raster <- ebs_trawl_summary %>%
+#   ungroup() %>%
+#   dplyr::select(round_lat, round_lon, log_total_weight) %>%
+#   spread(round_lon, log_total_weight) %>%
+#   dplyr::select(-round_lat) %>%
+#   as.matrix() %>%
+#   raster()
+# extent(ebs_gfw_raster) <- extent(ebs_map)
+# proj4string(ebs_gfw_raster)
+```
+
+```{r}
+
+
+fviz_ebs_map <- tm_shape(alaska)  +
+  tm_lines(col = 'black') + 
+  tm_shape(fviz_ebs) + 
+  tm_bubbles(size = .05, alpha = 0.5, col = 'log_total_weight',
+             palette = c('blue','red'),
+             legend.size.show = F) + 
+    tm_legend(legend.outside.position = c("right"),
+  legend.outside = TRUE) #format legend
+
+fviz_ebs_map
+
+```
+
+
+Hot damn! Let's merge these. Just do it over summer if possible
+
+```{r}
+joint_ebs <- ebs %>% 
+  left_join(ebs_trawl_summary, by = c('year','round_lat','round_lon')) %>% 
+  filter(is.na(total_weight) == F) 
+
+joint_ebs %>% 
+  ggplot(aes(log(fishing_hours), log(total_weight), fill = log(mean_dist_from_port))) + 
+  geom_point(shape = 21) + 
+  geom_smooth(method = 'lm') + 
+  xlab('Log GFW Fishing Hours') + 
+  ylab('Log Trawl Survey Biomass') + 
+scale_fill_continuous(name = 'Distance from Port', low = 'green', high = 'blue') + 
+  ggthemes::theme_fivethirtyeight() + 
+  theme(axis.title = element_text())
+
+
+```
+
+```{r}
+
+reg <- lm(total_weight ~ fishing_hours + mean_dist_from_port, data = joint_ebs)
+
+```
+
+
+# Getting Vessel Characteristics
+
+Go to vessel_lists > YEAR_fishing_vessel_info
+
+nn_max_label gives you what the neural net is 
+
+max_score is how confident it is
+
+
+
+# Interpolating EBS trawl survey data
+
+The raw EBS trawl survey data from fishviz is at a relatively course (or true if you want to tihnk about it that way) scale. The problem is that while that's a pretty solid resolution, it's still way coarser than the global fishing watch data themselves. That leaves you with two options more or less. What you were doing was just "rounding" the lats and longs into conformity. That was just erasing a lot of data though, and is obviously just a convenient hack. Another option then would be to just rasterize and overlay both options. Basically, assign an interpolation function to the data. Seems like you really don't want to do that for the GFW data, since the data are in theory closer to a census than a survey. 
+
+So, that then means you need to think about manipulating the trawl survey data. One option would just be to apply a simple interpolation to the data, and then interpolate the density at each point in the GFW data. That would be the simplest option, but also probably the most incorrect. Could mess around with it for a sec though as a starting point. 
+
+From there, the better thing to do would be to mess around with using VAST to interpolate, to basically create the maps in the shiny app. I'm guessing you'd use VAST to do that, but will have to check with Jim. Let's try rasterizing first and see how it looks. 
+
+
+```{r}
+ebs_trawl <-  FishData::download_catch_rates( survey="EBSBTS", species_set=20 ) %>% 
+  as_data_frame() %>% 
+  set_names(colnames(.) %>% tolower())
+
+
+
+pollock_2016 <- ebs_trawl %>% 
+  filter(sci == 'Gadus_chalcogrammus') %>% 
+  dplyr::select(towid,year,lat,long,wt) %>% 
+  filter(year == max(year))
+
+coords <- SpatialPoints(pollock_2016 %>% ungroup() %>%  dplyr::select(long, lat))  
+
+fviz_ebs <- SpatialPointsDataFrame(coords, pollock_2016 %>% ungroup())
+
+proj4string(fviz_ebs) <- CRS("+proj=longlat +datum=WGS84")
+
+pollock_raster <- raster(fviz_ebs, resolution = 1/5)
+
+pollock_raster <- raster(fviz_ebs)
+
+raster_pollock_2016 <- rasterize(fviz_ebs,pollock_raster,'wt')
+
+raster_pollock_2016@data@values
+
+
+plot(fviz_ebs)
+
+plot(raster_pollock_2016)
+
+interp_pollock <- idw(formula = wt ~ 1, fviz_ebs, newdata = pollock_raster) 
+
+```
+
+# New idea for testing pollock
+
+As a starting point, let's try and focus on on EBS pollock, iconic species, trawl fishery, large boats, should be somewhat doable. So the steps to make that happen. 
+
+1. Use VAST to get density estimates at knots (start at 100 knots)
+
+2. Get EBS GFW data for trawl vessels
+
+3. Use `RANN:nn2` to snap each EBS GFW data point to a knot
+
+```{r}
+
+x1 <- runif(100, 0, 2*pi)
+x2 <- runif(100, 0,3)
+DATA <- data.frame(x1, x2)
+nearest <- nn2(DATA,DATA, k  = 3)
+
+```
+
+4. Summarize the total effort at each knot
+
+5. Fit model!
+
+Here's the concept 
+```{r}
+
+library(tidyverse)
+library(VAST)
+library(ThorsonUtilities)
+library(demons)
+library(sf)
+library(ggmap)
+library(FishData)
+library(viridis)
+library(compiler)
+library(TMB)
+library(bigrquery)
+
+ebs_trawl <-
+  FishData::download_catch_rates(survey = "EBSBTS", species_set = 50) %>%
+  set_names(tolower(colnames(.)))
+Version = "VAST_v2_4_0"
+Method = c("Grid", "Mesh")[2]
+grid_size_km = 25
+n_x = c(100, 250, 500, 1000, 2000)[1] # Number of stations
+Kmeans_Config = list( "randomseed"=1, "nstart"=100, "iter.max"=1e3 )  
+
+
+FieldConfig = c("Omega1"=1, "Epsilon1"=1, "Omega2"=1, "Epsilon2"=1) 
+RhoConfig = c("Beta1"=0, "Beta2"=0, "Epsilon1"=0, "Epsilon2"=0) 
+OverdispersionConfig = c("Vessel"=0, "VesselYear"=0)
+ObsModel = c(2,0)  
+
+Options =  c("SD_site_density"=0, "SD_site_logdensity"=0, "Calculate_Range"=1, "Calculate_evenness"=0, "Calculate_effective_area"=1, "Calculate_Cov_SE"=0, 'Calculate_Synchrony'=0, 'Calculate_Coherence'=0)
+
+Region <- 'Eastern_Bering_Sea'
+
+
+DateFile = file.path(getwd(), 'VAST_output/')
+dir.create(DateFile)
+
+
+
+
+alaska_pollock <- ebs_trawl %>%
+filter(sci == sci[1]) %>%
+rename(
+Year = year,
+Lat = lat,
+Lon = long,
+Catch_KG = wt
+) %>%
+mutate(AreaSwept_km2 = 1, Vessel = 'missing') %>%
+select(Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG)
+
+qmplot(
+x = Lon,
+y = Lat,
+data = alaska_pollock,
+color = log10(Catch_KG)
+) +
+scale_color_viridis() +
+facet_wrap( ~ Year)
+
+Record = ThorsonUtilities::bundlelist(
+c(
+"alaska_pollock",
+"Version",
+"Method",
+"grid_size_km",
+"n_x",
+"FieldConfig",
+"RhoConfig",
+"OverdispersionConfig",
+"ObsModel",
+"Kmeans_Config"
+)
+)
+save(Record, file = file.path(DateFile, "Record.RData"))
+capture.output(Record, file = paste0(DateFile, "Record.txt"))
+strata.limits <- data.frame('STRATA' = "All_areas")
+
+Extrapolation_List = SpatialDeltaGLMM::Prepare_Extrapolation_Data_Fn(Region =
+Region, strata.limits = strata.limits)
+
+alaska_pollock <- alaska_pollock %>%
+na.omit() %>%
+mutate(Vessel = as.factor(Vessel))
+
+Spatial_List = SpatialDeltaGLMM::Spatial_Information_Fn(
+grid_size_km = grid_size_km,
+n_x = n_x,
+Method = Method,
+Lon = alaska_pollock[, 'Lon'],
+Lat = alaska_pollock[, 'Lat'],
+Extrapolation_List = Extrapolation_List,
+randomseed = Kmeans_Config[["randomseed"]],
+nstart = Kmeans_Config[["nstart"]],
+iter.max = Kmeans_Config[["iter.max"]],
+DirPath = DateFile,
+Save_Results = FALSE
+)
+# Add knots to Data_Geostat
+alaska_pollock = cbind(alaska_pollock, "knot_i" = Spatial_List$knot_i)
+
+TmbData = Data_Fn(
+"Version" = Version,
+"FieldConfig" = FieldConfig,
+"OverdispersionConfig" = OverdispersionConfig,
+"RhoConfig" = RhoConfig,
+"ObsModel" = ObsModel,
+"c_i" = rep(0, nrow(alaska_pollock)),
+"b_i" = alaska_pollock[, 'Catch_KG'],
+"a_i" = alaska_pollock[, 'AreaSwept_km2'],
+"v_i" = as.numeric(alaska_pollock[, 'Vessel']) - 1,
+"s_i" = alaska_pollock[, 'knot_i'] - 1,
+"t_iz" = alaska_pollock[, 'Year'],
+"a_xl" = Spatial_List$a_xl,
+"MeshList" = Spatial_List$MeshList,
+"GridList" = Spatial_List$GridList,
+"Method" = Spatial_List$Method,
+"Options" = Options
+)
+
+TmbList = Build_TMB_Fn(
+"TmbData" = TmbData,
+"RunDir" = DateFile,
+"Version" = Version,
+"RhoConfig" = RhoConfig,
+"loc_x" = Spatial_List$loc_x,
+"Method" = Method
+)
+Obj = TmbList[["Obj"]]
+
+Opt = TMBhelper::Optimize(
+obj = Obj,
+lower = TmbList[["Lower"]],
+upper = TmbList[["Upper"]],
+getsd = TRUE,
+savedir = DateFile,
+bias.correct = FALSE
+)
+
+Report = Obj$report()
+Save = list(
+"Opt" = Opt,
+"Report" = Report,
+"ParHat" = Obj$env$parList(Opt$par),
+"TmbData" = TmbData
+)
+save(Save, file = paste0(DateFile, "Save.RData"))
+
+MapDetails_List = SpatialDeltaGLMM::MapDetails_Fn( "Region"=Region, "NN_Extrap"=Spatial_List$PolygonList$NN_Extrap, "Extrapolation_List"=Extrapolation_List )
+# Decide which years to plot                                                   
+Year_Set = seq(min(alaska_pollock[,'Year']),max(alaska_pollock[,'Year']))
+Years2Include = which( Year_Set %in% sort(unique(alaska_pollock[,'Year'])))
+
+Dens_xt <- SpatialDeltaGLMM::PlotResultsOnMap_Fn(plot_set=c(3), MappingDetails=MapDetails_List[["MappingDetails"]], Report=Report, Sdreport=Opt$SD, PlotDF=MapDetails_List[["PlotDF"]], MapSizeRatio=MapDetails_List[["MapSizeRatio"]], Xlim=MapDetails_List[["Xlim"]], Ylim=MapDetails_List[["Ylim"]], FileName=,,, Year_Set=Year_Set, Years2Include=Years2Include, Rotate=MapDetails_List[["Rotate"]], Cex=MapDetails_List[["Cex"]], Legend=MapDetails_List[["Legend"]], zone=MapDetails_List[["Zone"]], mar=c(0,0,2,0), oma=c(3.5,3.5,0,0), cex=1.8, plot_legend_fig=FALSE)
+
+alaska_pollock_densities = cbind( "density"=as.vector(Dens_xt), "year"=Year_Set[col(Dens_xt)], "e_km"=Spatial_List$MeshList$loc_x[row(Dens_xt),'E_km'], "n_km"=Spatial_List$MeshList$loc_x[row(Dens_xt),'N_km'] ) %>% 
+  as_data_frame() %>% 
+  mutate(knot = as.numeric(factor(paste(e_km,n_km)))) %>% 
+  arrange(knot,year)
+
+project <- "ucsb-gfw"
+
+fishing_connection <-
+  src_bigquery(project, "skynet") # This function initiliazes a connection with a BQ dataset
+
+
+ebs_raw <- fishing_connection %>%
+  tbl("ebs_w_vessels") %>%
+  collect(n = Inf)
+
+ebs <- ebs_raw %>% 
+  select(-b_mmsi, -b_year) %>% 
+  set_names(str_replace_all(colnames(.), '(a_)|(b_)',''))
+
+utm_coords <- SpatialDeltaGLMM::Convert_LL_to_UTM_Fn( Lon=ebs$rounded_lon, Lat=ebs$rounded_lat, zone=Extrapolation_List$zone, flip_around_dateline=Extrapolation_List$flip_around_dateline) %>% 
+  rename(e_km = X, n_km = Y) %>% 
+  select(e_km, n_km)
+
+ebs <- ebs %>% 
+  bind_cols(utm_coords)
+
+ebs %>% 
+  ggplot(aes(best_label)) +
+  geom_bar()
+
+knots <- alaska_pollock_densities %>% 
+  select(knot,e_km,n_km) %>% 
+  unique()
+
+nearest_knot <- nn2(knots %>% select(-knot), utm_coords, k = 1)
+
+ebs$knot <- knots$knot[nearest_knot$nn.idx]
+
+ebs %>% 
+  select(rounded_lat, rounded_lon, knot) %>% 
+  unique() %>% 
+  ggplot(aes(rounded_lat, rounded_lon, color = knot %>% factor())) + 
+  geom_point() 
+
+trawl_fishing_by_knot <- ebs %>% 
+  filter(best_label == 'trawlers') %>% 
+  group_by(year,knot) %>% 
+  summarise(total_hours = sum(total_hours),
+            total_engine_hours = sum(total_hours * inferred_engine_power),
+            num_vessels = length(unique(mmsi)),
+            dist_from_shore = mean(mean_distance_from_shore),
+            dist_from_port = mean(mean_distance_from_port),
+            mean_vessel_length = mean(inferred_length))
+
+skynet_data <- trawl_fishing_by_knot %>% 
+  left_join(alaska_pollock_densities, by = c('year','knot'))
+  
+skynet_data %>% 
+  ggplot(aes(total_hours %>% log(), density %>% log())) +
+  geom_point()
+
+
+skynet_model <- randomForest::randomForest(density ~ ., data = skynet_data %>% select(-e_km, -n_km))
+
+randomForest::varImpPlot(skynet_model)
+
+skynet_data <- skynet_data %>% 
+  ungroup() %>% 
+  mutate(density_hat = predict(skynet_model))
+
+HOLYSHIT <- skynet_data %>% 
+  ggplot(aes(density, density_hat)) + 
+  geom_point() + 
+  geom_abline(aes(slope = 1, intercept = 0)) + 
+  labs(x = 'EBS Groundfish Survey Density', y = 'GFW Model of Densities', 
+       title = 'Alaska Pollock',
+       caption = paste('R2 =',mean(skynet_model$rsq) %>% round(2))) + 
+  hrbrthemes::theme_ipsum() +
+  scale_x_continuous(limits = c(0,NA)) + 
+  scale_y_continuous(limits = c(0, NA))
+  
+
+
+```
+
+```{r fig.cap="HOLY SHIT IT'S ALIVE"}
+
+HOLYSHIT
+
+```
+
+
+
+

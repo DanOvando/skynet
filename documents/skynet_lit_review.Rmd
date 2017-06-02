@@ -1,0 +1,75 @@
+---
+title: "skynet_lit_review"
+author: "Dan Ovando"
+date: "1/17/2017"
+output: html_document
+bibliography: ../Dissertation.bib
+biblio-style: apalike
+---
+
+
+## @Rust1987
+
+The important thing in here is the concept, since the algorithm is obviously outdated. Equation 3.5 spells out the choice model specified. THe idea here is that maintenance decisions are a tradeoff between certain current costs and uncertain future costs, and you're trying to balance that. 
+
+In your case, the choice is to go fishing. If you go fishing, you incur costs, so what's the expected state of the stock to make that possible?
+
+## @Huang2014
+
+Both of these raise an interesting question of how micro is it worth it to go. Individual trip based decisions? Is aggregate fleet action sufficient?
+
+So the common thing here is thinking about this in a state-space framework, where the true underyling biomass is an observed state. 
+
+You don't really need this if you think you **know** costs, and then your marginal equation is one equation one unknown. 
+
+Under another approach though, where for example you need coefficients on things like depth, waves, etc, you'd then need an estimating procedure that says estiamte a state and cost parameters such that marginal profits are close to equal everywhere. Would be tough. 
+
+While they are estimating observed harvest, you're trying to recover observed effort
+You 
+
+Look up gear types / vessel types  from bigquery 
+
+## @Miller2016
+
+* "Distinct since we use a model of spatial fishing decisions"
+* Use local wage data as a measure of full opportunity cost
+* Vessel size as proxy for crew and cost
+* "While based on individual fishers maximizing expected profits, the model ultimately expresses fleet-wide effort in a location and period as a function of location characteristics, prices, man- agement regime, and parameters"
+* Expected profit per init effort (aka marginal profit) is equation 1
+* SO really the key difference between that you're proposing and Miller is that they take the index of abundance as given, and so calcualte the effort in patch j based on that expected CPUE (aka index of abundance). You are proposing the estimate that index of abundance yourself, since you don't have any other data to base it off of, and that index is really the parameter of interest for you. 
+* What they really care about are quota prices (aka costs). You're kind of saying that costs are easier to get, and estimating CPUE. This could be accomplished by manually setting all costs based on best available data, or setting very informative priors on the costs based on best available data and estimating 
+
+## @Thorson2016 - Using spatio-temporal models of population growth and movement to monitor overlap between...
+
+* Identifying overlap in spatial overlap in species distribution and human pressures
+* On the whole, interesting, but not really applicable to what you're up to, unless you were to try and use a similar methodology to estimate actual pop dy parameters. In which case, this could be interesting. 
+* But, given that for now your interest is more in estimating an index of abundance, then it's a little too in the weeds for where you are now. 
+
+## @Thorson2013 - A new role for effort dynamics...
+
+* Might be useful in that it specifies an "effort-dynamics" likelihood function. Though again, this might all be next level stuff of trying to fit an actual population model, as opposed to abundance indicies which could then themselves be used to fit pop models 
+
+* Need to get a copy of Vasconcellos & Cochrane
+
+* Honestly, still focused on the stock assessment side of things, really not that useful for your goal of simply an economic standardized index of abundance
+
+* Could be interesting though to test the types of effort dynamics observed by global fishing watch: see what "model" the effort dynamics seem to arrise from. 
+
+* Also this lit is really more appropriate for scrooge than this to some extent. 
+
+* Goal of this is to estimate E based on catch, which isn't really your problem, you have E. But could be interesting to compare results to GFW
+
+* Gives some interesting ideas on how to empirically structure the idea of priors into the economic dynamics. So, the estimating model for scrooge would have potentially some explicit effort dynamics, where the evolution of those effort dynamics might be governed by informative priors. 
+
+## @Vasconcellos2005 Overvire of the world status of data-limited fisheries
+
+* similar vibe in that this paper is trying to get more out of catch data by considering the effort dynamics that produce that catch data. Again, a useful framework for scrooge, not this. Moving on for now, but revisit this lit. 
+
+## @Thorson2017 - niche times
+
+* Estimating species interactions, not really of use
+
+* Might have some interesting applications though for ahnold, in thinking about estimating this for the 
+
+
+

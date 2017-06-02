@@ -1,0 +1,417 @@
+---
+title: "Interacting with Google Big Query to make a global map of fishing effort"
+author: "Juan S. Mayorga"
+date: "October 17, 2016"
+output: html_notebook
+---
+
+This is a quick example of how to work with "Big data" in R through interacting with Google Big Query. We will use Global Fishing Watch data to show three different ways to access, analyze, and summarize dataset of millions and millions of rows.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+detach_package <- function(pkg, character.only = FALSE){
+  if(!character.only)
+  {
+    pkg <- deparse(substitute(pkg))
+  }
+  search_item <- paste("package", pkg, sep = ":")
+  while(search_item %in% search())
+  {
+    detach(search_item, unload = TRUE, character.only = TRUE)
+  }
+}
+
+library(tidyverse)
+
+```
+
+# 1. Using the *bigrquery* package dplyr style:
+
+```{r dplyr_style}
+project <- "ucsb-gfw"
+
+library(bigrquery)
+
+fishing_connection <- src_bigquery(project, "Juan") # This function initiliazes a connection with a BQ dataset
+
+effort_in_HS_by_countries <- fishing_connection %>% 
+  tbl("clean_effort_with_VC_and_FAO_2015") %>%  #tbl connect to a specific table within dataset
+  filter((is.na(eez) | eez == 'Antarctica') & measure_new_score >= 0.5) %>% 
+  group_by(country) %>% 
+  summarise(effort = sum(hours)) %>% 
+  top_n(10, effort)
+  
+collect(effort_in_HS_by_countries) %>% 
+  knitr::kable()
+
+```
+
+```{r joins_fail, eval = FALSE}
+fishing_connection %>% 
+  tbl("clean_effort_with_VC_and_FAO_2015") %>% 
+  left_join(src_bigquery(project, "fao") %>% 
+              tbl("cost_by_FAO_region_in_HS_2015"), by = "Fao_region")
+```
+
+Pros: 
+
+  - Is basically dplyr on steroids
+  - No need to learn another language
+  - Easy to incorporate in your workflow
+  
+Cons: 
+
+  - Not yet perfect: joins and some verbs and not fully compatible yet
+  - Cannot query over multiple tables 
+
+# 2. Using the *bigrquery* package SQL style:
+
+
+```{r complex_queries_SQL_style, eval = FALSE}
+sql <- "SELECT
+  a.mmsi mmsi,
+  b.country country,
+  b.iso_code iso_code,
+  b.is_EU is_EU,
+  a.timestamp timestamp,
+  a.lon lon,
+  a.lat lat,
+  a.speed speed,
+  a.course course,
+  a.heading heading,
+  c.country_name eez,
+  a.hours hours,
+  a.distance_from_shore distance_from_shore,
+  a.distance_from_port distance_from_port,
+  a.seg_id seg_id,
+  a.measure_new_score measure_new_score,
+  a.FAO_Region FAO_region
+FROM (
+  SELECT
+    *,
+    INTEGER(IF( LENGTH(STRING(mmsi)) = 9,LEFT(STRING(mmsi),3), '0')) code
+  FROM
+    TABLE_DATE_RANGE([fao.], TIMESTAMP('2015-01-01'), TIMESTAMP('2015-12-31'))
+  WHERE
+    lat > -80
+    AND lat <80
+    AND lon > -180
+    AND lon < 180
+    AND mmsi > 100000000
+    )a
+LEFT JOIN (
+  SELECT
+    code,
+    country_name country,
+    iso3 iso_code,
+    isEU is_EU
+  FROM
+    [vessel_lists.country_code])b
+ON
+  a.code = b.code
+LEFT JOIN (
+  SELECT
+    *
+  FROM
+    [vessel_lists.eez_country_codes])c
+ON
+  a.eez = c.eez"
+
+clean_names_2015 <- query_exec(sql,project, destination_table = "fao.test", max_pages = 10)
+```
+
+```{r mapping_resources}
+library(maps)
+library(rasterVis)
+
+eez = rgdal::readOGR(dsn='../Clipperton/eez',layer='World_Maritime_Boundaries_v8') # get global EEZ shapefile
+world = maps::map(database ="world", fill = TRUE, interior = FALSE, col = "gray",plot = FALSE) # get world shapefile
+IDs <- sapply(strsplit(world$names, ":"), function(x) x[1]) # get polygon ID
+
+bPols <- maptools::map2SpatialPolygons(world, IDs=IDs,
+                             proj4string=sp::CRS("+proj=longlat +datum=WGS84")) # convert map object to a suitable sp object
+```
+
+```{r map_HS_effort_by_country_function}
+map_effort_by_country <- function(year,country){
+  
+sql <-  paste("SELECT
+INTEGER(floor(lat*2)) lat_bin,
+INTEGER(floor(lon*2)) lon_bin,
+SUM(hours) effort
+FROM
+  high_seas_cost_model.clean_effort_with_VC_and_FAO_",year,"
+where 
+  country = '",country,"' and
+  measure_new_score >=.5
+AND (eez IS NULL or eez = 'Antarctica')
+group by 
+lat_bin,
+lon_bin", sep = "")
+
+country_effort <- query_exec(sql,project)  
+  
+# Define map limits and grid size
+
+max_lat = 90
+min_lat = -90
+max_lon = 180
+min_lon = -180
+cell_size  = 0.5
+one_over_cellsize = 2
+
+num_lats = (max_lat-min_lat)*one_over_cellsize+1
+num_lons = (max_lon-min_lon)*one_over_cellsize+1
+
+# create grid and fills it in 
+grid <- matrix(nrow=num_lats,ncol=num_lons)
+
+for (i in 1:nrow(country_effort)) {
+  lat = country_effort[i, "lat_bin"]
+  lon = country_effort[i, "lon_bin"]
+  lat_index = lat-min_lat*one_over_cellsize
+  lon_index = lon-min_lon*one_over_cellsize
+  grid[num_lats - lat_index,lon_index] = country_effort[i, "effort"]
+}
+
+#creates rater from grid
+r <- raster::raster(grid, 
+                    xmn = min_lon,
+                    xmx = max_lon, 
+                    ymn = min_lat, 
+                    ymx= max_lat, 
+                    crs = NA, 
+                    template = NULL) 
+
+# define the theme: breaks, background, colorkey
+
+my.at <- c(1,10,20,30,40,50,100,110,120,130,140,150,160,170,180,190,200,300,500)
+
+myTheme <- rasterTheme(region=rev(colorspace::sequential_hcl(200, 
+                                                             power=0.4,
+                                                             h = 250, 
+                                                             c = c(57,77), 
+                                                             l = c(20,95))))
+myTheme$panel.background$col = 'black' 
+
+my.colorkey=list(at=my.at,
+                 labels=list(at=my.at,
+                             labels=my.at))
+colorspace::choose_palette()  
+
+# creates the map using levelplot
+effort_map <- rasterVis::levelplot(r, 
+                                   margin = FALSE, 
+                                   par.settings = myTheme, 
+                                   at = my.at, 
+                                   main = paste(country,"Fishing effort in the high seas (hours) in",year,sep = " "),
+                                   scales = list(draw = FALSE), 
+                                   colorkey = list(colorkey = my.colorkey,
+                                                 space ="bottom", 
+                                                 width = 0.7))+
+  layer(sp::sp.polygons(bPols, fill = 'gray', col = "gray"))
+
+print(effort_map)
+
+detach_package(rasterVis)
+detach_package(raster)
+detach_package(maps)}
+
+map_effort_by_country(2015,"China")
+```
+
+Pros:
+
+  - Can do more complicated queries and joins
+  - query multiple table
+  - Save query output to BQ (not as fast as BQ directly)
+  - Can be functionalized
+  
+Cons: 
+
+  - is SQL
+  - Cognitive dissonance between languages
+  - not the easiest thing to write SQL as string in R
+  - not great to display code in dynamic documents
+
+
+# 3. Using DBI, bigrquery, and RMarkdown chunks
+
+
+```{r dbi_setup}
+library(DBI)
+BQ_connection <-  dbConnect(dbi_driver(),dataset = "", project = "ucsb-gfw")
+
+country <- 'Mexico'
+min_lat1 <- -20.4
+max_lat1 <- 34.1
+min_lon1 <- -133.6
+max_lon1 <- -98.7
+
+min_lat2 <- -20.4
+max_lat2 <- 17.9
+min_lon2 <- -99.8 
+max_lon2 <- -75.2 
+```
+
+
+```{sql mexico_effort, connection=BQ_connection,  highlight=TRUE, output.var="mexico_ETP_effort"}
+SELECT
+  eez,
+  mmsi,
+  country,
+  general_vessel_type,
+  length,
+  length_source,
+  tonnage,
+  tonnage_source,
+  engine_power,
+  sum(hours) fishing_hours,
+  EXACT_COUNT_DISTINCT(DAYOFYEAR(timestamp)) fishing_days,
+FROM
+  [ucsb-gfw:high_seas_cost_model.clean_effort_with_VC_and_FAO_2015]
+WHERE
+  country = ?country
+and measure_new_score >= .5 
+ AND 
+ ( ( lon > ?min_lon1 and lat > ?min_lat1 and lon < ?max_lon1 and lat < ?max_lat1 )
+   OR 
+   (lon > ?min_lon2 and lat > ?min_lat2 and lon < ?max_lon2 and lat < ?max_lat2 )
+   )
+group by 
+  eez,
+  mmsi,
+  country,
+  general_vessel_type,
+  length,
+  length_source,
+  tonnage,
+  tonnage_source,
+  engine_power
+having fishing_days > 1
+```
+  
+
+```{sql mexico_effort_map, connection=BQ_connection,  highlight=TRUE, output.var="mexicos_binned_effort"}
+SELECT
+ INTEGER(FLOOR(lat*2)) lat_bin,
+ INTEGER(FLOOR(lon*2)) lon_bin,
+ SUM(hours) effort
+FROM
+ high_seas_cost_model.clean_effort_with_VC_and_FAO_2015
+WHERE
+ country = ?country
+and measure_new_score >= .5 
+ AND 
+ ( ( lon > ?min_lon1 and lat > ?min_lat1 and lon < ?max_lon1 and lat < ?max_lat1 )
+   OR 
+   (lon > ?min_lon2 and lat > ?min_lat2 and lon < ?max_lon2 and lat < ?max_lat2 )
+   )
+GROUP BY
+ lat_bin,
+ lon_bin
+```
+
+
+```{r mexico_ETP_map}
+library(maps)
+library(rasterVis)
+
+# define map's limits and grid size
+max_lat = 35
+min_lat = -10
+max_lon = -75.2
+min_lon = -133.6
+cell_size  = 0.5
+one_over_cellsize = 2
+
+# initialyze a grid and fill it in 
+num_lats = (max_lat-min_lat)*one_over_cellsize+1
+num_lons = (max_lon-min_lon)*one_over_cellsize+1
+
+grid <- matrix(nrow=num_lats,ncol=num_lons)
+
+for (i in 1:nrow(mexicos_binned_effort)) {
+  lat = mexicos_binned_effort[i, "lat_bin"]
+  lon = mexicos_binned_effort[i, "lon_bin"]
+  lat_index = lat-min_lat*one_over_cellsize
+  lon_index = lon-min_lon*one_over_cellsize
+  grid[num_lats - lat_index,lon_index] = mexicos_binned_effort[i, "effort"]
+}
+
+# create raster from grid
+r <- raster(grid, 
+            xmn = min_lon,
+            xmx = max_lon, 
+            ymn = min_lat, 
+            ymx= max_lat, 
+            crs = NA, 
+            template = NULL) 
+
+#define the theme: color key, background color, breaks 
+my.at <- c(1,10,20,30,40,50,100,110,120,130,140,150,160,170,180,190,200,300,500)
+
+myTheme <- rasterTheme(region=rev(colorspace::sequential_hcl(200, 
+                                                             power=0.4, 
+                                                             h = 240, 
+                                                             c = c(57,77), 
+                                                             l = c(20,95))),
+                       layout.heights=list(xlab.key.padding=1))
+
+myTheme$panel.background$col = 'white' 
+
+my.colorkey=list(at=my.at,
+                 labels=list(at=my.at,cex=.7,labels=my.at))
+
+# get EEZ's 
+library(mregions)
+mr_names <- mregions::mr_names()
+panama_eez_pacific <- mr_shp(name = "Panamanian Exclusive Economic Zone", read = TRUE)@polygons[[1]]@Polygons[1][[1]]
+mexico_eez_pacific <- mr_shp(name = "Mexican Exclusive Economic Zone", read = TRUE)@polygons[[1]]@Polygons[4][[1]]
+galapagos_eez <- mr_shp(name = "Ecuadorean Exclusive Economic Zone (Galapagos)", read = TRUE)
+ecuador_eez_pacific <- mr_shp(name = "Ecuadorean Exclusive Economic Zone", read = TRUE)@polygons[[1]]@Polygons[4][[1]]
+clipperton_eez <- mr_shp(name = "Clipperton Island Exclusive Economic Zone", read = TRUE)
+colombia_eez_pacific <- mr_shp(name = "Colombian Exclusive Economic Zone", read = TRUE)@polygons[[1]]@Polygons[1][[1]]
+costa_rica_eez_pacific <- mr_shp(name = "Costa Rican Exclusive Economic Zone", read = TRUE)@polygons[[1]]@Polygons[1][[1]]
+guatemalan_eez_pacific <- mr_shp(name = "Guatemalan Exclusive Economic Zone", read = TRUE)@polygons[[1]]@Polygons[1][[1]]
+nicaraguan_eez_pacific <- mr_shp(name = "Nicaraguan Exclusive Economic Zone", read = TRUE)@polygons[[1]]@Polygons[1][[1]]
+salvadorean_eez_pacific <- mr_shp(name = "El Salvador Exclusive Economic Zone", read = TRUE)@polygons[[1]]@Polygons[1][[1]]
+
+# make shapefile of proposed MPA
+
+revilla_coords <- read_csv('../Revillagigedo/revilla_puntos.csv')
+revilla_p <- Polygon(revilla_coords, hole = TRUE) 
+revilla_ps <- Polygons(list(revilla_p),1)
+revilla_sps <-  SpatialPolygons(list(revilla_ps), proj4string=sp::CRS("+proj=longlat +datum=WGS84"))
+
+# make the map with levelplot
+
+ETP_effort_map <- levelplot(r,
+          margin = FALSE, 
+          par.settings = myTheme, 
+          at = my.at, 
+          main = "Mexico's Fishing effort in the Eastern Tropical Pacific",
+          scales=list(draw=FALSE), 
+          colorkey=list(colorkey = my.colorkey,space="bottom", width = 0.7, title = "hours"), 
+          xlab=list(label="Fishing hours", cex=.8),
+          cexRow=0.8, cexCol=0.8)+
+  layer(sp::sp.polygons(bPols, fill = 'gray', col = "gray"))+
+  layer(sp::sp.polygons(panama_eez_pacific))+
+  layer(sp::sp.polygons(ecuador_eez_pacific))+
+  layer(sp::sp.polygons(mexico_eez_pacific))+
+  layer(sp::sp.polygons(galapagos_eez))+
+  layer(sp::sp.polygons(colombia_eez_pacific))+
+  layer(sp::sp.polygons(clipperton_eez))+
+  layer(sp::sp.polygons(costa_rica_eez_pacific))+
+  layer(sp::sp.polygons(guatemalan_eez_pacific))+
+  layer(sp::sp.polygons(nicaraguan_eez_pacific))+
+  layer(sp::sp.polygons(salvadorean_eez_pacific))+
+  layer(sp::sp.polygons(revilla_sps, col = 'red'))
+
+print(ETP_effort_map)
+
+detach_package(rasterVis)
+detach_package(raster)
+```
+

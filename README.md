@@ -1,2 +1,2 @@
 # skynet
-Stock assessment from space using global fishing watch
+A repo for stock assessment from the sky

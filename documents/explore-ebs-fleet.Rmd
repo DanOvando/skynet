@@ -1,0 +1,113 @@
+---
+title: "Explore EBS Fleet"
+output: html_notebook
+---
+
+```{r}
+rm(list = ls())
+set.seed(123)
+library(tidyverse)
+library(forcats)
+library(modelr)
+library(stringr)
+library(rstan)
+library(rstanarm)
+library(car)
+library(AER)
+library(broom)
+library(bigrquery)
+library(FishData)
+library(tmap)
+library(rgdal)
+library(leaflet)
+library(tmaptools)
+library(raster)
+library(viridis)
+library(hrbrthemes)
+
+demons::load_functions()
+```
+
+
+```{r}
+
+theme_set(theme_ipsum(base_size = 18, axis_title_size = 16))
+
+fishing_threshold <-  0.75 # Set a prob. cutoff for what is considered "fishing"
+
+
+# Load in data ------------------------------
+# Summary: Load data
+
+project <- "ucsb-gfw"
+
+fishing_connection <-
+  src_bigquery(project, "eastern_bering_sea") # This function initiliazes a connection with a BQ dataset
+
+vessel_connection <-
+  src_bigquery(project, "Vessel_Characteristics") # This function initiliazes a connection with a BQ dataset
+
+
+summer <- 6:8
+
+ebs <- fishing_connection %>%
+  tbl("ebs") %>%
+  mutate(y_m_d = date(timestamp)) %>%
+  mutate(
+    obs_year = year(y_m_d),
+    obs_month = month(y_m_d),
+    round_lat = round(lat, as.integer(1)),
+    round_lon = round(lon, as.integer(1))
+  ) %>%
+  filter(obs_month %in% summer) %>%
+  group_by(round_lat, round_lon, obs_year,mmsi) %>%
+  summarise(
+    fishing_hours = sum(hours * measure_new_score * as.numeric(measure_new_score >= fishing_threshold)),
+    mean_dist_from_shore = mean(distance_from_shore),
+    mean_dist_from_port = mean(distance_from_port)
+  ) %>%
+  collect() %>%
+  rename(year = obs_year) %>%
+  mutate(fishing_hours = ifelse(fishing_hours == 0, NA, fishing_hours)) %>%
+  mutate(log_fishing_hours = log(fishing_hours))
+
+ebs_fleet <- vessel_connection %>%
+  tbl('complete_fishing_fleet_characteristics_2015') %>%
+  collect() %>% 
+  filter(mmsi %in% unique(ebs$mmsi))
+
+ebs_fleet2 <- vessel_connection %>%
+  tbl('complete_fishing_fleet_characteristics_2015') %>%
+  collect() %>% 
+  filter(mmsi %in% unique(ebs$mmsi))
+```
+
+Number of vessls: `r length(unique(ebs$mmsi))`
+
+Number of vessels with registry data: `r length(unique(ebs_fleet$mmsi))`
+
+```{r, fig.cap="Counts of vessel types identified so far"}
+
+ebs_fleet %>% 
+  ggplot(aes(general_vessel_type)) + 
+  geom_bar()  +
+  coord_flip() + 
+  labs(title = 'Identified Vessel Types', x = element_blank())
+
+```
+
+```{r}
+
+ebs_fleet %>% 
+  ggplot(aes(length, crew, fill = length_source, size = engine_power)) + 
+  geom_point(shape = 21)
+
+```
+
+```{r}
+ebs_fleet$engine_power
+```
+
+
+
+

@@ -1,0 +1,17 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+VAST_output/
+*.pdf
+*.png
+*.jpg
+*.mov
+*.mp4
+*.html
+*.Rdata
+*.pptx
+*.m4v
+*.httr-oauth
+
+
