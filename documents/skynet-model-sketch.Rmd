@@ -276,11 +276,6 @@ results %>%
 ```
 
 
-
-
-
-
-
 ## MLE et al
 
 This isn't a complex problem, `nlminb` to the rescue. Once you start to add more parameters, TMB might be interesting, as though might be `pipelearner` if you want to explore fitting a model whose goal is out of sample prediction

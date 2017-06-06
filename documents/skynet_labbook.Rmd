@@ -264,7 +264,7 @@ interp_pollock <- idw(formula = wt ~ 1, fviz_ebs, newdata = pollock_raster)
 
 ```
 
-# New idea for testing pollock
+# Random Forest Fitting
 
 As a starting point, let's try and focus on on EBS pollock, iconic species, trawl fishery, large boats, should be somewhat doable. So the steps to make that happen. 
 
@@ -489,30 +489,48 @@ ebs %>%
   geom_point() 
 
 trawl_fishing_by_knot <- ebs %>% 
-  filter(best_label == 'trawlers') %>% 
+  filter(best_label == 'trawlers') %>%
   group_by(year,knot) %>% 
-  summarise(total_hours = sum(total_hours),
-            total_engine_hours = sum(total_hours * inferred_engine_power),
+  summarise(total_hours = sum(total_hours, na.rm = T),
+            total_engine_hours = sum(total_hours * inferred_engine_power, na.rm = T),
             num_vessels = length(unique(mmsi)),
-            dist_from_shore = mean(mean_distance_from_shore),
-            dist_from_port = mean(mean_distance_from_port),
-            mean_vessel_length = mean(inferred_length))
+            dist_from_shore = mean(mean_distance_from_shore, na.rm = T),
+            dist_from_port = mean(mean_distance_from_port, na.rm = T),
+            mean_vessel_length = mean(inferred_length, na.rm = T))
 
 skynet_data <- trawl_fishing_by_knot %>% 
   left_join(alaska_pollock_densities, by = c('year','knot'))
-  
-skynet_data %>% 
-  ggplot(aes(total_hours %>% log(), density %>% log())) +
-  geom_point()
 
+# skynet_data <- skynet_data %>%
+#   group_by(knot) %>% 
+#   arrange(knot,year) %>% 
+#   mutate(total_hours_lag_1 = lag(total_hours,1))
+#   
+# skynet_data <- skynet_data %>% 
+#   remove_missing() %>% 
+#   ungroup()
 
-skynet_model <- randomForest::randomForest(density ~ ., data = skynet_data %>% select(-e_km, -n_km))
+skynet_model <- randomForest::randomForest(density ~ ., data = skynet_data %>% select(-e_km, -n_km, -knot,-year))
 
 randomForest::varImpPlot(skynet_model)
 
 skynet_data <- skynet_data %>% 
   ungroup() %>% 
   mutate(density_hat = predict(skynet_model))
+
+lm(density ~ total_hours, data = skynet_data) %>% summary() -> a
+
+badshit <- skynet_data %>% 
+  ggplot(aes(density, total_hours)) + 
+  geom_point() + 
+    geom_smooth(method = 'lm')+
+  geom_abline(aes(slope = 1, intercept = 0)) + 
+  labs(x = 'EBS Groundfish Survey Density', y = 'GFW Fishing Hours', 
+       title = 'Alaska Pollock',
+       caption = paste('R2 =',a$r.squared %>% round(2))) + 
+  hrbrthemes::theme_ipsum() +
+  scale_x_continuous(limits = c(0,NA)) + 
+  scale_y_continuous(limits = c(0, NA))
 
 HOLYSHIT <- skynet_data %>% 
   ggplot(aes(density, density_hat)) + 
@@ -534,6 +552,214 @@ HOLYSHIT <- skynet_data %>%
 HOLYSHIT
 
 ```
+
+# 2017-06-05
+
+Well holy shit, things seem to be working. Specifically, a random forest model seems capable of reasonably predicting densities in space and time. So, what's the next step here to make sense of all this. 
+
+I think before you go to Chris you need to give the structural approach a bit more thought. So, I'd like to get a "structural" model built this week, with an obvious candidate being an ideal-free distribution model, wherein you assume that marginal profits are equal across scace for a given time unit, and then "solve" or estimate abundance to make this true, following methods from Miller et al. There are a couple odd constants here that you'd need to explore. 
+
+Let's maybe first focus on getting the structural approach working. Once that's working, let's integrate those into a cohesive script and start thinking through the right set of diagnostics. 
+
+At it's core... 
+
+R^2^
+
+Maps
+
+Out of sample prediction in space, time, species
+
+Bias
+
+# Structural Fitting
+
+The idea here goes back to the original premise: if marginal profits are indeed equal in space and time, 
+
+This is a summary of the proposed model structure for version 1.0 of the "skynet" model. The objective of this model is to estimate spatio-temporal indicies of abundance using GFW effort data. The general method is an adaptation of @Miller2016, wherein the authors attempt to estimate quota lease prices by fitting observed patterns of effort to predicted patterns of effort based on the expected profitability of fishing different patch (subject to the constraint that marginal profits are equal in each patch). Your goal is to flip this around a bit, and now predicted relative abundance as a function of the effort, price, and cost for fishing that patch, again conditional on the same assumption as above. 
+
+
+So, with that in mind, the fraction of trawl vulerable biomass left after fishing is just the survival of the stock times the fraction of the stock that is vulnerable to trawl survey.... That seems wrong. Why wouldn't it go into the survival itself?
+
+Expected CPUE is based on the self reported CPUE in prior time period. In your case, you're going to try and estimate that value itself. 
+
+They assume observation error here, in that there are other things influencing expected CPUE besides last years, that we cannot directly observe, so they apply log normal error term to the expected CPUE. What does that say about your formulation? 
+
+The tobit process says that effort will be 0 if expected marginal profits if T were 0 are greater than the overall marginal profits across the system. 
+
+So, overall, the model works by estimating the quota prices *c* that rationalize the equation. Can you think about it a bit more generally for your use. You don't need to think about the whole "fraction vulnerable to trawl thing". 
+
+
+Note that this is "expected profits from a marginal unit of effort", meaning marginal profits, $d\pi/dE$
+
+
+The key sentance that you're missing here is the "in which T units of effort have already been applied". So, this is basically accounting for the draw-down of the stock, which your standard method doesn't account for (just taking the usual marginal profits per unit E). So this is say, conditional on some already observed amount of effort, the expected profits per unit of one more unit of effort is price * expected 
+
+
+
+
+
+So, what this is saying, with that lovely exponent in there, let's start with revenues. 
+
+This is saying that the revenue of the first unit of effort is just $p*CPUE*E^{q1}$. And so, this decays 
+
+```{r}
+
+p <-  10
+cpue <-  100
+q = .1
+effort = 0:100
+
+marginal_revenue <- p * cpue * exp(-q * effort)
+
+plot(effort, marginal_revenue)
+
+```
+
+So, those are "marginal" revenues, calculated in an interesting way which is a little different thatn the way that you would usually think about it, mostly since your usual approach assumes that catch is $pqEB$, and so the marginal revenue with respect to effort is constant $pqB$, meaning that conditional on B, you get the same revenues from the first to the last additional unit of effort, which seems wrong. While, with this version, you're acknolweding that marginal revenues go down as you kill the damn stock. SO, they should do about the same thing, except in your case, you usually assume that marginal revenues are constant, and increase cost per effort to give the thing some concavity. Where they assume that the cost of every unit of effort is the same, but the expected revenues go down as the stock is drawn down. 
+
+So, they just say here are the revenues per unit effort for the Tth unit of effort, minus the variable cost. So, now just try and understand the variable cost. Becuase this is marginal, that is why it should be the cost per unit effort, since it's saying that marginal profits are the expected revenues under one more unit of effort minus the cost of the unit of effort. BOOYAH, I finally get why this thing works that way. 
+
+So, what is the model then. 
+
+If you did your math right 
+
+$$B_{i,t} = \frac{e^{E_{i,t}q_{t}}(c_{i,t} + \pi)}{p_t}$$
+
+So, what does this leave you to estimate? And let's start simple. 
+
+*E* is known
+
+*q* is certainly not known
+
+*c* is partially known, you have some information vessel size, distance from shore, gas prices, etc. Look more carefully at how they define c, your standin for VC here. 
+
+*$\pi$* You start off assuming zero
+
+*p* this should really just be a scalar, take as data. 
+
+So, regardless of how you parameterize it, it's down to q and c as the only options for model tuning. 
+
+So what do you do with this? 
+
+q is in units of.... something 1/kwH?. You can't estimate a q for each knot, so how would you go about estimating it? You could do one q by year, which doesn't really help a lot, or you could try and make q a function of vessel size, something like that. Doesn't seem like you have a whole lot of data to create a rational model of this besides treating it as a nuisance parameter that basically scales the relationship between effort and the magnitude of density. 
+
+Given how troublesome q is normally, seems much more logical to think about tuning costs. In one world, you think of costs as being directly observable, and so the cost per kilowat hour at a given site is known perfectly. To think about it in simple terms, you could certainly get data on labor costs per kilowat hour and fuel costs per kwh for a given site, as a function of vessel size and distance from port. So, in that world cost c is just
+
+$ c = labor*distance + fuel * distance$ or then
+
+$c = distance*(labor + fuel)$
+
+In that case, since c needs to be in \$ where kwh is one, so labor and fuel would have in units of \$/kwh, so labor and fuel costs would have to be in units of \$/kwh, where \$/kwh internalizes the travel costs, so it's something like (miles / MPG)*$(gallon).... but then that cost would in theory be spread over fishing hours, so gets trickier. 
+
+Seems a little easier to try and estimate it. 
+
+So, in that world, you say that cost is something like $\beta_{1}*(distance * vessel_size) + \beta_{2}*distance + \beta_{3}*vessel_size$
+
+Now, how would you think about doing this. The "vessel size" thing is a little tough, since that's not a characteristic of the site, but of the vessels chosing to fish at that site. 
+
+The core problem then is that the you think that different vessel sizes should have different cost per hour to fish at a given site. So, you could do something like break the vessels into fleets by vessel size. Assume one expected CPUE (abundance) common abundance at a site. Then, tune q and c for each fleet, such that they all produce the same expected CPUE. 
+
+Or, make it a bit simpler. Take the observed CPUE, and for each fleet, estimate a q and a cost per unit distance (where the $\beta$ on distance would be in units of $/distance*hour...)?
+
+Think about that. You need cost to be in units of \$
+
+You're going to get cost as $\beta*distance$, where distance is units of km. So, $\beta$ would be a little tough to interpret, since it would have to be in units of $/km for a particular fleet. 
+
+
+So, the marginal profits would be
+
+$\pi_{i,j} = p*cpue_{j}*e^{-q_{j}T_{i,j}} - \beta_{j}*distance_{i}$
+
+That model would be assuming that each fleet is targeting mutually exclusive parts of the stock... don't worry about that for now. So, in the single fleet world, the model is
+
+
+$[q_{j}, \beta_{j} | cpue_{j}] \propto [cpue_{j} | q_{j},\beta_{j}][q_{j}][\beta_{j}]$
+
+Where you can assign prior to beta_j based on fuel prices and labor costs. 
+
+
+So, now you need to think about how you would estiamate each of these parameters. Let's make a list of all the parameters you need for this model, and how you'd go about estimating them. 
+
+
+
+
+
+## Model and Data
+
+Let's go back to @Miller2016 and make sure that you understand what's happening here. 
+
+The crux: expected profits are price - quota cost * expected harvest, minus variable costs
+
+Fishers are not assumed to consider the dynamic consequences of spatial fishing choices, but rather react to known prices and costs. 
+
+X^o^ is the biological stock at the start of the time period 
+
+
+**Check this after work**
+$$Effort_{f,t,s} = \frac{1}{q_{f,t,s}}log(\frac{p_{f,t,s}B_{f,t,s}}{c_{f,t,s} + \bar{\pi}_{f,t}})$$
+
+$$B = \frac{e^{Eq}(c + \pi)}{p}$$
+
+Note that *c* here are variable costs per unit  effort ($/hour). You're omitting the quota price for now (though that might need to be incorporated in here at some point)
+
+$$[p,c,q,\bar{\pi}| B] \propto [B |p,c,q,\bar{\pi},effort][priors]$$
+
+In english, the likelihood of price, cost, q, and marginal profits conditional on Biomass is proportional to the likelihood of the biomass conditional on a given price, cost, q, and marginal profits and data effort and priors. 
+
+So, how to fit this fun thing? 
+
+notation. Let's call species *s*, location *l*, and time *t*, and fleet *f*
+
+## price *p*
+
+You probably don't need to actuall estimate *p*. You can match the species in the EBS trawl survey data to Tyler's price database as a starting point. So, in that world, you have $p_{s}$. You could also, if you can link gear types from GFW to type of product, in which case you would have $p_{s,f}$
+
+## cost *c*
+
+This is in units of $/hour (where hour is presumably fishing hour, not travel time), so that travel time is incororated into the cost of actual fishing. From @Miller2016, they compute VC, which you call *c*, as fuel, labor, ice, distance from port. As a starting point, you could focus on distance from port and vessel size. Something like 
+
+$$c_{l,f} = f(distance,fuel,labor, misc)$$
+
+You can get distance from GFW data. Fuel prices you could either estimate, take global averages, or better yet, scrape from [here](bunkerindex.com). Labor costs are a little tricker. You could just make it proportional to vessel size and estimate something from there. Or, you could use [BLS data](https://www.bls.gov/oes/current/oes453011.htm) for the US as a starting point, seems like a good idea. Misc costs I think you have to ignore for now. 
+
+So, the way that they do it in @Miller2016 is to calculate the cost per trip, where that is presumably $fuel*distance + labor * time$, where *time* is a function of distance, that you might be able to get from GFW. You would then divide that total cost by the average number of fishing hours exerted at that patch, to get to a cost per unit fishing effort at that patch. That seems a little goofy to me though, since it says that say you have a reallllly far away patch that people fish at a lot though, that's going to say that the cost per unit effort is really low out there, where in fact it is really damn high. I could actually see the opposite, where per trip you fish a lot on a very far away place, since you're not going to go back and forth from port a bunch, but rather stay out there and fish. But, let's go with it for now, since it's what they do in that paper. Best thing to do is start with that. So, for each patch/fleet then, you'll calculate the average number of fishing hours per "trip" out there, which you'll need to poke at the data to really understand. So, to match @Miller2016 exactly. For each patch in the database, you would calcualte it's distance from port. For each fleet type, you would get something like miles per gallon. You would then get cost in fuel. For each fleet, you would also get average speed, and use that to get the time taken to get to each place, and multiply that by cost per hour times crew size. Add that to the fuel costs, and you have the total costs to fish at a site. Divide that by the average number of fishing hours at the site, and you've got yourself cost per unit fishing effort at said site. 
+
+There's a few problems with that. I'm still not comfortable with the divide by average fishing hours per trip at site, since I feel like it's likely to really skew the cost for far away sites that people hang at for a long time. There's also the issue that you can string sites together, so the marginal cost of fishing around the priblofs is spread out across the sites out there. But let's maybe go with it for now as a starting point. 
+
+As an alternative, you could estimate these. So, say cost is something like 
+
+$$c = aDistance + bLength + cDistanceLength + constant$$
+
+and you could fit those parameters as part of the model, possible with some informative priors
+
+## q
+
+Ah ye old catchability. You obviously can't have $q_{f,l}$, since that would perfectly fit your data. So, that leaves $q_{f}$. That's a straight nuisance paramter, though you could in theory make it a function of depth at the site or something like that as well if you wanted to try and make it spatial. 
+
+
+## marginal profits
+
+Set this to zero for now, estimate later, but really doesn't matter for within season comparison. 
+
+
+## Likelihoods
+
+
+The simplest model you could write of this then would be something like
+
+$$ [q,\sigma|log(B)] \propto norm(log(B)|log(g(p,c,\Pi,q,E)),\sigma)gamma(q,scale,shape)inversegamma(\sigma,mean,sd) $$
+
+So, you're just tuning fleet with catchability to solve this problem. Pretty damn minimalistic. Let's see if it works. as a starting point. 
+
+From there, you can go into tuning the cost and q parameters, as well as changing marginal profits by patch and fleet. 
+
+OK this is why you have weekends. There's no way that that can work, unless you have the cost parameters so damn tuned in that the expected biomass is literally just a solvable function of cost, price, and effort. All that one q parameter would do is scale the relationship between the amount of effort itself and the amount of effort and the amount of biomass expected. 
+
+It would be worth exploring to see how essentially deterministic based on the model of @Miller2016 things are. Maybe the data and the model are just that good that it works that well! That would be pretty weird though. In reality then, you'll need a few more options. Let's brainstorm a bit here. Assuming that that doesn't work, you'll need to mess with a few other parameters. The simplest solution is basically that the model of @Miller2016 is "right", and you just need to be able to fine tune the parameters of the model. So, in that framework, you tune parameters to cost/price/q to better match the data. This is basically saying that there are costs/price/q factors that you can't get at just by downloading gas prices, and using the model to solve for those. You could think about informative priors in there to deal with colinearity among parameters (cost and q will be confounded for example, unless you make cost an informative function of distance or something). You could also think about making sub-regions of ideal free distributions to help hone in on things a bit. 
+That approach assumes that the underlying model itself is right. There are a few alternatives though. You could think about more of a "choice" model, similar to Becca's urchin paper, though I'm not clear that in theory that wouldn't just get you to an ideal free distribution prediction. You'd need to do some literature reading to think through other general structures for thinking about fleet allocation. 
+
+
+
 
 
 
