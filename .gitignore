@@ -13,5 +13,6 @@ VAST_output/
 *.pptx
 *.m4v
 *.httr-oauth
-
+*.csv
+*.docx
 

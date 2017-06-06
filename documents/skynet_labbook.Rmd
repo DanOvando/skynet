@@ -490,9 +490,10 @@ ebs %>%
 
 trawl_fishing_by_knot <- ebs %>% 
   filter(best_label == 'trawlers') %>%
+  rename(th = total_hours) %>% 
   group_by(year,knot) %>% 
-  summarise(total_hours = sum(total_hours, na.rm = T),
-            total_engine_hours = sum(total_hours * inferred_engine_power, na.rm = T),
+  summarise(total_hours = sum(th, na.rm = T),
+            total_engine_hours = sum(th * inferred_engine_power, na.rm = T),
             num_vessels = length(unique(mmsi)),
             dist_from_shore = mean(mean_distance_from_shore, na.rm = T),
             dist_from_port = mean(mean_distance_from_port, na.rm = T),
@@ -668,18 +669,78 @@ You're going to get cost as $\beta*distance$, where distance is units of km. So,
 
 So, the marginal profits would be
 
-$\pi_{i,j} = p*cpue_{j}*e^{-q_{j}T_{i,j}} - \beta_{j}*distance_{i}$
+$\pi_{i,j,t} = p*cpue_{j,t}*e^{-q_{j}T_{i,j,t}} - \beta_{j,t}*distance_{i,t}$
 
 That model would be assuming that each fleet is targeting mutually exclusive parts of the stock... don't worry about that for now. So, in the single fleet world, the model is
 
 
-$[q_{j}, \beta_{j} | cpue_{j}] \propto [cpue_{j} | q_{j},\beta_{j}][q_{j}][\beta_{j}]$
+$[q_{j}, \beta_{j,t} | cpue_{j}] \propto [cpue_{j} | q_{j},\beta_{j}][q_{j}][\beta_{j,t}]$
 
 Where you can assign prior to beta_j based on fuel prices and labor costs. 
 
+## What the hell units are things in in here?
 
-So, now you need to think about how you would estiamate each of these parameters. Let's make a list of all the parameters you need for this model, and how you'd go about estimating them. 
+price: $/kg
+cpue: kg/kwh
+q: 1/kwh
+T: kwh
 
+So if that's the case, then revenues have to be in \$/kwh, therefore cost has to be in units of \$/kwh as well. So, if you are scaling cost by distance from port for each patch, then \beta has to be in units of $/km*kwh, which is weird. 
+
+Let's look at a bit more carefully at how those cost parameters are set in @Miller2016. 
+
+" We compute variable costs (VC $/hr) using information on input costs (fuel, labor, ice, and distance from port)"
+
+Because the unit of ob- servation is a patch and period rather than a tow, a single cost per unit effort must be assigned to each patch for each period. This required designating a single distance from port for each patch. This was deemed to be the distance from the center of the patch to the nearest port for which trips originating from that port entailed at least 100 tows in aggregate. That same port was used to match patches to fuel prices from the fuel cost survey. If fuel costs were not available for that port, prices from the nearest port included in the survey were used. Dividing the resulting cost per trip by the average number of tow hours per trip for all trips to that patch yielded our mea- sure of cost per tow hour. In a subsequent model, we allow the opportunity cost of time to vary with management (see Abbott and Wilen 2011). This is accomplished by adding an interaction between distance and management to the variable cost term"
+
+So to match Miller more precisely, you would calculate variable cost directly. I'm arguing that this doesn't give you enough flexibility, though would be worth exploring this more if you either want to isolate specific parameters for optimization (e.g. just model "unobserved costs", taking the fuel/labor costs as data). 
+
+So what would that look like? If costs need to be in units of $/KWH, then total cost could be....
+
+1. Take all the kwh for a given knot, fleet, year
+
+2. Calculate the fuel costs to operate those kwh
+
+3. Calculate the labor costs to operate those kwh
+
+4. Calculate the fuel and labor costs to get to a site 
+
+5. Calculate the number of trips to a site... Can you get that? 
+
+6. Use all that to get an average cost per kwh, as the fuel costs + labor costs while operating in the patch, + the fuel and labor costs of getting there, divided by the average kwh exereted at that knot. 
+
+You could use this estimate as either a base, so that the actual cost per kwh is some multiplier times that thing. So, the idea would be that the relative magnitude of the costs would be right across knots, but you're consistently missing (or adding) something, and that multiplier would make up for that. 
+
+An alternative to that would be to think of this estimate as a strongly informative prior on the cost parameter at each knot, and then estimate it. 
+
+A last option would be to treat it as a latent variable, where you estimate costs in each knot and time step as coming from a distribution with mean derived from the empirical approach above, and some sigma. 
+
+As one other approach, you could turn it into a reduced form equation, basically turning it into a linear regression
+
+
+For now, let's go with simply setting priors on the thing based off of some rough sense of the magnitude of costs as priors. 
+
+Ah god damn it though. You can't rely on a framework for just estimating costs, you need a model of costs. So what if you made it simple. 
+
+Say that cost per unit hour is 
+
+$\beta_{1}*distance + \beta_{2}*meanvesselsize +  \beta_{3}*distance*meanvesselsize$
+
+Where the prior on $\beta_{1}$ is just \$/km, which you would get from fuel efficiency of vessel and price per gallon
+
+the prior on $\beta_{2}$ would be crew wages per hour * number of crew
+
+Unformative prior on $\beta_{3}$
+
+So, the final model will be....
+
+$ cpue_{k,t} = \frac{1}{p}e^{qE_{k,t}}(\beta_{1}*distance_{k} + \beta_{2}*meanvesselsize_{k,t} +  \beta_{3}*distance_{k}*meanvesselsize_{k,t} + \pi) + e_{i,j}$
+
+prior on q: gamma
+
+prior on $\beta$ normal with mean from data and sigma set to something 
+
+prior on $\sigma$ inverse gamma. 
 
 
 
@@ -694,11 +755,42 @@ Fishers are not assumed to consider the dynamic consequences of spatial fishing 
 
 X^o^ is the biological stock at the start of the time period 
 
+```{r}
+
+effort <-  100
+pi <- 0
+q <-  .1
+b <- 10
+
+
+
+```
+
+
 
 **Check this after work**
 $$Effort_{f,t,s} = \frac{1}{q_{f,t,s}}log(\frac{p_{f,t,s}B_{f,t,s}}{c_{f,t,s} + \bar{\pi}_{f,t}})$$
 
-$$B = \frac{e^{Eq}(c + \pi)}{p}$$
+$$B = \frac{(c + \pi)}{pe^{-qEffort}}$$
+
+check that math
+
+```{r}
+
+q <- .1
+p <-  10
+b <- 100
+pi <- 0
+c <- 1
+
+effort <- 1/q * log( (p * b) / (pi + c))
+
+bhat <- (c + pi) / (p * exp(-q *effort))
+
+bhat2 <- ((c + pi) * exp(q *effort)) / (p)
+
+```
+
 
 Note that *c* here are variable costs per unit  effort ($/hour). You're omitting the quota price for now (though that might need to be incorporated in here at some point)
 
@@ -732,33 +824,117 @@ $$c = aDistance + bLength + cDistanceLength + constant$$
 
 and you could fit those parameters as part of the model, possible with some informative priors
 
-## q
 
-Ah ye old catchability. You obviously can't have $q_{f,l}$, since that would perfectly fit your data. So, that leaves $q_{f}$. That's a straight nuisance paramter, though you could in theory make it a function of depth at the site or something like that as well if you wanted to try and make it spatial. 
+As one other alternative, you could collapse the distance and the labor into one thing....
 
+Take distance, convert it to hours using average distance per hour for that vessel size. Take the hours *the number of workers for that vessel size * hourly wage. That's the estiamte of labor costs for that trip. Then, take distance, convert to gallons of fuel per the average distance/gallon for the average vessel size at that site. That's your estimate of "travel" costs or something like that, and then just have a coefficient times that. 
 
-## marginal profits
+You can also take that same calculation and break apart in the same interaction mode you looked at above, so it would be fuel costs + labor costs + interaction or plus unknown... you can mess with different options here. 
 
-Set this to zero for now, estimate later, but really doesn't matter for within season comparison. 
+For now, let's KISS and start with seeing if you can get the model to fit without additional data on fuel or labor costs, and then launch into that
 
+## Fitting the structural model
 
-## Likelihoods
+Let's get to work!
 
+Let's start with MLE with the no-frills methods. 
 
-The simplest model you could write of this then would be something like
+Then move to STAN no frills, make sure it works
 
-$$ [q,\sigma|log(B)] \propto norm(log(B)|log(g(p,c,\Pi,q,E)),\sigma)gamma(q,scale,shape)inversegamma(\sigma,mean,sd) $$
+Then start adding complexity and data to cost model 
 
-So, you're just tuning fleet with catchability to solve this problem. Pretty damn minimalistic. Let's see if it works. as a starting point. 
-
-From there, you can go into tuning the cost and q parameters, as well as changing marginal profits by patch and fleet. 
-
-OK this is why you have weekends. There's no way that that can work, unless you have the cost parameters so damn tuned in that the expected biomass is literally just a solvable function of cost, price, and effort. All that one q parameter would do is scale the relationship between the amount of effort itself and the amount of effort and the amount of biomass expected. 
-
-It would be worth exploring to see how essentially deterministic based on the model of @Miller2016 things are. Maybe the data and the model are just that good that it works that well! That would be pretty weird though. In reality then, you'll need a few more options. Let's brainstorm a bit here. Assuming that that doesn't work, you'll need to mess with a few other parameters. The simplest solution is basically that the model of @Miller2016 is "right", and you just need to be able to fine tune the parameters of the model. So, in that framework, you tune parameters to cost/price/q to better match the data. This is basically saying that there are costs/price/q factors that you can't get at just by downloading gas prices, and using the model to solve for those. You could think about informative priors in there to deal with colinearity among parameters (cost and q will be confounded for example, unless you make cost an informative function of distance or something). You could also think about making sub-regions of ideal free distributions to help hone in on things a bit. 
-That approach assumes that the underlying model itself is right. There are a few alternatives though. You could think about more of a "choice" model, similar to Becca's urchin paper, though I'm not clear that in theory that wouldn't just get you to an ideal free distribution prediction. You'd need to do some literature reading to think through other general structures for thinking about fleet allocation. 
+```{r}
 
 
+fit_sffs <- function(beta_distance,
+                     beta_size,
+                     beta_interaction,
+                     q,
+                     sigma,
+                     dat,
+                     price,
+                     marginal_profits = 0,
+                     use = 'mle') {
+  
+  old_sigma <- sigma
+  sigma <-  exp(sigma)
+  
+  old_q <- q
+  
+  q <- exp(q)
+  
+  beta_distance <-  exp(beta_distance)
+  
+  beta_size <- exp(beta_size)
+  
+  beta_interaction <- exp(beta_interaction)
+  
+  # beta_intercept <- exp(beta_intercept)
+  
+  cost <-
+  beta_distance * dat$dist_from_port + beta_size * dat$mean_vessel_length + beta_interaction * dat$dist_from_port * dat$mean_vessel_length
+  
+  estimated_abundance <-
+  ((cost + marginal_profits)) / (price  * exp(-q * dat$total_engine_hours))
+  if (use == 1){
+  out <-
+  -sum(stats::dlnorm(dat$density, log(estimated_abundance), sigma, log = T))
+  } else {
+    out <- estimated_abundance
+  }
+  return(out)
+                     
+}
+
+
+ 
+mle_model <- mle(
+  fit_sffs,
+  start = list(
+  beta_distance = log(100),
+  beta_size = 100 %>% log,
+  beta_interaction = 100 %>% log,
+  sigma = log(sd(skynet_data$density)/100),
+  q = log(1e-7)),
+  fixed = list(price = 765, 
+               dat = skynet_data %>% filter(total_engine_hours > 0, density > 0, year == max(year)),
+               marginal_profits = 0,
+               use = 1),
+  upper = list(sigma = log(100),
+               q = log(1.5e-5)))
+
+summary(mle_model)
+
+mle_coefs <- coef(mle_model)
+
+skynet_data_2 <- skynet_data %>% 
+  filter(total_engine_hours > 0, density > 0, year == max(year)) %>% 
+  mutate(structural_density_hat  = fit_sffs(beta_distance = mle_coefs['beta_distance'],
+                                            beta_size = mle_coefs['beta_size'],
+                                            beta_interaction = mle_coefs['beta_interaction'],
+                                            q = mle_coefs['q'],
+                                            sigma = mle_coefs['sigma'],
+                                           dat = .,
+                                           price = 765,
+                                           marginal_profits = 0,
+                                           use = 0
+                                           ))
+
+structural_shit <- skynet_data_2 %>% 
+  ggplot(aes(density, structural_density_hat)) + 
+  geom_point() + 
+  geom_abline(aes(slope = 1, intercept = 0)) + 
+  labs(x = 'EBS Groundfish Survey Density', y = 'GFW Model of Densities', 
+       title = 'Alaska Pollock') +
+  hrbrthemes::theme_ipsum() +
+  scale_x_continuous(limits = c(0,NA)) + 
+  scale_y_continuous(limits = c(0, NA))
+  
+structural_shit
+                                          
+
+
+```
 
 
 
