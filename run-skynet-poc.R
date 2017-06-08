@@ -316,14 +316,15 @@ ebs$knot <- knots$knot[nearest_knot$nn.idx]
 ebs$distance <- nearest_knot$nn.dists
 
 
-ebs %>%
+knot_pairing_plot <- ebs %>%
   filter(distance <= quantile(ebs$distance, 0.75)) %>%
   select(e_km, n_km, knot) %>%
   unique() %>%
   ggplot(aes(e_km, n_km, label = knot)) +
   geom_text() +
-  geom_text(data = knots, aes(e_km, n_km, label = knot, color = 'red'))
+  geom_text(data = knots, aes(e_km, n_km, label = knot), color = 'red')
 
+ggsave(file = paste0(run_dir,'knot_pairing_plot.pdf'), knot_pairing_plot)
 
 trawl_fishing_by_knot <- ebs %>%
   filter(best_label == 'trawlers',
@@ -348,7 +349,10 @@ skynet_data <- trawl_fishing_by_knot %>%
   mutate(
     total_engine_hours_lag1 = lag(total_engine_hours, 1),
     total_engine_hours_lag2 = lag(total_engine_hours, 2),
-    total_engine_hours_lag3 = lag(total_engine_hours, 3)
+    total_engine_hours_lag3 = lag(total_engine_hours, 3),
+    port_hours = dist_from_port * total_engine_hours,
+    shore_number = dist_from_shore * num_vessels,
+    large_vessels = num_vessels * mean_vessel_length
   ) %>%
   ungroup() %>%
   filter(total_engine_hours > 0,
@@ -369,12 +373,39 @@ fitControl <- trainControl(## 10-fold CV
   repeats = 10)
 
 gbm_model <- train(
-  density ~ total_engine_hours + dist_from_port + dist_from_shore + num_vessels + mean_vessel_length,
+  density ~ total_engine_hours +
+    shore_number +
+    large_vessels +
+    port_hours +
+    dist_from_port +
+    dist_from_shore +
+    num_vessels +
+    mean_vessel_length,
   data = skynet_sandbox$train[[1]] %>% as_data_frame(),
   method = "gbm",
   trControl = fitControl
 )
 
+rf_model <- train(
+  density ~ total_engine_hours +
+    shore_number +
+    large_vessels +
+    port_hours +
+    dist_from_port +
+    dist_from_shore +
+    num_vessels +
+    mean_vessel_length,
+  data = skynet_sandbox$train[[1]] %>% as_data_frame(),
+  method = "rf",
+  trControl = fitControl
+)
+
+# arg <- skynet_sandbox$train[[1]] %>%
+#   as.data.frame() %>%
+#   select(density, shore_number, large_vessels,total_engine_hours, dist_from_port, dist_from_shore,num_vessels, mean_vessel_length,port_hours) %>%
+#   as.data.frame()
+#
+# randomForest::partialPlot(rf_model$finalModel,arg,  x.var = shore_number)
 
 
 # fit simple model --------------------------------------------------------
@@ -462,6 +493,7 @@ performance <- skynet_sandbox$test[[1]] %>% as_data_frame()
 performance <- performance %>%
   mutate(
     gbm = predict(gbm_model, newdata = .),
+    rf = predict(rf_model, newdata = .),
     lm = predict(lm_model, newdata = .),
     structural = fit_sffs(
       beta_distance = mle_coefs['beta_distance'],
@@ -483,7 +515,8 @@ performance <- performance %>%
 
 performance %>%
   group_by(model) %>%
-  dplyr::summarise(rmse = sqrt(mean(se)))
+  dplyr::summarise(rmse = sqrt(mean(se))) %>%
+  arrange((rmse))
 
 performance_plot <- performance %>%
   ggplot(aes(density, density_hat)) +
@@ -491,9 +524,15 @@ performance_plot <- performance %>%
               color = 'red',
               linetype = 2) +
   geom_point(alpha = 0.75) +
+  scale_x_continuous(limits = c(0,NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
   facet_wrap( ~ model) +
   labs(x = 'EBS Trawl Survey Alaska Pollock Density',
        y = 'Model Predicted Density',
        caption = 'Models trained on separate data')
 
 ggsave(filename = paste0(run_dir,'performance_plot.pdf'), performance_plot)
+
+
+
+
