@@ -324,7 +324,6 @@ knot_pairing_plot <- ebs %>%
   geom_text() +
   geom_text(data = knots, aes(e_km, n_km, label = knot), color = 'red')
 
-ggsave(file = paste0(run_dir,'knot_pairing_plot.pdf'), knot_pairing_plot)
 
 trawl_fishing_by_knot <- ebs %>%
   filter(best_label == 'trawlers',
@@ -350,8 +349,12 @@ skynet_data <- trawl_fishing_by_knot %>%
     total_engine_hours_lag1 = lag(total_engine_hours, 1),
     total_engine_hours_lag2 = lag(total_engine_hours, 2),
     total_engine_hours_lag3 = lag(total_engine_hours, 3),
-    port_hours = dist_from_port * total_engine_hours,
-    shore_number = dist_from_shore * num_vessels,
+    port_engine_hours = dist_from_port * total_engine_hours,
+    port_hours = dist_from_port * total_hours,
+    port_numbers = dist_from_port * num_vessels,
+    shore_numbers = dist_from_shore * num_vessels,
+    shore_hours = dist_from_shore * total_hours,
+    shore_engine_hours = dist_from_shore * total_engine_hours,
     large_vessels = num_vessels * mean_vessel_length
   ) %>%
   ungroup() %>%
@@ -363,7 +366,6 @@ skynet_data <- trawl_fishing_by_knot %>%
 # expand this more later, for now let's focus on getting all the models up and running well
 skynet_sandbox <- modelr::crossv_kfold(skynet_data, 5)
 
-
 # prep maching learning ---------------------------------------------------
 
 fitControl <- trainControl(## 10-fold CV
@@ -374,9 +376,14 @@ fitControl <- trainControl(## 10-fold CV
 
 gbm_model <- train(
   density ~ total_engine_hours +
-    shore_number +
+    total_hours +
     large_vessels +
     port_hours +
+    port_engine_hours +
+    port_numbers +
+    shore_hours +
+    shore_engine_hours +
+    shore_numbers +
     dist_from_port +
     dist_from_shore +
     num_vessels +
@@ -388,16 +395,22 @@ gbm_model <- train(
 
 rf_model <- train(
   density ~ total_engine_hours +
-    shore_number +
+    total_hours +
     large_vessels +
     port_hours +
+    port_engine_hours +
+    port_numbers +
+    shore_hours +
+    shore_engine_hours +
+    shore_numbers +
     dist_from_port +
     dist_from_shore +
     num_vessels +
     mean_vessel_length,
   data = skynet_sandbox$train[[1]] %>% as_data_frame(),
   method = "rf",
-  trControl = fitControl
+  trControl = fitControl,
+  do.trace = 10
 )
 
 # arg <- skynet_sandbox$train[[1]] %>%
@@ -411,9 +424,54 @@ rf_model <- train(
 # fit simple model --------------------------------------------------------
 
 
+ind_vars <- rf_model$finalModel$xNames
+
+model <- (paste0('density ~', paste(ind_vars, collapse = '+')))
+
+temp_model <- lm(model,data = skynet_sandbox$train[[1]])
+
+temp_aic <- AIC(temp_model)
+
+temp_vars <- ind_vars
+
+model_frame <- data_frame(model_num = 1:(length(ind_vars) - 1), aic = NA, dropped = NA, model = model)
+
+dropped <- NA
+
+for (i in 1:(length(ind_vars) - 1)) {
+
+  model_frame$model_num[i] <- i
+
+  model_frame$aic[i] <- temp_aic
+
+  model_frame$dropped[i] <- dropped
+
+  model_frame$model[i] <- model
+
+
+p_val <- summary(temp_model)$coefficients %>%
+  as.data.frame() %>%
+  mutate(name = rownames(.)) %>%
+  filter(name != '(Intercept)') %>%
+  arrange(`Pr(>|t|)` %>% desc())
+
+dropped <- p_val$name[1]
+
+temp_vars <- temp_vars[temp_vars  != dropped]
+
+model <- (paste0('density ~', paste(temp_vars, collapse = '+')))
+
+temp_model <- lm(model,data = skynet_sandbox$train[[1]])
+
+temp_aic <- AIC(temp_model)
+
+}
+
+best_model <- model_frame$model[model_frame$aic == min(model_frame$aic)]
+
 lm_model <-
   lm(
-    density ~ total_engine_hours + dist_from_port + dist_from_shore + num_vessels + mean_vessel_length,
+    best_model ,
     data = skynet_sandbox$train[[1]] %>% as_data_frame()
   )
 
@@ -511,12 +569,23 @@ performance <- performance %>%
 
 
 performance <- performance %>%
-  mutate(se = (density - density_hat) ^ 2)
+  mutate(se = (density - density_hat) ^ 2) %>%
+  group_by(model) %>%
+  dplyr::mutate(rmse = sqrt(mean(se))) %>%
+  mutate(model = fct_reorder(model, rmse))
 
-performance %>%
+
+rmse_mat <- performance %>%
   group_by(model) %>%
   dplyr::summarise(rmse = sqrt(mean(se))) %>%
+  mutate(model = fct_reorder(model, rmse)) %>%
   arrange((rmse))
+
+rmse_plot <- rmse_mat %>%
+  ggplot(aes(model,rmse)) +
+  geom_col() +
+  labs(y = 'Root Mean Squared Error')
+
 
 performance_plot <- performance %>%
   ggplot(aes(density, density_hat)) +
@@ -531,7 +600,16 @@ performance_plot <- performance %>%
        y = 'Model Predicted Density',
        caption = 'Models trained on separate data')
 
-ggsave(filename = paste0(run_dir,'performance_plot.pdf'), performance_plot)
+
+plot_files <- (ls()[ str_detect(ls(), '_plot')])
+
+plot_foo <- function(x,run_dir){
+
+  ggsave(paste0(run_dir,x,'.pdf'), get(x), device = cairo_pdf)
+
+}
+
+walk(plot_files, plot_foo, run_dir = run_dir)
 
 
 
