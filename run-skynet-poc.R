@@ -21,6 +21,9 @@ library(sf)
 library(ggmap)
 library(VAST)
 library(TMB)
+library(caret)
+library(stats4)
+library(extrafont)
 
 # run options -------------------------------------------------------------
 
@@ -482,7 +485,7 @@ performance %>%
   group_by(model) %>%
   dplyr::summarise(rmse = sqrt(mean(se)))
 
-performance %>%
+performance_plot <- performance %>%
   ggplot(aes(density, density_hat)) +
   geom_abline(aes(intercept = 0, slope = 1),
               color = 'red',
@@ -492,3 +495,5 @@ performance %>%
   labs(x = 'EBS Trawl Survey Alaska Pollock Density',
        y = 'Model Predicted Density',
        caption = 'Models trained on separate data')
+
+ggsave(filename = paste0(run_dir,'performance_plot.pdf'), performance_plot)
