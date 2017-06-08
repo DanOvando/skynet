@@ -1,0 +1,39 @@
+---
+title: "Proof of Concept for 'Fish From Space'"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+```{r, include=F}
+knitr::opts_chunk$set(message = F, warning = F, echo = F)
+```
+
+This project seeks to generate estimates of fish abundance across space and time using data on fishing behavior derived from Global Fishing Watch. 
+
+This document provides a "proof of concept", evaluating performance metrics across alternative models for the "SpaceFish" assessment method. Performance here will be primarily measured by out-of-sample predictive power at a variety of scales, as this is the primary goal of this method (to be able to predict spatio-temporal trends in abundance in locations covered by GFW but lacking scientific surveys of abundance). 
+
+# Data
+
+# Models
+
+## Machine Learning
+
+## OLS
+
+## Structural 
+
+# Results 
+
+## Local performance
+
+## Other species in region
+
+## Other Regions
+
+# Summary
+
+
+
+
+
