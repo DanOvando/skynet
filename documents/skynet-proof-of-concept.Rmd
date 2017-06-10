@@ -1,6 +1,7 @@
 ---
 title: "Proof of Concept for 'Fish From Space'"
 output:
+  bookdown::html_document2: null
   html_document: default
   html_notebook: default
 ---
@@ -9,19 +10,227 @@ output:
 knitr::opts_chunk$set(message = F, warning = F, echo = F)
 ```
 
+```{r}
+
+library(randomForest)
+library(lme4)
+library(bigrquery)
+library(stringr)
+library(modelr)
+library(broom)
+library(hrbrthemes)
+library(viridis)
+library(gridExtra)
+library(sf)
+library(ggmap)
+library(VAST)
+library(TMB)
+library(caret)
+library(stats4)
+library(extrafont)
+library(tidyverse)
+
+
+# run options -------------------------------------------------------------
+
+run_name <- 'testing'
+
+run_description <- 'development of scripts'
+
+run_dir <- file.path('results', run_name, '')
+
+load(paste0('../',run_dir,'skynet-results.Rdata'))
+
+```
+
+
 This project seeks to generate estimates of fish abundance across space and time using data on fishing behavior derived from Global Fishing Watch. 
 
 This document provides a "proof of concept", evaluating performance metrics across alternative models for the "SpaceFish" assessment method. Performance here will be primarily measured by out-of-sample predictive power at a variety of scales, as this is the primary goal of this method (to be able to predict spatio-temporal trends in abundance in locations covered by GFW but lacking scientific surveys of abundance). 
 
 # Data
 
+Data for the proof of concept come from Global Fishing Watch (for the effort data), accessed on 2016-06-09, and the Eastern Bering Sea Bottom Trawl Survey (EBSTS) data accessed from the `FishData` package.
+
+For this phase, I am isolating data for Alaska pollock (or Walleye pollock) (*Gadus chalcogrammus*, formerlly *Theragra chalcogramma*), as this is a highly abundant species with a highly specialized fleet that can be at least somewhat isolated in the GFW data by filtering down to vessels identified as "trawlers". 
+
+## EBSTS Data
+
+EBSTS data for Alaksa pollock go back to `r min(ebs_species$Year)`, up through `r max(ebs_species$Year)` (Fig. \@ref(fig:cpue-trend)).
+
+```{r cpue-trend, fig.cap='Median CPUE of Alaska pollock over time'}
+
+ebs_species %>% 
+  group_by(Year) %>% 
+  dplyr::summarise(median_cpue = median(Catch_KG)) %>% 
+  ggplot(aes(Year, median_cpue)) + 
+  geom_line()
+
+```
+
+These data cover a broad spatial range, 
+
+```{r}
+qmplot(
+  x = Lon,
+  y = Lat,
+  data = ebs_species %>% filter(Year > 2012),
+  color = log(Catch_KG),
+  alpha = 0.75
+) +
+  scale_color_viridis() +
+  facet_wrap( ~ Year) +
+  theme_classic() + 
+  labs(caption = 'Log Density of Alaska Pollock')
+```
+
+## Global Fishing Watch Data
+
+
+```{r}
+ 
+
+ebs %>%
+  filter(best_label == 'trawlers') %>% 
+  group_by(year, rounded_lat, rounded_lon) %>% 
+  dplyr::summarise(total_hours = sum(total_hours)) %>% 
+  qmplot(
+  x = rounded_lon,
+  y = rounded_lat,
+  color = log(total_hours),
+  data = .,
+  alpha = 0.75
+) +
+  scale_color_viridis() +
+  facet_wrap( ~ year) +
+  theme_classic() + 
+  labs(caption = 'Log10 Total Trawl Fishing Hours')
+
+
+```
+
+
+Along with the spatial distribution of fishing effort, we have data on lots of other fun metrics from GFW 
+
+```{r}
+
+ebs %>%
+  filter(best_label == 'trawlers') %>% 
+  select(year,total_hours, mean_distance_from_shore,mean_distance_from_port,
+         inferred_length,inferred_engine_power) %>% 
+  gather('variable','value', -year) %>% 
+  ggplot(aes(value)) + 
+  geom_histogram() + 
+  facet_wrap(~variable, scales = 'free')
+
+```
+
+## Merged Data
+
+We can take these data and link the EBSBTS data and GFW data together. To do that, we pass the EBSTS trawl survey data to Spatial Delta GLM package developed by Jim Thorson, which overlays a standardized grid of densities at a series of "knots" over the sample space. I then snapped each observed location of fishing in the GFW data to the nearest knot
+
+
+```{r knot-plot, fig.cap='Visualizationg of GFW to EBSTS pairing. Colored numbers represent position of EBSTS knots, colored dots show locations of corresponding GFW points'}
+
+knot_pairing_plot
+```
+
+Through this pairing process,we can then calculate the total hours fished, total engine hours fished, total number of vessels, mean vessel length, mean distance from shore, and mean distance from port associated with each knot, and by extension the EBSTS derived density of Alaska pollock at that knot. We can also create interaction terms as needed, such as the interaction of the number of vessels at a knot and the distance from shore for that knot. We can then take a look at the visual correlations between these variables and EBSBTS densities of Alaska pollock (Fig.\@ref(fig:var-cor)). 
+
+```{r var-cor, fig.cap= 'Smoothed visual correlations between covariates and observed densities of Alaska pollock'}
+
+skynet_data %>% 
+  select(-knot, -e_km, -n_km, -year) %>% 
+  gather('variable','value', -density) %>% 
+  ggplot() + 
+  geom_smooth(aes(value, density, color = variable), show.legend = F) + 
+  labs(y = 'Density of Alaska Pollock') +
+  facet_wrap(~variable, scales = 'free') + 
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        strip.text = element_text(size = 8),
+        panel.spacing = unit(.1, 'lines'))
+  
+
+```
+
 # Models
+
+The goal of this exercise is now to fit a series of model utulizing the data provided by GFW to predict the densities estimated by the EBSBTS and the VAST package. 
+
+As the primary objective of this model is to eventually use GFW data to predict spatio-temporal trends in fish abundance in areas lacking fishery indendent surveys of abundance, for now we will use out-of-sample predictive power as our metric of model performance, specifically root-mean squared error (RMSE). 
+
+We fit a series of candidate models, and here present a random forest, a linear model, and a structural model. 
+
+Each model was designed using a separate subset of data, so as to isolate  initial model design from the data that will eventually be used to judge model performance. 
+
+We conduct two test of performance. One uses K-fold cross validation, in which the paired EBSBTS and GFW data were then separated into 10 splits of training and test data. Each of the models is fit to the training data (or subsets of the training data in the case of the machine learning algorithms). The fitted model was then used predict the densities of the training data sets, allowing us to estimate out-of-sample RMSE across 10 iterations of training and test data. 
+
+One goal of this project though is to be able to predict time-trends of abundance as well. To explore the ability of the model to capture trends in data that it was not trained on, we also fit each of the models to pre-2016 data, and then used the fitted models to predict data from the year 2016. 
+
+Summaries of each of the models are presented below. Each of these models has been adjusted in a limited fashion to optimize performance. However, these are highly preliminary results, and substantially more work will be needed to develop the best models possbible. These models then should be considered as lightly tuned demonstration models. 
 
 ## Machine Learning
 
+Two machine learning algorithms, random forests (rf) and generalized boosted regression modeling (gbm), were evaluated. Tuning parameters of each method were selected using the `caret` package on an isolated set of data, and since the random forest performed better than the gbm model, for brevity's sake I will only present results of the random forest here. 
+
+A random forest works by fitting a series of regression trees. Each regression tree takes a sub-sample of the training data, and a sub sample of the independent variables provided for model fitting. The algorithm then determines the variable and variable split (e.g. vessel size and vessel size above 30ft) that provides the greatest explanatory power in estimating density of the "out of bag" samples (the part of the training data that were not included in the tree), and creates that as the first node. The next two nodes are selected in the same process, and so on and so forth, down to a specified tree depth tuned through the `caret` package. Each tree provides a high-variance estiamtor of densities. The random forest then averages over hundreds of trees to reduce this variance and provide an improved estimate of density as a function of provided covariates. The advantage of this approach is that it makes no assumptions about error distributions or linearity of parameters, and actively pushes back against over fitting by prioritizing out-of-sample prediction, and sub sampling of the provided independent variables (lots and lots of literature on this). 
+
+The random forest allows us to clasify each variable by its "importance", a measure of the degree to which the fit of the model decreases when that variable is omitted from the model. The model estimates that distance from port and shore are the most important variables, along with "shore numbers", the interaction between distance from shore and number of vessels. Interestingly, total hours of fishing estimated by GFW were not particularly important. However, clearly many of these parameters are highly colinear and so the importance of some variables may be confounded, further work will be needed to improve variable selection. 
+
+```{r var-imp, fig.cap='Variable importance plot from model using random forest to predict density of Alaska pollock'}
+
+varImpPlot(rf_model$finalModel)
+
+```
+
+We can also construct partial dependence plots, which visualize the marginal effect of each independent variable. 
+
+```{r partial-plot, fig.cap='Partial dependence plots of variables in random forest'}
+
+partial_foo <- function(variable) {
+  
+  eval(parse(text = paste0('a <- randomForest::partialPlot(rf_model$finalModel
+, skynet_sandbox$train[[1]] %>% as.data.frame() %>% remove_missing() %>% as.data.frame(),', variable,')')))
+  
+
+}
+
+
+partial_plot  <- data_frame(variable = rf_model$finalModel$xNames) %>% 
+  mutate(varname = map(variable, as.name)) %>% 
+  mutate(partials = map(.$varname, partial_foo))
+
+partial_plot <- partial_plot %>% 
+  mutate(partial = map(.$partials, as_data_frame)) %>% 
+  select(variable, partial) %>% 
+  unnest()
+
+
+partial_plot %>% 
+  ggplot() + 
+  geom_line(aes(x,y, color = variable), show.legend = F) + 
+  labs(y = 'Predicted Density') +
+  facet_wrap(~variable, scales = 'free')
+
+```
+
 ## OLS
 
+As a counterbalance to the mysteries of the random forest algorithm, I also fit a simple OLS model to the data. Variable selection was made be backwards AIC selection (fitting the model with all parameters, dropping the least significant variable, refitting the model, repeat process until a minimum AIC value is reached). This is not an ideal model selection process, but again this serves simply to attempt to compare a reasonably tuned linear model to a reasonably tuned random forest. Though I will note that I did not include interaction terms at this time. 
+
+The selected model was 
+
+```{r}
+summary(lm_model)
+```
+
 ## Structural 
+
+Lastly, I fit a structural model in the form of @Miller2016 to the data. The key assumption here is that fishermen have followed an ideal free distribution, and so marginal profits are equal across space and time. 
+
+Marginal profits are estimated as ...
 
 # Results 
 

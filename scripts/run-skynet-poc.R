@@ -7,7 +7,6 @@
 rm(list = ls())
 # Load Libraries ----------------------------------------------------------
 
-library(tidyverse)
 library(randomForest)
 library(lme4)
 library(bigrquery)
@@ -24,6 +23,9 @@ library(TMB)
 library(caret)
 library(stats4)
 library(extrafont)
+library(ggsci)
+library(tidyverse)
+
 
 # run options -------------------------------------------------------------
 
@@ -43,6 +45,8 @@ write(run_description, file = paste0(run_dir, 'description.txt'))
 # run settings ------------------------------------------------------------
 
 sci_to_use <- 'Gadus_chalcogrammus'
+
+log_space <- TRUE
 
 # figure options ----------------------------------------------------------
 
@@ -224,6 +228,7 @@ MapDetails_List = SpatialDeltaGLMM::MapDetails_Fn(
 Year_Set = seq(min(ebs_species[, 'Year']), max(ebs_species[, 'Year']))
 Years2Include = which(Year_Set %in% sort(unique(ebs_species[, 'Year'])))
 
+#god damn it Dens_xt is in log space
 Dens_xt <-
   SpatialDeltaGLMM::PlotResultsOnMap_Fn(
     plot_set = c(3),
@@ -277,15 +282,6 @@ ebs <- ebs_raw %>%
   filter(is.na(on_fishing_list_nn) == F) %>%
   arrange(year, mmsi)
 
-qmplot(
-  x = rounded_lon,
-  y = rounded_lat,
-  data = ebs,
-  color = log10(total_hours)
-) +
-  scale_color_viridis() +
-  facet_wrap(~ year) +
-  theme_classic()
 
 utm_coords <-
   SpatialDeltaGLMM::Convert_LL_to_UTM_Fn(
@@ -308,6 +304,14 @@ knots <- ebs_species_densities %>%
   select(knot, e_km, n_km) %>%
   unique()
 
+# Tmp = cbind('PID'=1,'POS'=1:length(knots$e_km),'X'=knots$e_km,'Y'=knots$n_km)
+# attr(Tmp,"projection") = "UTM"
+# attr(Tmp,"zone") = Extrapolation_List$zone
+# tmpUTM = PBSmapping::convUL(Tmp, km = T)
+# if( flip_around_dateline==TRUE ) tmpUTM[,'X'] = 180 + ifelse( tmpUTM[,'X']>0, tmpUTM[,'X']-360, tmpUTM[,'X'])
+#
+
+
 nearest_knot <-
   RANN::nn2(knots %>% select(-knot), utm_coords, k = 1)
 
@@ -320,10 +324,15 @@ knot_pairing_plot <- ebs %>%
   filter(distance <= quantile(ebs$distance, 0.75)) %>%
   select(e_km, n_km, knot) %>%
   unique() %>%
-  ggplot(aes(e_km, n_km, label = knot)) +
-  geom_text() +
-  geom_text(data = knots, aes(e_km, n_km, label = knot), color = 'red')
-
+  ggplot() +
+  geom_point(aes(e_km, n_km, color = factor(knot)),
+             show.legend = F,
+             alpha = 0.25) +
+  geom_text(
+    data = knots,
+    aes(e_km, n_km, label = knot, color = knot %>% factor()),
+    show.legend = F
+  )
 
 trawl_fishing_by_knot <- ebs %>%
   filter(best_label == 'trawlers',
@@ -357,9 +366,17 @@ skynet_data <- trawl_fishing_by_knot %>%
     shore_engine_hours = dist_from_shore * total_engine_hours,
     large_vessels = num_vessels * mean_vessel_length
   ) %>%
-  ungroup() %>%
+  ungroup() %>% {
+    if (log_space == F) {
+      mutate(., density = exp(density))
+    } else {
+      .
+    }
+
+  } %>%
   filter(total_engine_hours > 0,
-         density > 0) #fix this later, need to include zeros
+         density > 0,
+         is.na(density) == F) #fix this later, need to include zeros
 
 
 # prepare training data ---------------------------------------------------
@@ -393,6 +410,16 @@ gbm_model <- train(
   trControl = fitControl
 )
 
+
+# a <- skynet_sandbox$train[[1]] %>% as_data_frame() %>%
+#   select(-contains('lag'), -contains('_km')) %>%
+#   gather(variable, value, -knot, -year) %>%
+#   group_by(variable) %>%
+# dplyr::mutate(
+#     ss_value = (value - mean(value)) / (2 * sd(value))) %>%
+#   select(-value) %>%
+#   spread(variable,ss_value)
+
 rf_model <- train(
   density ~ total_engine_hours +
     total_hours +
@@ -403,8 +430,6 @@ rf_model <- train(
     shore_hours +
     shore_engine_hours +
     shore_numbers +
-    dist_from_port +
-    dist_from_shore +
     num_vessels +
     mean_vessel_length,
   data = skynet_sandbox$train[[1]] %>% as_data_frame(),
@@ -428,18 +453,23 @@ ind_vars <- rf_model$finalModel$xNames
 
 model <- (paste0('density ~', paste(ind_vars, collapse = '+')))
 
-temp_model <- lm(model,data = skynet_sandbox$train[[1]])
+temp_model <- lm(model, data = skynet_sandbox$train[[1]])
 
 temp_aic <- AIC(temp_model)
 
 temp_vars <- ind_vars
 
-model_frame <- data_frame(model_num = 1:(length(ind_vars) - 1), aic = NA, dropped = NA, model = model)
+model_frame <-
+  data_frame(
+    model_num = 1:(length(ind_vars) - 1),
+    aic = NA,
+    dropped = NA,
+    model = model
+  )
 
 dropped <- NA
 
 for (i in 1:(length(ind_vars) - 1)) {
-
   model_frame$model_num[i] <- i
 
   model_frame$aic[i] <- temp_aic
@@ -449,31 +479,30 @@ for (i in 1:(length(ind_vars) - 1)) {
   model_frame$model[i] <- model
 
 
-p_val <- summary(temp_model)$coefficients %>%
-  as.data.frame() %>%
-  mutate(name = rownames(.)) %>%
-  filter(name != '(Intercept)') %>%
-  arrange(`Pr(>|t|)` %>% desc())
+  p_val <- summary(temp_model)$coefficients %>%
+    as.data.frame() %>%
+    mutate(name = rownames(.)) %>%
+    filter(name != '(Intercept)') %>%
+    arrange(`Pr(>|t|)` %>% desc())
 
-dropped <- p_val$name[1]
+  dropped <- p_val$name[1]
 
-temp_vars <- temp_vars[temp_vars  != dropped]
+  temp_vars <- temp_vars[temp_vars  != dropped]
 
-model <- (paste0('density ~', paste(temp_vars, collapse = '+')))
+  model <- (paste0('density ~', paste(temp_vars, collapse = '+')))
 
-temp_model <- lm(model,data = skynet_sandbox$train[[1]])
+  temp_model <- lm(model, data = skynet_sandbox$train[[1]])
 
-temp_aic <- AIC(temp_model)
+  temp_aic <- AIC(temp_model)
 
 }
 
-best_model <- model_frame$model[model_frame$aic == min(model_frame$aic)]
+best_model <-
+  model_frame$model[model_frame$aic == min(model_frame$aic)]
 
 lm_model <-
-  lm(
-    best_model ,
-    data = skynet_sandbox$train[[1]] %>% as_data_frame()
-  )
+  lm(best_model ,
+     data = skynet_sandbox$train[[1]] %>% as_data_frame())
 
 
 
@@ -487,7 +516,8 @@ fit_sffs <- function(beta_distance,
                      dat,
                      price,
                      marginal_profits = 0,
-                     use = 'mle') {
+                     use = 'mle',
+                     log_space = 1) {
   old_sigma <- sigma
   sigma <-  exp(sigma)
 
@@ -508,9 +538,27 @@ fit_sffs <- function(beta_distance,
 
   estimated_abundance <-
     ((cost + marginal_profits)) / (price  * exp(-q * dat$total_engine_hours))
+
+  if (any(estimated_abundance <= 0)) {
+    browser()
+  }
+
+  log_estimated_abundance <- log(estimated_abundance)
+
+  if (log_space == 1) {
+    estimated_abundance <- log(estimated_abundance)
+
+    log_density <-  dat$density
+
+
+  } else {
+    log_density <- log(dat$density)
+
+  }
+
   if (use == 1) {
     out <-
-      -sum(stats::dlnorm(dat$density, log(estimated_abundance), sigma, log = T))
+      -sum(stats::dnorm(log_density, log_estimated_abundance, sigma, log = T))
   } else {
     out <- estimated_abundance
   }
@@ -518,8 +566,6 @@ fit_sffs <- function(beta_distance,
   return(out)
 
 }
-
-
 
 mle_model <- stats4::mle(
   fit_sffs,
@@ -534,45 +580,69 @@ mle_model <- stats4::mle(
     price = 765,
     dat = skynet_data %>% filter(total_engine_hours > 0),
     marginal_profits = 0,
-    use = 1
+    use = 1,
+    log_space = 1
   ),
   upper = list(sigma = log(100),
                q = log(1.5e-5))
 )
 
-
 mle_coefs <- coef(mle_model)
 
 
+for (i in 1:10) {
+  mle_model <- stats4::mle(
+    fit_sffs,
+    start = list(
+      beta_distance =  mle_coefs['beta_distance'] %>% as.numeric() %>% jitter(2),
+      beta_size =  mle_coefs['beta_size'] %>% as.numeric() %>% jitter(2),
+      beta_interaction = mle_coefs['beta_interaction'] %>% as.numeric(2) %>% jitter(2),
+      sigma =  mle_coefs['sigma'] %>% as.numeric() %>% jitter(2),
+      q =  mle_coefs['q'] %>% as.numeric() %>% jitter(2)
+    ),
+    fixed = list(
+      price = 765,
+      dat = skynet_data %>% filter(total_engine_hours > 0),
+      marginal_profits = 0,
+      use = 1
+    ),
+    upper = list(sigma = log(100),
+                 q = log(1.5e-5))
+  )
+
+  mle_coefs <- coef(mle_model)
+}
+
 #  assess performance -----------------------------------------------------
 
-performance <- skynet_sandbox$test[[1]] %>% as_data_frame()
 
-performance <- performance %>%
+performance <- skynet_sandbox %>%
   mutate(
-    gbm = predict(gbm_model, newdata = .),
-    rf = predict(rf_model, newdata = .),
-    lm = predict(lm_model, newdata = .),
-    structural = fit_sffs(
-      beta_distance = mle_coefs['beta_distance'],
-      beta_size = mle_coefs['beta_size'],
-      beta_interaction = mle_coefs['beta_interaction'],
-      q = mle_coefs['q'],
-      sigma = mle_coefs['sigma'],
-      dat = .,
-      price = 765,
-      marginal_profits = 10,
-      use = 0
+    predictions = map2(
+      train,
+      test,
+      fit_models,
+      mtry = rf_model$bestTune$mtry,
+      best_lm_model = best_model,
+      mle_coefs = mle_coefs
     )
   ) %>%
-  gather('model', 'density_hat', gbm:structural)
+  select(.id, predictions) %>%
+  unnest()
 
-
-performance <- performance %>%
-  mutate(se = (density - density_hat) ^ 2) %>%
-  group_by(model) %>%
-  dplyr::mutate(rmse = sqrt(mean(se))) %>%
-  mutate(model = fct_reorder(model, rmse))
+performance_plot <- performance %>%
+  ggplot(aes(density, density_hat, color = .id)) +
+  geom_abline(aes(intercept = 0, slope = 1),
+              color = 'red',
+              linetype = 2) +
+  geom_point(alpha = 0.75) +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  facet_grid(model ~ .) +
+  labs(x = 'EBS Trawl Survey Alaska Pollock Density',
+       y = 'Model Predicted Density',
+       caption = 'Models trained on separate data') +
+  scale_color_npg()
 
 
 rmse_mat <- performance %>%
@@ -582,35 +652,70 @@ rmse_mat <- performance %>%
   arrange((rmse))
 
 rmse_plot <- rmse_mat %>%
-  ggplot(aes(model,rmse)) +
+  ggplot(aes(model, rmse)) +
   geom_col() +
   labs(y = 'Root Mean Squared Error')
 
 
-performance_plot <- performance %>%
+# do time experiment ------------------------------------------------------
+
+time_sandbox <-
+  data_frame(train = list(skynet_data %>% filter(year < max(year))),
+             test =  list(skynet_data %>% filter(year == max(year))))
+
+time_performance <- time_sandbox %>%
+  mutate(
+    predictions = map2(
+      train,
+      test,
+      fit_models,
+      mtry = rf_model$bestTune$mtry,
+      best_lm_model = best_model,
+      mle_coefs = mle_coefs
+    )
+  ) %>%
+  select(predictions) %>%
+  unnest()
+
+time_performance_plot <- time_performance %>%
   ggplot(aes(density, density_hat)) +
   geom_abline(aes(intercept = 0, slope = 1),
               color = 'red',
               linetype = 2) +
   geom_point(alpha = 0.75) +
-  scale_x_continuous(limits = c(0,NA)) +
+  scale_x_continuous(limits = c(0, NA)) +
   scale_y_continuous(limits = c(0, NA)) +
-  facet_wrap( ~ model) +
+  facet_grid(model ~ .) +
   labs(x = 'EBS Trawl Survey Alaska Pollock Density',
        y = 'Model Predicted Density',
-       caption = 'Models trained on separate data')
+       caption = 'Models trained on pre-2015 data') +
+  scale_color_npg()
+
+time_rmse_mat <- time_performance %>%
+  group_by(model) %>%
+  dplyr::summarise(rmse = sqrt(mean(se))) %>%
+  mutate(model = fct_reorder(model, rmse)) %>%
+  arrange((rmse))
+
+time_rmse_plot <- time_rmse_mat %>%
+  ggplot(aes(model, rmse)) +
+  geom_col() +
+  labs(y = 'Root Mean Squared Error')
 
 
-plot_files <- (ls()[ str_detect(ls(), '_plot')])
+plot_files <- (ls()[str_detect(ls(), '_plot')])
 
-plot_foo <- function(x,run_dir){
-
-  ggsave(paste0(run_dir,x,'.pdf'), get(x), device = cairo_pdf)
+plot_foo <- function(x, run_dir) {
+  ggsave(
+    paste0(run_dir, x, '.pdf'),
+    get(x),
+    device = cairo_pdf,
+    width = 8,
+    height = 10
+  )
 
 }
 
 walk(plot_files, plot_foo, run_dir = run_dir)
 
-
-
-
+save.image(file = paste0(run_dir, 'skynet-results.Rdata'))
