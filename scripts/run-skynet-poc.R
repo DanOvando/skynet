@@ -24,9 +24,10 @@ library(caret)
 library(stats4)
 library(extrafont)
 library(ggsci)
+library(forcats)
 library(tidyverse)
 
-
+demons::load_functions()
 # run options -------------------------------------------------------------
 
 run_name <- 'testing'
@@ -374,6 +375,7 @@ skynet_data <- trawl_fishing_by_knot %>%
     }
 
   } %>%
+  # mutate(density = lag(density, 1)) %>%
   filter(total_engine_hours > 0,
          density > 0,
          is.na(density) == F) #fix this later, need to include zeros
@@ -432,7 +434,7 @@ rf_model <- train(
     shore_numbers +
     num_vessels +
     mean_vessel_length,
-  data = skynet_sandbox$train[[1]] %>% as_data_frame(),
+  data = skynet_sandbox$train[[1]] %>% as_data_frame() %>% filter(is.na(total_engine_hours_lag1) == F),
   method = "rf",
   trControl = fitControl,
   do.trace = 10
@@ -630,6 +632,19 @@ performance <- skynet_sandbox %>%
   select(.id, predictions) %>%
   unnest()
 
+
+true_density <- performance %>%
+  group_by(year) %>%
+  dplyr::summarise(true_median_density = median(density))
+
+performance %>%
+  group_by(model, year) %>%
+  dplyr::summarise(median_density = median(density_hat)) %>%
+  ggplot(aes(year, median_density, color = model)) +
+  geom_line() +
+  geom_point(data = true_density, aes(year,true_median_density, color = 'true'))
+
+
 performance_plot <- performance %>%
   ggplot(aes(density, density_hat, color = .id)) +
   geom_abline(aes(intercept = 0, slope = 1),
@@ -647,13 +662,15 @@ performance_plot <- performance %>%
 
 rmse_mat <- performance %>%
   group_by(model) %>%
-  dplyr::summarise(rmse = sqrt(mean(se))) %>%
+  dplyr::summarise(rmse = sqrt(mean(se)),
+                     r2 = var(density_hat) / var(density)) %>%
   mutate(model = fct_reorder(model, rmse)) %>%
   arrange((rmse))
 
 rmse_plot <- rmse_mat %>%
   ggplot(aes(model, rmse)) +
   geom_col() +
+  geom_text(aes(model, rmse * 1.1, label = paste0('R2 = ',r2 %>% signif(2)))) +
   labs(y = 'Root Mean Squared Error')
 
 
@@ -693,13 +710,15 @@ time_performance_plot <- time_performance %>%
 
 time_rmse_mat <- time_performance %>%
   group_by(model) %>%
-  dplyr::summarise(rmse = sqrt(mean(se))) %>%
+  dplyr::summarise(rmse = sqrt(mean(se)),
+                   r2 = var(density_hat) / var(density)) %>%
   mutate(model = fct_reorder(model, rmse)) %>%
   arrange((rmse))
 
 time_rmse_plot <- time_rmse_mat %>%
   ggplot(aes(model, rmse)) +
   geom_col() +
+  geom_text(aes(model, rmse * 1.1, label = paste0('R2 = ',r2 %>% signif(2)))) +
   labs(y = 'Root Mean Squared Error')
 
 

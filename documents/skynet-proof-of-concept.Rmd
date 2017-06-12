@@ -1,13 +1,18 @@
 ---
 title: "Proof of Concept for 'Fish From Space'"
 output:
+  bookdown::pdf_document2:
   bookdown::html_document2: null
   html_document: default
   html_notebook: default
+linkcolor: blue
+bibliography: dissertation.bib
+biblio-style: apalike
 ---
 
 ```{r, include=F}
-knitr::opts_chunk$set(message = F, warning = F, echo = F)
+knitr::opts_chunk$set(message = F, warning = F, echo = F ,
+                      fig.width = 8, fig.height = 10)
 ```
 
 ```{r}
@@ -35,11 +40,15 @@ library(tidyverse)
 
 run_name <- 'testing'
 
-run_description <- 'development of scripts'
 
 run_dir <- file.path('results', run_name, '')
 
 load(paste0('../',run_dir,'skynet-results.Rdata'))
+
+fig_theme <- theme_ipsum(base_size = 14)
+
+theme_set(fig_theme)
+
 
 ```
 
@@ -52,11 +61,11 @@ This document provides a "proof of concept", evaluating performance metrics acro
 
 Data for the proof of concept come from Global Fishing Watch (for the effort data), accessed on 2016-06-09, and the Eastern Bering Sea Bottom Trawl Survey (EBSTS) data accessed from the `FishData` package.
 
-For this phase, I am isolating data for Alaska pollock (or Walleye pollock) (*Gadus chalcogrammus*, formerlly *Theragra chalcogramma*), as this is a highly abundant species with a highly specialized fleet that can be at least somewhat isolated in the GFW data by filtering down to vessels identified as "trawlers". 
+For this phase, I am isolating data for Alaska pollock (or Walleye pollock) (*Gadus chalcogrammus*, formerly *Theragra chalcogramma*), as this is a highly abundant species with a highly specialized fleet that can be at least somewhat isolated in the GFW data by filtering down to vessels identified as "trawlers". 
 
 ## EBSTS Data
 
-EBSTS data for Alaksa pollock go back to `r min(ebs_species$Year)`, up through `r max(ebs_species$Year)` (Fig. \@ref(fig:cpue-trend)).
+EBSTS data for Alaska pollock go back to `r min(ebs_species$Year)`, up through `r max(ebs_species$Year)` (Fig. \@ref(fig:cpue-trend)).
 
 ```{r cpue-trend, fig.cap='Median CPUE of Alaska pollock over time'}
 
@@ -157,9 +166,9 @@ skynet_data %>%
 
 # Models
 
-The goal of this exercise is now to fit a series of model utulizing the data provided by GFW to predict the densities estimated by the EBSBTS and the VAST package. 
+The goal of this exercise is now to fit a series of model utilizing the data provided by GFW to predict the densities estimated by the EBSBTS and the VAST package. 
 
-As the primary objective of this model is to eventually use GFW data to predict spatio-temporal trends in fish abundance in areas lacking fishery indendent surveys of abundance, for now we will use out-of-sample predictive power as our metric of model performance, specifically root-mean squared error (RMSE). 
+As the primary objective of this model is to eventually use GFW data to predict spatio-temporal trends in fish abundance in areas lacking fishery independent surveys of abundance, for now we will use out-of-sample predictive power as our metric of model performance, specifically root-mean squared error (RMSE). 
 
 We fit a series of candidate models, and here present a random forest, a linear model, and a structural model. 
 
@@ -169,15 +178,15 @@ We conduct two test of performance. One uses K-fold cross validation, in which t
 
 One goal of this project though is to be able to predict time-trends of abundance as well. To explore the ability of the model to capture trends in data that it was not trained on, we also fit each of the models to pre-2016 data, and then used the fitted models to predict data from the year 2016. 
 
-Summaries of each of the models are presented below. Each of these models has been adjusted in a limited fashion to optimize performance. However, these are highly preliminary results, and substantially more work will be needed to develop the best models possbible. These models then should be considered as lightly tuned demonstration models. 
+Summaries of each of the models are presented below. Each of these models has been adjusted in a limited fashion to optimize performance. However, these are highly preliminary results, and substantially more work will be needed to develop the best models possible. These models then should be considered as lightly tuned demonstration models. 
 
 ## Machine Learning
 
 Two machine learning algorithms, random forests (rf) and generalized boosted regression modeling (gbm), were evaluated. Tuning parameters of each method were selected using the `caret` package on an isolated set of data, and since the random forest performed better than the gbm model, for brevity's sake I will only present results of the random forest here. 
 
-A random forest works by fitting a series of regression trees. Each regression tree takes a sub-sample of the training data, and a sub sample of the independent variables provided for model fitting. The algorithm then determines the variable and variable split (e.g. vessel size and vessel size above 30ft) that provides the greatest explanatory power in estimating density of the "out of bag" samples (the part of the training data that were not included in the tree), and creates that as the first node. The next two nodes are selected in the same process, and so on and so forth, down to a specified tree depth tuned through the `caret` package. Each tree provides a high-variance estiamtor of densities. The random forest then averages over hundreds of trees to reduce this variance and provide an improved estimate of density as a function of provided covariates. The advantage of this approach is that it makes no assumptions about error distributions or linearity of parameters, and actively pushes back against over fitting by prioritizing out-of-sample prediction, and sub sampling of the provided independent variables (lots and lots of literature on this). 
+A random forest works by fitting a series of regression trees. Each regression tree takes a sub-sample of the training data, and a sub sample of the independent variables provided for model fitting. The algorithm then determines the variable and variable split (e.g. vessel size and vessel size above 30ft) that provides the greatest explanatory power in estimating density of the "out of bag" samples (the part of the training data that were not included in the tree), and creates that as the first node. The next two nodes are selected in the same process, and so on and so forth, down to a specified tree depth tuned through the `caret` package. Each tree provides a high-variance estimator of densities. The random forest then averages over hundreds of trees to reduce this variance and provide an improved estimate of density as a function of provided covariates. The advantage of this approach is that it makes no assumptions about error distributions or linearity of parameters, and actively pushes back against over fitting by prioritizing out-of-sample prediction, and sub sampling of the provided independent variables (lots and lots of literature on this). 
 
-The random forest allows us to clasify each variable by its "importance", a measure of the degree to which the fit of the model decreases when that variable is omitted from the model. The model estimates that distance from port and shore are the most important variables, along with "shore numbers", the interaction between distance from shore and number of vessels. Interestingly, total hours of fishing estimated by GFW were not particularly important. However, clearly many of these parameters are highly colinear and so the importance of some variables may be confounded, further work will be needed to improve variable selection. 
+The random forest allows us to classify each variable by its "importance", a measure of the degree to which the fit of the model decreases when that variable is omitted from the model. The model estimates that distance from port and shore are the most important variables, along with "shore numbers", the interaction between distance from shore and number of vessels. Interestingly, total hours of fishing estimated by GFW were not particularly important. However, clearly many of these parameters are highly colinear and so the importance of some variables may be confounded, further work will be needed to improve variable selection (Fig. \@ref(fig:var-imp)). 
 
 ```{r var-imp, fig.cap='Variable importance plot from model using random forest to predict density of Alaska pollock'}
 
@@ -185,14 +194,14 @@ varImpPlot(rf_model$finalModel)
 
 ```
 
-We can also construct partial dependence plots, which visualize the marginal effect of each independent variable. 
+We can also construct partial dependence plots, which visualize the marginal effect of each independent variable (Fig. \@ref(fig:partial-plot)). 
 
 ```{r partial-plot, fig.cap='Partial dependence plots of variables in random forest'}
 
 partial_foo <- function(variable) {
   
   eval(parse(text = paste0('a <- randomForest::partialPlot(rf_model$finalModel
-, skynet_sandbox$train[[1]] %>% as.data.frame() %>% remove_missing() %>% as.data.frame(),', variable,')')))
+, skynet_sandbox$train[[1]] %>% as.data.frame() %>% remove_missing() %>% as.data.frame(),', variable,', plot = F)')))
   
 
 }
@@ -222,27 +231,87 @@ As a counterbalance to the mysteries of the random forest algorithm, I also fit 
 
 The selected model was 
 
-```{r}
-summary(lm_model)
+```{r, results = 'asis'}
+
+stargazer::stargazer(lm_model)
+
 ```
 
 ## Structural 
 
-Lastly, I fit a structural model in the form of @Miller2016 to the data. The key assumption here is that fishermen have followed an ideal free distribution, and so marginal profits are equal across space and time. 
+Lastly, I fit a structural model in the form of @Miller2016 to the data. The key of this model assumption here is that fishermen conform to an ideal free distribution, and so marginal profits are equal across space and time, at the unit of year and "knot", each knot having an area of approximately 25km^2^. 
 
-Marginal profits are estimated as ...
+Following @Miller2016, we consider marginal profits per unit effort as being 
+
+$$ \pi_{y,k} = pCPUE_{y,k}e^{-qE_{y,k}} - c_{y,k}  $$
+
+where for year *y* at knot *k*, *p* is price, CPUE is the index of abundance prior to any fishing effort occurring (our index of abundance, *q* is catchability, *E* is effort, and *c* are variable costs). 
+
+@Miller2016 was primarily interested in estimating quota price aspects of *c*, taking as data *p*, *CPUE*, *E*, and other components of *c* (fuel, labor, ice, etc.). We are instead interested in estimating CPUE as a function of other variable, and so we can rearrange this equation as
+
+$$ CPUE_{y,k} = \frac{\pi_{y,k} + c_{y,k}}{pe^{-qE_{y,k}}}$$
+
+Similar to @Miller2016 we assume for now that $\pi_{y,k}$ is zero, though this is clearly not accurate given that the Alaska pollock fishery is a rationalized fishery (however, changing $\pi_{y,k}$ to positive values had little effect on the fit of the model). *p* is taken from @Melnychuk2016, and $E_{y,k}$ is observed from GFW. 
+
+That leaves *q* and *c* as unknown parameters. While we do not have the high resolution logbook data available to @Miller2016, we could certainly obtain data on fuel and labor prices for this model. However, at this time, I simply assume that $c_{y,k}$ is a function of the distance of a knot *k* from port, the mean vessel size used at knot *k* in year *y*, and the interaction of these terms (under the assumption that cost of large vessels increase with distance). 
+
+$$ c_{y,k} = \beta_{1}pd_{k} + \beta_{2}vs_{y,k} + \beta_{3}pd_{k}vs_{y,k} $$
+
+Where $pd_{k}$ is the distance from port of knot *k* and $vs_{y,k}$ is the mean vessel length observed fishing at knot *k* in year *y*. 
+
+We fit the model through maximum likelihood, per
+
+$$[q, \beta_{1}, \beta_{2},\beta_{3} | log(CPUE_{y,k}()] \propto normal(log(CPUE_{y,k}) | f(q, \beta_{1}, \beta_{2},\beta_{3} ),\sigma)$$
+
+Repeated initial values and a jittered while loop were used to ensure model convergence (though a full Bayesian implementation will improve on this at a later date). We could of course again include either informative priors on the $\beta$ parameters based on fuel and labor costs, or directly incorporate those data, but this provides a useful starting point. 
+
+```{r, eval = F}
+
+p <- 10
+cpue <- 100
+q <- .1
+effort <- 0:100
+cost <- 200
+
+mp <- p * cpue * exp(-q*effort) - cost
+
+plot(effort,mp)
+
+```
 
 # Results 
 
-## Local performance
+We can start with evaluating performance of the K-fold cross validation. Plotting observed densities (log CPUE) from the test data to values predicted for those densities, using the models trained on the training data, we see that the random forest model performs the best in terms of RMSE and R^2^. The linear model has a lower RMSE, though also a much R^2^ than the structural model (Fig. \@ref(fig:perf-plot), Fig. \@ref(fig:rmse-plot)). 
 
-## Other species in region
+```{r perf-plot, fig.cap='Observed vs predicted log CPUE for test data from models trained on training data'}
 
-## Other Regions
+performance_plot
+
+```
+
+```{r rmse-plot, fig.cap= 'RMSE and R2 of each model on test data'}
+rmse_plot
+```
+
+We can repeat the same exercise, but now comparing the performance of models trained on pre-2015 data and tested on 2015 data (Fig. \@ref(fig:time-perf-plot), Fig. \@ref(fig:time-rmse-plot))
+
+
+```{r time-perf-plot, fig.cap='Observed vs predicted log CPUE for test data (2015) from models trained on training data (pre 2015)'}
+time_performance_plot
+```
+
+```{r time-rmse-plot, fig.cap= 'RMSE and R2 of each model on test (2015) data'}
+time_rmse_plot
+```
 
 # Summary
 
+So far the GFW data show a limited but promising ability to predict CPUEs outside of sample (both through K-fold cross validation and through omission of the most recent data). 
 
+There is clearly a lot of work to be done from here, and I think that improvements in model fit can be achieved through rescaling of coefficients (e.g. we don't really care about absolute CPUE, but rather the trend). We will also need to explore the ability of the model to perform across different aggregations of fleets and species. The structural model can also be improved by integration of additional data on fuel and labor costs. 
 
+Early results suggest then that this idea isn't insane. The most rigorous approach then will be a careful development and comparison of machine learning and structural models. However so far the machine learning approach is in the front of the pack by a decent distance. 
+
+# Works Cited
 
 
