@@ -982,8 +982,98 @@ At this point, it's time to leave the labbook. All methods have methods to be fi
 
 
 
+# Check in the Steve
+
+Pull in chlorophyl, depth, and wind data
+
+Try also adding in the effort in the surrounding nodes
+
+Try it by joining to the effort instead of collapsing down
+
+See how influential past observed abundance actually is
 
 
+# 2017-06-17 Check in with Chris
 
+Agenda: 
 
+Thoughts on progress so far
 
+What's the best path forward
+
+Angles
+
+  - Machine learning focused, trends and distributions of density around the planet
+      - Species, climate, etc. 
+  
+  - Pursue structural approach
+  
+  - Model comparisons: Show performance of alternative models (machine learning vs structural)
+  
+  - Value of information
+      - Compare a catch only model to a "abundance only" model to RAM
+      - Simulation framework to think about "how off" can the index of abundance be in the final years to still be useful, scaled to error rates observed by model
+      - See how much fit improves comparing COM to a surplus production style model fit to paired catch and GFW data
+      
+  - Abandon ship
+
+# 2017-07 plan of attack
+
+OK, what needs to happen to make this project work. 
+
+The paper: 
+
+**A global assessment of distributions of fish abundance in space and time**
+
+What needs to happen?
+
+You need to decide on the model structure. 
+
+Performance of this model will be judged by the ability to predict observed abundances from FishData. 
+
+Pretty clear that you can ditch the strutural approach for the time being. 
+
+So, what steps need to go into making the machine learning approach work well. 
+
+One key question that you need to address is "what's the dependent variable". Is it all the fished species? Subsets by gear type? 
+
+So far you've been focusing on one species, which isn't really all that useful in practice. I propose two new approaches. 
+
+For all, let's focus on making it work for EBS, and then extend the framework for all areas. 
+
+## What species?
+
+### All fished species
+
+Filter out the abundance of fished species from FishData. Create a net abundance index which is the sum of the densities across species. 
+
+Fit the model to that. 
+
+### Creating species assemblages by gear type
+
+The idea here is to look at each of the gear type classifications available in GFW, and do a lit review on the either habitat or depth profile of that gear type. Then, use fishbase or something similar to classify the depth profile/habitat for each species in FishData. Then, generate, for each type of gear, an index of say "deep water demersals" "mid-water pelagics" for each species group. Then, train the model on that index, using the appropriate vessel grouping from GFW. 
+
+Another thing to deal with here is going to be 
+
+## What are we measuring
+
+With either species grouping, you then want to run the model once predicting absolute abundance, and another predicint "delta abundance", where that is the change in abundance in that space since the last year. 
+
+## CPUE
+
+This one is simpler, work with tyler to try and match catch to GFW, and create CPUE indicies. But, this would really only be at the country or LME level if you match to SAUP. 
+
+## Metrics
+
+Judegement will be passed on ability of the model to predict out of spatial sample, out of time sample, and out of species sample. The last one means, suppose that you fit the model on a subset of fished species, and now need to predict the abundance with another fished species that wasn't in your data in there, how well does it do. 
+
+You will test
+
+- Absolute abundance
+    - in space
+    - in time
+- Delta Abundance
+  - in space
+  - in time
+
+Your objective right now is to get to metrics. Specifically, compare performance of different models to achieve the above, and write up a summary of what works and what doesn't, and then see what you can do to improve the model. 

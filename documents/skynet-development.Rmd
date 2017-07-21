@@ -1,0 +1,190 @@
+---
+title: "Skynet Development"
+output: html_notebook
+---
+
+This is a sketchpad for developing the tools and code needed to evaluate project skynet. As much as possible, use functions to do all the critical steps that you will then call into use for the formal run script. Use this space to think outloud and examine/debug outputs of scripts. 
+
+# Load things
+
+```{r}
+set.seed(42)
+knitr::opts_chunk$set(message = F, warning = F)
+library(bigrquery)
+library(lubridate)
+library(tmap)
+library(leaflet)
+library(rgdal)
+library(FishData)
+library(ggmap)
+library(tidyverse)
+
+demons::load_functions('../functions')
+
+run_name <- 'testing'
+
+run_description <- 'development of full paper'
+
+run_dir <- file.path('../results', run_name, '')
+
+if (dir.exists(run_dir) == F) {
+  dir.create(run_dir)
+}
+
+write(run_description, file = paste0(run_dir, 'description.txt'))
+
+
+```
+
+# Build databases
+
+This section will be used to devlop functions to get Fishdata and GFW data, and compile the "final" databases that you will use. 
+
+## FishData
+
+Let's start with getting the FishData, since you'll use the locations from FishData to decide which places you want to aggregate and scrape from GFW. 
+
+Let's focus on getting the compelte database up and running now, so that the actual script can have an option to either load the compiled data from box, or to reload it from scratch. 
+
+`download_catch_rates` is the function you need from FishData, the only problem is that it's a little unclear what the potential list of surveys are. 
+
+Looking through FishData, seems like Alaska is really what you have available to you. SOAB. You're going to need some non-alaska places, but at least you also do have West Coast. There is also some irish data availabe in `download_datras`
+
+```{r}
+
+fishdata_names <- tribble(
+  ~survey, ~survey_name,
+  #--/--
+  'EBSBTS', 'eastern bering sea bottom trawl survey',
+  'WCGBTS','west coast groundfish bottom trawl survey',
+  'WCGHL', 'West_coast_groundfish_hook_and_line',
+  'GOABTS', 'gulf of alaska bottom trawl survey',
+  'AIBTS', 'aluetian islands bottom trawl survey'
+)
+
+```
+
+
+Note: the error_tol is a bit finicky. Somewhere in the missing zeros thing it's messing up the addition of new things by a few decimal places. Change to 1e-2 and that seems to do it, off by a few decimals, but not really a problem. 
+
+```{r, eval = F}
+
+fish.data <- fishdata_names %>% 
+  mutate(survey_data = map(survey, ~download_catch_rates(.x, species_set = 50,
+                           error_tol = 1e-2)))
+
+fish.data <- unnest(fish.data)
+  
+save(file = '../data/fish_data.Rdata', fish.data)
+  
+```
+
+OK, that gives you the data that you need across all the surveys. Now, you need to get the GFW data that fall under those coordinates.... This should be fun
+
+Let's make some plots just to check your data a bit
+
+
+```{r}
+load("../data/fish_data.Rdata")
+
+fish.maps <- fish.data %>% 
+    set_names(tolower(colnames(.))) %>% 
+  mutate(rlat = round(lat, 2),
+         rlon = round(long,2)) %>% 
+  group_by(survey, year, sci, rlat, rlon) %>% 
+  summarise(mean_density = mean(wt, na.rm = T)) %>% 
+  group_by(survey, year, rlat, rlon) %>% 
+  summarise(total_mean_density = sum(mean_density)) %>% 
+  na.omit()
+
+mapfoo <- function(dens){
+  
+  qmplot(
+  x = rlon,
+  y = rlat,
+  data = dens,
+  color = log(total_mean_density),
+  maptype = 'toner-lite',
+  source = 'google'
+) +
+  scale_color_viridis(guide = F) +
+  facet_wrap( ~ year) +
+  theme_classic() + 
+  labs(caption = 'Total Mean Species Density')
+  
+}
+
+
+a <- fish.maps %>% 
+  ungroup() %>% 
+  filter(rlon < 0,year >=2012) %>% 
+  nest(-survey, .key = densities) %>% 
+  mutate(density_map = map_plot(densities, mapfoo))
+
+trelliscope(a, name = 'blah', panel_col = 'density_map', self_contained = F)
+  
+  
+
+```
+
+Great, that all looks good (finally), though there is something a little off with the AIBTS data on the other side of the international date line... should examine that a little later. 
+
+## GFW data
+
+Now what you need are the bounding boxes for each of the regions, to provide a bit of constraint to your GFW queries. 
+
+```{r}
+
+fish.data %>% 
+  filter(Long <0) %>% 
+  group_by(survey) %>% 
+  summarise(min_lat = min(Lat, na.rm = T),
+            max_lat = max(Lat, na.rm = T),
+            min_lon = min(Long, na.rm = T),
+            max_lon = max(Long, na.rm = T))
+
+```
+
+OK I went into google bigquery and set up a series of queries that produce tables of the form *<survey>_gfw*, and saved them under the skynet project in our bigquery account. Let's try and grab those things now. 
+
+```{r}
+
+survey_names <- paste0(fishdata_names$survey %>% tolower(),'_gfw')
+
+gfw.data <- data_frame(survey = survey_names)
+
+project <- "ucsb-gfw"
+
+fishing_connection <- DBI::dbConnect(bigrquery::dbi_driver(),
+                         project = project,
+                         dataset = 'skynet')
+
+gfw.data <- gfw.data %>% 
+  mutate(gfw.data = map(survey, ~fishing_connection %>%
+  tbl(.x) %>%
+  collect(n = Inf)
+))
+
+save(file = '../data/gfw_data.Rdata', gfw.data)
+
+
+
+```
+
+
+
+# Fit Models
+
+Fit a series of models on the data at different aggregation levels
+
+# Diagnose models
+
+
+
+
+
+
+
+
+
+

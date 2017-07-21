@@ -272,6 +272,10 @@ project <- "ucsb-gfw"
 fishing_connection <-
   src_bigquery(project, "skynet") # This function initiliazes a connection with a BQ dataset
 
+fishing_connection <- DBI::dbConnect(bigrquery::dbi_driver(),
+                         project = project,
+                         dataset = 'skynet')
+
 
 ebs_raw <- fishing_connection %>%
   tbl("ebs_w_vessels") %>%
@@ -335,6 +339,7 @@ knot_pairing_plot <- ebs %>%
     show.legend = F
   )
 
+#
 trawl_fishing_by_knot <- ebs %>%
   filter(best_label == 'trawlers',
          distance <= quantile(ebs$distance, 0.75)) %>%
@@ -348,6 +353,22 @@ trawl_fishing_by_knot <- ebs %>%
     dist_from_port = mean(mean_distance_from_port, na.rm = T),
     mean_vessel_length = mean(inferred_length, na.rm = T)
   )
+
+trawl_fishing_by_knot <- ebs %>%
+  filter(best_label == 'trawlers',
+         distance <= quantile(ebs$distance, 0.75)) %>%
+  dplyr::rename(th = total_hours) %>%
+  group_by(year, rounded_lat, rounded_lon) %>%
+  dplyr::summarise(
+    knot = unique(knot),
+    total_hours = sum(th, na.rm = T),
+    total_engine_hours = sum(th * inferred_engine_power, na.rm = T),
+    num_vessels = length(unique(mmsi)),
+    dist_from_shore = mean(mean_distance_from_shore, na.rm = T),
+    dist_from_port = mean(mean_distance_from_port, na.rm = T),
+    mean_vessel_length = mean(inferred_length, na.rm = T)
+  )
+
 
 skynet_data <- trawl_fishing_by_knot %>%
   left_join(ebs_species_densities, by = c('year', 'knot')) %>%
@@ -379,6 +400,40 @@ skynet_data <- trawl_fishing_by_knot %>%
   filter(total_engine_hours > 0,
          density > 0,
          is.na(density) == F) #fix this later, need to include zeros
+
+
+skynet_data <- trawl_fishing_by_knot %>%
+  left_join(ebs_species_densities, by = c('year', 'knot')) %>%
+  ungroup() %>%
+  mutate(vessel_hours = total_engine_hours * num_vessels) %>%
+  group_by(rounded_lat, rounded_lon) %>%
+  arrange(year) %>%
+  mutate(
+    total_engine_hours_lag1 = lag(total_engine_hours, 1),
+    total_engine_hours_lag2 = lag(total_engine_hours, 2),
+    total_engine_hours_lag3 = lag(total_engine_hours, 3),
+    port_engine_hours = dist_from_port * total_engine_hours,
+    port_hours = dist_from_port * total_hours,
+    port_numbers = dist_from_port * num_vessels,
+    shore_numbers = dist_from_shore * num_vessels,
+    shore_hours = dist_from_shore * total_hours,
+    shore_engine_hours = dist_from_shore * total_engine_hours,
+    large_vessels = num_vessels * mean_vessel_length
+  ) %>%
+  ungroup() %>% {
+    if (log_space == F) {
+      mutate(., density = exp(density))
+    } else {
+      .
+    }
+
+  } %>%
+  # mutate(density = lag(density, 1)) %>%
+  filter(total_engine_hours > 0,
+         density > 0,
+         is.na(density) == F) #fix this later, need to include zeros
+
+
 
 
 # prepare training data ---------------------------------------------------
