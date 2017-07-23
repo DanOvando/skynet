@@ -18,8 +18,12 @@ library(rgdal)
 library(FishData)
 library(ggmap)
 library(tidyverse)
+library(stringr)
+library(viridis)
+library(purrr)
+library(trelliscopejs)
 
-demons::load_functions('../functions')
+# demons::load_functions('../functions')
 
 run_name <- 'testing'
 
@@ -135,21 +139,26 @@ Now what you need are the bounding boxes for each of the regions, to provide a b
 
 ```{r}
 
-fish.data %>% 
+survey.bbox <- fish.data %>% 
   filter(Long <0) %>% 
   group_by(survey) %>% 
-  summarise(min_lat = min(Lat, na.rm = T),
+  summarise(min_year = min(Year, na.rm = T),
+            max_year = max(Year, na.rm = T),
+            min_lat = min(Lat, na.rm = T),
             max_lat = max(Lat, na.rm = T),
             min_lon = min(Long, na.rm = T),
             max_lon = max(Long, na.rm = T))
+
+survey.bbox
+
+survey_names <- paste0(fishdata_names$survey %>% tolower(),'_gfw')
 
 ```
 
 OK I went into google bigquery and set up a series of queries that produce tables of the form *<survey>_gfw*, and saved them under the skynet project in our bigquery account. Let's try and grab those things now. 
 
-```{r}
+```{r, eval = F}
 
-survey_names <- paste0(fishdata_names$survey %>% tolower(),'_gfw')
 
 gfw.data <- data_frame(survey = survey_names)
 
@@ -162,11 +171,142 @@ fishing_connection <- DBI::dbConnect(bigrquery::dbi_driver(),
 gfw.data <- gfw.data %>% 
   mutate(gfw.data = map(survey, ~fishing_connection %>%
   tbl(.x) %>%
-  collect(n = Inf)
+  collect(n = Inf) %>%
+  select(-b_mmsi,-b_year) %>%
+  set_names(str_replace_all(colnames(.), '(a_)|(b_)', '')) %>%
+  filter(is.na(on_fishing_list_nn) == F) %>%
+  arrange(year, mmsi)
+
 ))
 
 save(file = '../data/gfw_data.Rdata', gfw.data)
 
+```
+
+
+Examining the data a bit to make sure that there's some rhyme and reason to the data
+
+```{r}
+
+load(file = '../data/gfw_data.Rdata')
+
+gfw_plot_foo <- function(dat){
+  
+  mapdat <- dat %>% 
+    group_by(year, rounded_lat, rounded_lon) %>% 
+    summarise(fishing_hours = sum(total_hours, na.rm = T)) %>% 
+    ungroup() %>% 
+    rename(rlon = rounded_lon, rlat = rounded_lat)
+
+  
+   qmplot(
+  x = rlon,
+  y = rlat,
+  data = mapdat,
+  color = log(fishing_hours),
+  maptype = 'toner-lite',
+  source = 'google'
+) +
+  scale_color_viridis(guide = F) +
+  facet_wrap( ~ year) +
+  theme_classic() + 
+  labs(caption = 'Total Fishing Hours')
+  
+  
+}
+
+gfw.data <- gfw.data %>% 
+  mutate(plots = map_plot(gfw.data, gfw_plot_foo))
+
+
+trelliscope(
+  gfw.data,
+  name = 'blah',
+  panel_col = 'plots',
+  self_contained = F
+  )
+  
+
+```
+
+Ok, working the 0.25 degree unit seems to work nicely. Those GFW data are saved. 
+
+## SST
+
+
+
+```{r, eval = F}
+
+query_erdap <- function(bbox, years = 2012:2016,
+                        variable = 'Chl-a'){
+  
+ erdap.enviro <- download_ERDDAP(Lat_bounds = c(min = floor(bbox$min_lat), max = ceiling(bbox$max_lat)), Lon_bounds = c(min =
+  floor(bbox$min_lon), max = floor(bbox$max_lon)), Date_bounds = c(min = "06-01", max = "10-01"),
+  Year_set = years, Variable = variable, by = c(Lat = 1, Lon = 1, Day = 1))
+ 
+ # download_ERDDAP(Lat_bounds = c(min = 53, max = 66), Lon_bounds = c(min =
+ #  -180, max = -157), Date_bounds = c(min = "06-01", max = "10-01"),
+ #  Year_set = 2009, Variable = "Chl-a", by = c(Lat = 1, Lon = 1, Day = 1))
+
+
+  
+}
+
+chl.data <- survey.bbox %>% 
+  slice(1) %>% 
+  mutate(sst = pmap(list(min_year = pmax(2012,min_year), 
+                         max_year = max_year,
+                         min_lat = min_lat,
+                         max_lat = max_lat, 
+                         min_lon = min_lon,
+                         max_lon = max_lon
+                         ), query_erddap))
+
+chl.data$sst[[1]] %>% View()
+
+
+chl_plot_foo <- function(dat){
+
+
+   qmplot(
+  x = rlon,
+  y = rlat,
+  data = dat,
+  color = log(mean_analysed_sst),
+  maptype = 'toner-lite',
+  source = 'google'
+) +
+  scale_color_viridis(guide = F) +
+  facet_wrap( ~ year) +
+  theme_classic() + 
+  labs(caption = 'SST(c)')
+  
+  
+}
+
+chl.data <-  chl.data %>% 
+  mutate(plots = map_plot(sst, chl_plot_foo))
+  
+trelliscope(
+  chl.data,
+  name = 'blah',
+  panel_col = 'plots',
+  self_contained = F
+  )
+  
+chl.data$sst[[1]] %>% 
+  group_by(year) %>% 
+  mutate(mt = mean(mean_analysed_sst)) %>% 
+  ggplot(aes(x = mean_analysed_sst, y = factor(year), group = factor(year), fill = (mt))) + 
+  geom_joy() + 
+  labs(c = 'Degrees C') +
+  scale_fill_viridis(option = 'C', name = 'Mean Temperature (C)') + 
+  hrbrthemes::theme_ipsum()
+
+
+
+
+save(file = '../data/bad_chl_data', chl.data)
 
 
 ```
