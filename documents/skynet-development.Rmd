@@ -252,18 +252,17 @@ query_erdap <- function(bbox, years = 2012:2016,
   
 }
 
-chl.data <- survey.bbox %>% 
-  slice(1) %>% 
-  mutate(sst = pmap(list(min_year = pmax(2012,min_year), 
+chl_data <- survey.bbox %>% 
+  mutate(chl_a = pmap(list(min_year = pmax(2012,min_year), 
                          max_year = max_year,
                          min_lat = min_lat,
                          max_lat = max_lat, 
                          min_lon = min_lon,
                          max_lon = max_lon
-                         ), query_erddap))
-
-chl.data$sst[[1]] %>% View()
-
+                         ), query_erddap,
+                    desired_data = 'chl-a',
+                    date_interval = 1,
+                    space_interval = 1))
 
 chl_plot_foo <- function(dat){
 
@@ -272,7 +271,7 @@ chl_plot_foo <- function(dat){
   x = rlon,
   y = rlat,
   data = dat,
-  color = log(mean_analysed_sst),
+  color = log(mean_chlorophyll),
   maptype = 'toner-lite',
   source = 'google'
 ) +
@@ -284,32 +283,37 @@ chl_plot_foo <- function(dat){
   
 }
 
-chl.data <-  chl.data %>% 
-  mutate(plots = map_plot(sst, chl_plot_foo))
+chl_data <-  chl_data %>% 
+  mutate(plots = map_plot(chl_a, chl_plot_foo))
   
 trelliscope(
-  chl.data,
+  chl_data,
   name = 'blah',
   panel_col = 'plots',
   self_contained = F
   )
   
-chl.data$sst[[1]] %>% 
-  group_by(year) %>% 
-  mutate(mt = mean(mean_analysed_sst)) %>% 
-  ggplot(aes(x = mean_analysed_sst, y = factor(year), group = factor(year), fill = (mt))) + 
-  geom_joy() + 
-  labs(c = 'Degrees C') +
-  scale_fill_viridis(option = 'C', name = 'Mean Temperature (C)') + 
-  hrbrthemes::theme_ipsum()
 
 
-
-
-save(file = '../data/bad_chl_data', chl.data)
+save(file = '../data/chl_data.Rdata', chl_data)
 
 
 ```
+and sst
+```{r}
+sst_data <- survey.bbox %>% 
+  mutate(sst = pmap(list(min_year = pmax(2012,min_year), 
+                         max_year = max_year,
+                         min_lat = min_lat,
+                         max_lat = max_lat, 
+                         min_lon = min_lon,
+                         max_lon = max_lon
+                         ), query_erddap,
+                    desired_data = 'sst',
+                    date_interval = 14,
+                    space_interval = 1))
+```
+
 
 
 
