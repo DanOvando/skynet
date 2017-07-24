@@ -83,9 +83,46 @@ query_erddap <- function(desired_data = 'sst',
       )
 
   }
+  if (desired_data == 'waves'){
+
+
+    year_query <-
+      paste0('[(',
+             min_year,
+             '-01-01):',
+             date_interval,
+             ':(',
+             max_year,
+             '-12-31)]')
+
+    lat_query <-
+      paste0('[(', min_lat, '):', space_interval, ':(', max_lat, ')]') # for some unholy reason the lats go in reverse for this database
+
+    lon_query <-
+      paste0('[(', 360 + min_lon, '):', space_interval, ':(', 360+max_lon, ')]')
+
+    depth_query <- '[(0):1:(0.0)]'
+
+    query <- paste0(year_query,depth_query, lat_query, lon_query)
+
+    dat <-
+      jsonlite::fromJSON(
+        paste0(
+          'https://coastwatch.pfeg.noaa.gov/erddap/griddap/NWW3_Global_Best.json?Thgt',
+          query
+        )
+
+        ,
+        flatten = T
+      )
+
+
+
+  }
+
   datnames <- dat$table$columnNames
 
-  date_cols <- which(dat$table$columnUnits == 'UTC')
+  date_cols <- which(dat$table$columnUnits == 'UTC' | dat$table$columnUnits == 'time')
 
   other_cols <- which(dat$table$columnUnits != 'UTC')
 
@@ -97,6 +134,12 @@ query_erddap <- function(desired_data = 'sst',
     as_data_frame() %>%
     map_at(other_cols, as.numeric) %>%
     as_data_frame()
+
+  if (desired_data == 'waves'){
+
+    tidy_dat$longitude <-  tidy_dat$longitude - 360
+
+  }
 
   tidy_dat <- tidy_dat %>%
     mutate(

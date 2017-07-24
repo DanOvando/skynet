@@ -1,6 +1,6 @@
 ---
 title: "Skynet Development"
-output: html_notebook
+output: html_document
 ---
 
 This is a sketchpad for developing the tools and code needed to evaluate project skynet. As much as possible, use functions to do all the critical steps that you will then call into use for the formal run script. Use this space to think outloud and examine/debug outputs of scripts. 
@@ -23,7 +23,7 @@ library(viridis)
 library(purrr)
 library(trelliscopejs)
 
-# demons::load_functions('../functions')
+demons::load_functions('../functions')
 
 run_name <- 'testing'
 
@@ -43,6 +43,15 @@ write(run_description, file = paste0(run_dir, 'description.txt'))
 # Build databases
 
 This section will be used to devlop functions to get Fishdata and GFW data, and compile the "final" databases that you will use. 
+
+Let's talk resolution for a moment here. For everything except FishData, you can specify the lat-lon resolution. So, to make life a little easier from the get-go, let's make this variable and pass that along the queries to make sure that they are all in the same units. 
+
+```{r}
+
+lat_lon_res <- 0.25 # round data to intervels of 0.25 degrees lat lon, as in 56.25
+
+```
+
 
 ## FishData
 
@@ -73,13 +82,13 @@ Note: the error_tol is a bit finicky. Somewhere in the missing zeros thing it's 
 
 ```{r, eval = F}
 
-fish.data <- fishdata_names %>% 
+fish_data <- fishdata_names %>% 
   mutate(survey_data = map(survey, ~download_catch_rates(.x, species_set = 50,
                            error_tol = 1e-2)))
 
-fish.data <- unnest(fish.data)
+fish_data <- unnest(fish_data)
   
-save(file = '../data/fish_data.Rdata', fish.data)
+save(file = '../data/fish_data.Rdata', fish_data)
   
 ```
 
@@ -91,10 +100,10 @@ Let's make some plots just to check your data a bit
 ```{r}
 load("../data/fish_data.Rdata")
 
-fish.maps <- fish.data %>% 
+fish_maps <- fish_data %>% 
     set_names(tolower(colnames(.))) %>% 
-  mutate(rlat = round(lat, 2),
-         rlon = round(long,2)) %>% 
+  mutate(rlat = round(lat * (1/lat_lon_res)) / ((1/lat_lon_res)),
+         rlon = round(long * (1/lat_lon_res)) / ((1/lat_lon_res))) %>% 
   group_by(survey, year, sci, rlat, rlon) %>% 
   summarise(mean_density = mean(wt, na.rm = T)) %>% 
   group_by(survey, year, rlat, rlon) %>% 
@@ -119,7 +128,7 @@ mapfoo <- function(dens){
 }
 
 
-a <- fish.maps %>% 
+a <- fish_maps %>% 
   ungroup() %>% 
   filter(rlon < 0,year >=2012) %>% 
   nest(-survey, .key = densities) %>% 
@@ -127,7 +136,10 @@ a <- fish.maps %>%
 
 trelliscope(a, name = 'blah', panel_col = 'density_map', self_contained = F)
   
-  
+#   
+# quick_map(dat = dat, lat_var = quo(rlat), lon_var = quo(rlon),
+#           plot_var = quo(total_mean_density),facet_var = quo(year))
+
 
 ```
 
@@ -139,7 +151,7 @@ Now what you need are the bounding boxes for each of the regions, to provide a b
 
 ```{r}
 
-survey.bbox <- fish.data %>% 
+survey_bbox <- fish_data %>% 
   filter(Long <0) %>% 
   group_by(survey) %>% 
   summarise(min_year = min(Year, na.rm = T),
@@ -149,7 +161,7 @@ survey.bbox <- fish.data %>%
             min_lon = min(Long, na.rm = T),
             max_lon = max(Long, na.rm = T))
 
-survey.bbox
+survey_bbox
 
 survey_names <- paste0(fishdata_names$survey %>% tolower(),'_gfw')
 
@@ -160,7 +172,7 @@ OK I went into google bigquery and set up a series of queries that produce table
 ```{r, eval = F}
 
 
-gfw.data <- data_frame(survey = survey_names)
+gfw_data <- data_frame(survey = survey_names)
 
 project <- "ucsb-gfw"
 
@@ -168,8 +180,8 @@ fishing_connection <- DBI::dbConnect(bigrquery::dbi_driver(),
                          project = project,
                          dataset = 'skynet')
 
-gfw.data <- gfw.data %>% 
-  mutate(gfw.data = map(survey, ~fishing_connection %>%
+gfw_data <- gfw_data %>% 
+  mutate(gfw_data = map(survey, ~fishing_connection %>%
   tbl(.x) %>%
   collect(n = Inf) %>%
   select(-b_mmsi,-b_year) %>%
@@ -179,10 +191,9 @@ gfw.data <- gfw.data %>%
 
 ))
 
-save(file = '../data/gfw_data.Rdata', gfw.data)
+save(file = '../data/gfw_data.Rdata', gfw_data)
 
 ```
-
 
 Examining the data a bit to make sure that there's some rhyme and reason to the data
 
@@ -215,7 +226,7 @@ gfw_plot_foo <- function(dat){
   
 }
 
-gfw.data <- gfw.data %>% 
+gfw_data <- gfw_data %>% 
   mutate(plots = map_plot(gfw.data, gfw_plot_foo))
 
 
@@ -231,28 +242,15 @@ trelliscope(
 
 Ok, working the 0.25 degree unit seems to work nicely. Those GFW data are saved. 
 
-## SST
+At some point though you'll need to make a more intelligent decision about the spatial scale that you want to aggregate things to
+
+## CHL-A
 
 
 
 ```{r, eval = F}
 
-query_erdap <- function(bbox, years = 2012:2016,
-                        variable = 'Chl-a'){
-  
- erdap.enviro <- download_ERDDAP(Lat_bounds = c(min = floor(bbox$min_lat), max = ceiling(bbox$max_lat)), Lon_bounds = c(min =
-  floor(bbox$min_lon), max = floor(bbox$max_lon)), Date_bounds = c(min = "06-01", max = "10-01"),
-  Year_set = years, Variable = variable, by = c(Lat = 1, Lon = 1, Day = 1))
- 
- # download_ERDDAP(Lat_bounds = c(min = 53, max = 66), Lon_bounds = c(min =
- #  -180, max = -157), Date_bounds = c(min = "06-01", max = "10-01"),
- #  Year_set = 2009, Variable = "Chl-a", by = c(Lat = 1, Lon = 1, Day = 1))
-
-
-  
-}
-
-chl_data <- survey.bbox %>% 
+chl_data <- survey_bbox %>% 
   mutate(chl_a = pmap(list(min_year = pmax(2012,min_year), 
                          max_year = max_year,
                          min_lat = min_lat,
@@ -262,7 +260,8 @@ chl_data <- survey.bbox %>%
                          ), query_erddap,
                     desired_data = 'chl-a',
                     date_interval = 1,
-                    space_interval = 1))
+                    space_interval = 1,
+                    runit = lat_lon_res))
 
 chl_plot_foo <- function(dat){
 
@@ -293,15 +292,16 @@ trelliscope(
   self_contained = F
   )
   
-
-
 save(file = '../data/chl_data.Rdata', chl_data)
 
 
 ```
+
+## And SST
+
 and sst
 ```{r}
-sst_data <- survey.bbox %>% 
+sst_data <- survey_bbox %>% 
   mutate(sst = pmap(list(min_year = pmax(2012,min_year), 
                          max_year = max_year,
                          min_lat = min_lat,
@@ -311,10 +311,124 @@ sst_data <- survey.bbox %>%
                          ), query_erddap,
                     desired_data = 'sst',
                     date_interval = 14,
-                    space_interval = 1))
+                    space_interval = 25,
+                    runit = lat_lon_res))
+
+sst_plot_foo <- function(dat){
+
+
+   qmplot(
+  x = rlon,
+  y = rlat,
+  data = dat,
+  color = log(mean_analysed_sst),
+  maptype = 'toner-lite',
+  source = 'google'
+) +
+  scale_color_viridis(guide = F) +
+  facet_wrap( ~ year) +
+  theme_classic() + 
+  labs(caption = 'SST(c)')
+  
+  
+}
+
+sst_data <-  sst_data %>% 
+  mutate(plots = map_plot(sst, sst_plot_foo))
+  
+trelliscope(
+  sst_data,
+  name = 'blah',
+  panel_col = 'plots',
+  self_contained = F
+  )
+
+save(file = '../data/sst_data.Rdata', sst_data)
+
 ```
 
 
+## MPA coverage
+
+You can get this in GFW from the "regions" column, which you'll need to generate into your data. You can use a regex that Juan sent you in slack to parse out the MPA coverage
+
+here's the regex
+
+LEFT(REGEXP_EXTRACT(regions,‘\“(fao:.*?)\“‘),INSTR(REGEXP_EXTRACT(regions,‘\“(fao:.*?)\“‘),“.”)-1),REGEXP_EXTRACT(regions,‘\“(fao:.*?)\“‘)), ‘[^0-9 ]‘,’‘))
+
+but instead of FAO, sub in mparu (restricted use) mpant (no take)
+
+lookup tables live in region_ids in the UCSB thing. You've already included mparu and mpant as variables in the GFW data, let's get the lookup table here
+
+```{r}
+
+
+project <- "ucsb-gfw"
+
+mpa_ids <- data_frame(mpa_type = c('no_take_mpas_id', 'restricted_use_mpas_id'))
+
+fishing_connection <- DBI::dbConnect(bigrquery::dbi_driver(),
+                         project = project,
+                         dataset = 'regions_ids')
+
+mpa_ids <- mpa_ids %>% 
+  mutate(data = map(mpa_type, ~fishing_connection %>%
+  tbl(.x) %>%
+  collect(n = Inf))) %>% 
+  unnest()
+
+mpa_ids <- mpa_ids %>% 
+  mutate(mpa_type = str_split(region_id, ':', simplify = T)[,1],
+         mpa_id = str_split(region_id, ':', simplify = T)[,2])
+
+save(file = '../data/mpa_ids.Rdata', mpa_ids)
+
+```
+
+
+
+## Waves
+
+NWW3_Global_Best
+```{r}
+
+wave_data <- survey_bbox %>% 
+  mutate(wave_height = pmap(list(min_year = pmax(2012,min_year), 
+                         max_year = max_year,
+                         min_lat = min_lat,
+                         max_lat = max_lat, 
+                         min_lon = min_lon,
+                         max_lon = max_lon
+                         ), query_erddap,
+                    desired_data = 'waves',
+                    date_interval = 24*14, #1 hour interval
+                    space_interval = 0.5,
+                    runit = lat_lon_res))
+
+
+wave_data <- wave_data %>% 
+  mutate(plots = map_plot(wave_height, ~quick_map(.x, lat_var = quo(rlat), 
+                                                 lon_var = quo(rlon),
+                                                 plot_var = quo(mean_Thgt),
+                                                 facet_var = quo(year))))
+
+
+trelliscope(
+  wave_data,
+  name = 'blah',
+  panel_col = 'plots',
+  self_contained = F
+  )
+
+
+
+```
+
+## Wind
+
+erdQAwind14day
+
+## Bathymetry
 
 
 # Fit Models
