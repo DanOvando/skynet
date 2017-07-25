@@ -120,6 +120,76 @@ query_erddap <- function(desired_data = 'sst',
 
   }
 
+  if (desired_data == 'wind'){
+
+    year_query <-
+      paste0('[(',
+             min_year,
+             '-01-01):',
+             date_interval,
+             ':(',
+             max_year,
+             '-12-31)]')
+
+    altitude_query <- '[(10.0):1:(10.0)]'
+
+    lat_query <-
+      paste0('[(', min_lat, '):', space_interval, ':(', max_lat, ')]')
+
+    lon_query <-
+      paste0('[(', min_lon, '):', space_interval, ':(', max_lon, ')]')
+
+    query <- paste0(year_query, altitude_query, lat_query, lon_query)
+
+    dat <-
+      jsonlite::fromJSON(
+        paste0(
+          'https://coastwatch.pfeg.noaa.gov/erddap/griddap/erdQAwindmday_LonPM180.json?x_wind',
+          query,',y_wind',query
+        ),
+        flatten = T
+      )
+
+
+    # https://coastwatch.pfeg.noaa.gov/erddap/griddap/erdQAwindmday_LonPM180.htmlTable?x_wind[(2017-06-16T00:00:00Z):1:(2017-06-16T00:00:00Z)][(10.0):1:(10.0)][(-75.0):1:(75.0)][(-180.0):1:(179.75)],y_wind[(2017-06-16T00:00:00Z):1:(2017-06-16T00:00:00Z)][(10.0):1:(10.0)][(-75.0):1:(75.0)][(-180.0):1:(179.75)]
+
+  }
+
+  if (desired_data == 'topography'){
+
+    # https://coastwatch.pfeg.noaa.gov/erddap/griddap/etopo180.htmlTable?altitude[(-90.0):1:(90.0)][(-180.0):1:(180.0)]
+
+    year_query <-
+      paste0('[(',
+             min_year,
+             '-01-01):',
+             date_interval,
+             ':(',
+             max_year,
+             '-12-31)]')
+
+    lat_query <-
+      paste0('[(', min_lat, '):', space_interval, ':(', max_lat, ')]') # for some unholy reason the lats go in reverse for this database
+
+    lon_query <-
+      paste0('[(',min_lon, '):', space_interval, ':(',max_lon, ')]')
+
+    query <- paste0(year_query, lat_query, lon_query)
+
+    dat <-
+      jsonlite::fromJSON(
+        paste0(
+          'https://coastwatch.pfeg.noaa.gov/erddap/griddap/etopo180.json?altitude',
+          query
+        )
+
+        ,
+        flatten = T
+      )
+
+
+  }
+
   datnames <- dat$table$columnNames
 
   date_cols <- which(dat$table$columnUnits == 'UTC' | dat$table$columnUnits == 'time')
@@ -134,6 +204,7 @@ query_erddap <- function(desired_data = 'sst',
     as_data_frame() %>%
     map_at(other_cols, as.numeric) %>%
     as_data_frame()
+
 
   if (desired_data == 'waves'){
 
@@ -155,8 +226,27 @@ query_erddap <- function(desired_data = 'sst',
 
   var_name_units <- paste0(var_name, '_units')
 
+  group_vars <- c(quo(year), quo(rlat), quo(rlon))
+
+  if (desired_data == 'wind'){
+
+    var_name = 'wind_speed'
+
+    tidy_dat <-  tidy_dat %>%
+      gather('wind_direction','wind_speed', contains('_wind'))
+
+    var <- last(colnames(tidy_dat))
+
+    var_name <- paste0('mean_', var)
+
+    var_name_units <- paste0(var_name, '_units')
+
+    group_vars <- c(quo(year), quo(rlat), quo(rlon), quo(wind_direction))
+
+  }
+
   agg_dat <- tidy_dat %>%
-    group_by(year, rlat, rlon) %>%
+    group_by(!!!group_vars) %>%
     summarise(!!var_name := mean(!!!rlang::parse_exprs(var), na.rm = T)) %>%
     mutate(!!var_name_units := last(dat$table$columnUnits))
 

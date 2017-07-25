@@ -422,11 +422,62 @@ trelliscope(
 
 
 
+save(file = '../data/wave_data.Rdata', wave_data)
+
+
 ```
 
 ## Wind
 
-erdQAwind14day
+
+```{r}
+wind_data <- survey_bbox %>% 
+  mutate(wind_speed = pmap(list(min_year = pmax(2012,min_year), 
+                         max_year = max_year,
+                         min_lat = min_lat,
+                         max_lat = max_lat, 
+                         min_lon = min_lon,
+                         max_lon = max_lon
+                         ), query_erddap,
+                    desired_data = 'wind',
+                    date_interval = 1, #1 hour interval
+                    space_interval = 1,
+                    runit = lat_lon_res))
+
+
+wind_data <- wind_data %>%
+  mutate(wind_vectors = map(
+  wind_speed, ~ .x %>%
+  spread(wind_direction, mean_wind_speed) %>%
+  mutate(wind_vector = map2(
+  x_wind, y_wind, ~ vectorize_wind(x_wind = .x, y_wind = .y)
+  ),
+  wind_speed = map_dbl(wind_vector,"wind_speed"),
+  wind_angle = map_dbl(wind_vector,"wind_angle")) %>% 
+    select(-wind_vector, -x_wind, -y_wind)
+  )) %>% 
+  select(-wind_speed)
+         
+
+
+wind_data <- wind_data %>% 
+  mutate(plots = map_plot(wind_vectors, ~quick_map(.x, lat_var = quo(rlat), 
+                                                 lon_var = quo(rlon),
+                                                 plot_var = quo(wind_speed),
+                                                 facet_var = quo(year))))
+
+
+trelliscope(
+  wind_data,
+  name = 'blah',
+  panel_col = 'plots',
+  self_contained = F
+  )
+
+
+save(file = '../data/wind_data.Rdata', wind_data)
+
+```
 
 ## Bathymetry
 
