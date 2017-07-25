@@ -479,7 +479,45 @@ save(file = '../data/wind_data.Rdata', wind_data)
 
 ```
 
-## Bathymetry
+## Topography
+
+
+```{r}
+
+topo_data <- survey_bbox %>% 
+  mutate(wave_height = pmap(list(min_year = pmax(2012,min_year), 
+                         max_year = max_year,
+                         min_lat = min_lat,
+                         max_lat = max_lat, 
+                         min_lon = min_lon,
+                         max_lon = max_lon
+                         ), query_erddap,
+                    desired_data = 'topography',
+                    date_interval = 24*14, #1 hour interval
+                    space_interval = 0.5,
+                    runit = lat_lon_res))
+
+
+wave_data <- wave_data %>% 
+  mutate(plots = map_plot(wave_height, ~quick_map(.x, lat_var = quo(rlat), 
+                                                 lon_var = quo(rlon),
+                                                 plot_var = quo(mean_Thgt),
+                                                 facet_var = quo(year))))
+
+
+trelliscope(
+  wave_data,
+  name = 'blah',
+  panel_col = 'plots',
+  self_contained = F
+  )
+
+
+
+save(file = '../data/wave_data.Rdata', wave_data)
+
+
+```
 
 
 # Fit Models

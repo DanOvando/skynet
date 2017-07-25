@@ -83,9 +83,7 @@ query_erddap <- function(desired_data = 'sst',
       )
 
   }
-  if (desired_data == 'waves'){
-
-
+  if (desired_data == 'waves') {
     year_query <-
       paste0('[(',
              min_year,
@@ -99,11 +97,17 @@ query_erddap <- function(desired_data = 'sst',
       paste0('[(', min_lat, '):', space_interval, ':(', max_lat, ')]') # for some unholy reason the lats go in reverse for this database
 
     lon_query <-
-      paste0('[(', 360 + min_lon, '):', space_interval, ':(', 360+max_lon, ')]')
+      paste0('[(',
+             360 + min_lon,
+             '):',
+             space_interval,
+             ':(',
+             360 + max_lon,
+             ')]')
 
     depth_query <- '[(0):1:(0.0)]'
 
-    query <- paste0(year_query,depth_query, lat_query, lon_query)
+    query <- paste0(year_query, depth_query, lat_query, lon_query)
 
     dat <-
       jsonlite::fromJSON(
@@ -120,8 +124,7 @@ query_erddap <- function(desired_data = 'sst',
 
   }
 
-  if (desired_data == 'wind'){
-
+  if (desired_data == 'wind') {
     year_query <-
       paste0('[(',
              min_year,
@@ -139,13 +142,16 @@ query_erddap <- function(desired_data = 'sst',
     lon_query <-
       paste0('[(', min_lon, '):', space_interval, ':(', max_lon, ')]')
 
-    query <- paste0(year_query, altitude_query, lat_query, lon_query)
+    query <-
+      paste0(year_query, altitude_query, lat_query, lon_query)
 
     dat <-
       jsonlite::fromJSON(
         paste0(
           'https://coastwatch.pfeg.noaa.gov/erddap/griddap/erdQAwindmday_LonPM180.json?x_wind',
-          query,',y_wind',query
+          query,
+          ',y_wind',
+          query
         ),
         flatten = T
       )
@@ -155,8 +161,7 @@ query_erddap <- function(desired_data = 'sst',
 
   }
 
-  if (desired_data == 'topography'){
-
+  if (desired_data == 'topography') {
     # https://coastwatch.pfeg.noaa.gov/erddap/griddap/etopo180.htmlTable?altitude[(-90.0):1:(90.0)][(-180.0):1:(180.0)]
 
     year_query <-
@@ -172,10 +177,9 @@ query_erddap <- function(desired_data = 'sst',
       paste0('[(', min_lat, '):', space_interval, ':(', max_lat, ')]') # for some unholy reason the lats go in reverse for this database
 
     lon_query <-
-      paste0('[(',min_lon, '):', space_interval, ':(',max_lon, ')]')
+      paste0('[(', min_lon, '):', space_interval, ':(', max_lon, ')]')
 
-    query <- paste0(year_query, lat_query, lon_query)
-
+    query <- paste0(lat_query, lon_query)
     dat <-
       jsonlite::fromJSON(
         paste0(
@@ -192,9 +196,13 @@ query_erddap <- function(desired_data = 'sst',
 
   datnames <- dat$table$columnNames
 
-  date_cols <- which(dat$table$columnUnits == 'UTC' | dat$table$columnUnits == 'time')
+  date_cols <-
+    which(dat$table$columnUnits == 'UTC' |
+            dat$table$columnUnits == 'time')
 
-  other_cols <- which(dat$table$columnUnits != 'UTC')
+  other_cols <-
+    which(dat$table$columnUnits != 'UTC' |
+            dat$table$columnUnits == 'time')
 
 
   tidy_dat <- dat$table$rows %>%
@@ -206,9 +214,13 @@ query_erddap <- function(desired_data = 'sst',
     as_data_frame()
 
 
-  if (desired_data == 'waves'){
-
+  if (desired_data == 'waves') {
     tidy_dat$longitude <-  tidy_dat$longitude - 360
+
+  }
+
+  if (is.null(tidy_dat$time)) {
+    tidy_dat$time <- time <- today()
 
   }
 
@@ -228,12 +240,16 @@ query_erddap <- function(desired_data = 'sst',
 
   group_vars <- c(quo(year), quo(rlat), quo(rlon))
 
-  if (desired_data == 'wind'){
+  if (desired_data == 'topography') {
+    group_vars <- c(quo(rlat), quo(rlon))
 
+  }
+
+  if (desired_data == 'wind') {
     var_name = 'wind_speed'
 
     tidy_dat <-  tidy_dat %>%
-      gather('wind_direction','wind_speed', contains('_wind'))
+      gather('wind_direction', 'wind_speed', contains('_wind'))
 
     var <- last(colnames(tidy_dat))
 
@@ -241,7 +257,8 @@ query_erddap <- function(desired_data = 'sst',
 
     var_name_units <- paste0(var_name, '_units')
 
-    group_vars <- c(quo(year), quo(rlat), quo(rlon), quo(wind_direction))
+    group_vars <-
+      c(quo(year), quo(rlat), quo(rlon), quo(wind_direction))
 
   }
 
