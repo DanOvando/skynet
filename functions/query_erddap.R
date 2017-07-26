@@ -265,7 +265,8 @@ query_erddap <- function(desired_data = 'sst',
   agg_dat <- tidy_dat %>%
     group_by(!!!group_vars) %>%
     summarise(!!var_name := mean(!!!rlang::parse_exprs(var), na.rm = T)) %>%
-    mutate(!!var_name_units := last(dat$table$columnUnits))
+    mutate(!!var_name_units := last(dat$table$columnUnits)) %>%
+    ungroup()
 
   return(agg_dat)
 

@@ -21,6 +21,8 @@ library(tidyverse)
 library(stringr)
 library(viridis)
 library(purrr)
+library(VAST)
+library(TMB)
 library(trelliscopejs)
 
 demons::load_functions('../functions')
@@ -107,35 +109,46 @@ fish_maps <- fish_data %>%
   group_by(survey, year, sci, rlat, rlon) %>% 
   summarise(mean_density = mean(wt, na.rm = T)) %>% 
   group_by(survey, year, rlat, rlon) %>% 
-  summarise(total_mean_density = sum(mean_density)) %>% 
-  na.omit()
+  summarise(total_mean_density = sum(mean_density)) #%>% 
+  # na.omit()
 
 mapfoo <- function(dens){
+  
+  # 
+  # qmplot(rlon, rlat, color = total_mean_density, data = dens) + 
+  # facet_wrap(~year)
   
   qmplot(
   x = rlon,
   y = rlat,
   data = dens,
-  color = log(total_mean_density),
-  maptype = 'toner-lite',
-  source = 'google'
+  color = log(total_mean_density)
+  # maptype = 'toner-lite',
+  # source = 'google'
 ) +
   scale_color_viridis(guide = F) +
   facet_wrap( ~ year) +
-  theme_classic() + 
+  theme_classic() +
   labs(caption = 'Total Mean Species Density')
   
 }
 
 
-a <- fish_maps %>% 
-  ungroup() %>% 
-  filter(rlon < 0,year >=2012) %>% 
-  nest(-survey, .key = densities) %>% 
-  mutate(density_map = map_plot(densities, mapfoo))
+# wtf <- a %>% 
+#   filter(survey == 'WCGBTS') %>% 
+#   unnest()
+# 
+# b <- qmplot(rlon, rlat, color = total_mean_density, data = wtf) + 
+#   facet_wrap(~year)
 
-trelliscope(a, name = 'blah', panel_col = 'density_map', self_contained = F)
-  
+# a <- fish_maps %>% 
+#   ungroup() %>% 
+#   filter(rlon < 0, year > 2006) %>% 
+#   nest(-survey, .key = densities) %>% 
+#   mutate(density_map = map_plot(densities, mapfoo))
+# 
+# trelliscope(a, name = 'blah', panel_col = 'density_map', self_contained = F)
+#   
 #   
 # quick_map(dat = dat, lat_var = quo(rlat), lon_var = quo(rlon),
 #           plot_var = quo(total_mean_density),facet_var = quo(year))
@@ -227,11 +240,11 @@ gfw_plot_foo <- function(dat){
 }
 
 gfw_data <- gfw_data %>% 
-  mutate(plots = map_plot(gfw.data, gfw_plot_foo))
+  mutate(plots = map_plot(gfw_data, gfw_plot_foo))
 
 
 trelliscope(
-  gfw.data,
+  gfw_data,
   name = 'blah',
   panel_col = 'plots',
   self_contained = F
@@ -300,7 +313,7 @@ save(file = '../data/chl_data.Rdata', chl_data)
 ## And SST
 
 and sst
-```{r}
+```{r, eval = F}
 sst_data <- survey_bbox %>% 
   mutate(sst = pmap(list(min_year = pmax(2012,min_year), 
                          max_year = max_year,
@@ -360,7 +373,7 @@ but instead of FAO, sub in mparu (restricted use) mpant (no take)
 
 lookup tables live in region_ids in the UCSB thing. You've already included mparu and mpant as variables in the GFW data, let's get the lookup table here
 
-```{r}
+```{r, eval = F}
 
 
 project <- "ucsb-gfw"
@@ -385,12 +398,28 @@ save(file = '../data/mpa_ids.Rdata', mpa_ids)
 
 ```
 
+Check MPAs
+
+```{r, eval = F}
+
+gfw_data <- gfw_data %>% 
+  mutate(gfw_data = map(gfw_data, ~.x %>% mutate(any_mpa = (!is.na(mparu)) | (!is.na(mpant)))))
+
+
+mpa_plots <- gfw_data %>% 
+  mutate(plots = map_plot(gfw_data, ~quick_map(.x, lat_var = quo(rounded_lat), 
+                                                 lon_var = quo(rounded_lon),
+                                                 plot_var = quo(any_mpa),
+                                                 facet_var = quo(year))))
+
+mpa_plots$plots[[5]]
+```
 
 
 ## Waves
 
 NWW3_Global_Best
-```{r}
+```{r, eval = F}
 
 wave_data <- survey_bbox %>% 
   mutate(wave_height = pmap(list(min_year = pmax(2012,min_year), 
@@ -430,7 +459,7 @@ save(file = '../data/wave_data.Rdata', wave_data)
 ## Wind
 
 
-```{r}
+```{r, eval = F}
 wind_data <- survey_bbox %>% 
   mutate(wind_speed = pmap(list(min_year = pmax(2012,min_year), 
                          max_year = max_year,
@@ -482,10 +511,10 @@ save(file = '../data/wind_data.Rdata', wind_data)
 ## Topography
 
 
-```{r}
+```{r, eval = F}
 
 topo_data <- survey_bbox %>% 
-  mutate(wave_height = pmap(list(min_year = pmax(2012,min_year), 
+  mutate(altitude = pmap(list(min_year = pmax(2012,min_year), 
                          max_year = max_year,
                          min_lat = min_lat,
                          max_lat = max_lat, 
@@ -493,20 +522,25 @@ topo_data <- survey_bbox %>%
                          max_lon = max_lon
                          ), query_erddap,
                     desired_data = 'topography',
-                    date_interval = 24*14, #1 hour interval
-                    space_interval = 0.5,
+                    date_interval = 1, #1 hour interval
+                    space_interval = 1,
                     runit = lat_lon_res))
 
+topo_data  <- topo_data %>% 
+  mutate(altitude = map(altitude, ~ .x %>% 
+                             mutate(m_below_sea_level = -1*mean_altitude)))
+  
 
-wave_data <- wave_data %>% 
-  mutate(plots = map_plot(wave_height, ~quick_map(.x, lat_var = quo(rlat), 
+
+topo_data <- topo_data %>% 
+  mutate(plots = map_plot(altitude, ~quick_map(.x, lat_var = quo(rlat), 
                                                  lon_var = quo(rlon),
-                                                 plot_var = quo(mean_Thgt),
-                                                 facet_var = quo(year))))
+                                                 plot_var =quo(m_below_sea_level),
+                                                 facet_var = quo(mean_altitude_units))))
 
 
 trelliscope(
-  wave_data,
+  topo_data,
   name = 'blah',
   panel_col = 'plots',
   self_contained = F
@@ -514,10 +548,354 @@ trelliscope(
 
 
 
-save(file = '../data/wave_data.Rdata', wave_data)
+save(file = '../data/topo_data.Rdata', topo_data)
 
 
 ```
+
+
+## Check data
+
+```{r}
+
+data_files <- list.files("../data/")
+
+data_files <-
+  paste0('../data/', data_files[str_detect(data_files, '_data.Rdata')])
+
+for (i in seq_along(data_files)) {
+  load(data_files[i])
+  
+}
+
+chl_data %>% 
+  unnest() %>% 
+  ggplot(aes(x = mean_chlorophyll, y = factor(year), fill = survey)) + 
+  geom_joy(alpha = 0.75) + 
+  theme_joy()
+
+sst_data %>% 
+  unnest() %>% 
+  ggplot(aes(x = mean_analysed_sst, y = factor(year), fill = survey)) + 
+  geom_joy(alpha = 0.75) + 
+  theme_joy()
+
+topo_data %>% 
+  select(survey, altitude) %>% 
+  unnest() %>% 
+  ggplot(aes(x = m_below_sea_level, y = survey, fill = survey)) + 
+  geom_joy(alpha = 0.75) + 
+  theme_joy()
+
+wind_data %>% 
+  select(survey, wind_vectors) %>% 
+  unnest() %>% 
+  ggplot(aes(x = wind_speed, y = survey, fill = survey)) + 
+  geom_joy(alpha = 0.75) + 
+  theme_joy()
+
+wave_data %>% 
+  select(survey, wave_height) %>% 
+  unnest() %>% 
+  ggplot(aes(x = mean_Thgt, y = factor(year), fill = survey)) + 
+  geom_joy(alpha = 0.75) + 
+  theme_joy()
+
+```
+
+All in all looks pretty good. THere's some odd stuff in the west coast data since technically speaking the bounding box encompasses the sierras, but that shouldn't be a problem once you're matching to GFW, just makes the plots look a little weird. But, should check the data one more time once they are merged
+
+# Vastify FishData
+
+Good lord it's amazing how long that can take. OK, now that you've got all the data in here, let's run it through `spatial-delta-GLM`. Before you do that, let's put together a vignette explaining what the hell it is actually doing, since I confess to viewing it as a black box at this point. 
+
+The original article is "Geostatistical delta-generalized linear mixed models improve precision for estimated abundance indices for West Coast groundfishes", @Thorson2015
+
+"Data derived from fishery-independent surveys are generally processed to generate an index that is intended to be pro- portional to population abundance"
+
+" U.S. National Marine Fisheries Service primarily use design-based estimators, which generally calculate average catch rates within each predetermined sampling stratum in the sampling design, then generate an area-weighted sum of abundance in each stratum"
+
+So this is an alternative to relying on design (e.g. stratified random sampling and averaging across stratum) or GLM based statistical techniques for extracting the "true" index of abundance
+
+A design based method would say that mean abundance is fixed over a stratum, and so the more variation there is within the stratum, that just increases the variance in the estimate of the mean
+
+This can cause spikes (and drops) to be more of a function of sampling locations than of actual changes in abundance. Geostatistical methods account for that (see @Shelton2014)
+
+"The goal of applying a geostatistical model to data from fisheries research surveys is to explain the catches of each species recorded in the survey, and hence to infer population density throughout the domain of the survey design"
+
+"Specifically, a random field defines the expected value, variance and covariance of a multivariate realization from a stochastic process. In this case, the stochastic process represents the aggregate impact of environmental and biological factors that are not directly observed but still contribute to the distribution and density of the target species"
+
+" To accomplish this, the user pre-specifies the desired number of “knots” nj that are used to approximate random field E over domain V, such that the model tracks the value of E at each knot. The value of E at any location s is equal to its value at the nearest knot (hence the piecewise-constant approximation). Therefore, the value of E at location si (the location for the ith sample) is determined from the value EJ(i) at the knot J(i) that is nearest to si. The location of all nj knots is determined by applying a cluster algorithm (in this case, a k-means algorithm) to the loca- tions of available sampling data."
+
+"This clustering algorithm results in a distribution of knots with density that is proportional to the sampling intensity of the survey design. The area aj associated with each knot j is then calculated using the Voronoi tool in the PBSmapping package in R (Schnute et al., 2013). After being calcu- lated, the number and location of all knots is held fixed during par- ameter estimation. The prespecified number of knots controls the accuracy of this piecewise-constant approximation, and can be used to achieve a balance of accuracy and computational speed. This approximation also simplifies calculating the integral across the random field, as is necessary when calculating the index of abun- dance (as discussed in detail later)."
+
+"Specifically, this model is based on the interpretation that population density across sampling domain V in a given year is a realizations of a random function. This random functions arises from the combin- ation of measured covariates x and random fields v and 1, and assumptions about these random fields (i.e. that they stationary but have geometric anisotropy) result in the properties of the random function used to describe spatial variation in population density. The stochastic process of sampling local densities using bottom trawl gear then introduces another source of variability, which follows a Bernoulli or gamma distribution (Eqs. (1) and (2)), and vessels have random variation in catch efficiency, thus representing a third source of variability. The treatment of space via random functions allows for inference similar to that for “intrin- sic” geostatistics, such that the geostatistical model (Eqs. (1)–(7)) can also be applied to non-randomized sampling designs (Petitgas, 2001), subject to the assumption the process of selecting sampling locations is independent of the process generating differ- ence in population density"
+
+We use 1000 knots for all case-study runs of the geostatistical model (i.e. nj 1⁄4 1000)
+
+In english: the density at any given point is equal to the predicted density at its nearest knot. The expected density at a given knot is modeled throuhg a "delta" process that encompasses the probability of seeing anything and the density conditional on seeing something. Those probabilities are calculated using fixed effects for things like ansiotropy, and random effects for things like the spatial residuals, that take into account that the residuals are distributed multivariate normal, with a covariance matrix defined by something like a variogram (nearby places are more similar)
+
+OK, so in a nutshell then, you get density estimates by knot, which you then aggregate up into a system-wide density through a process that I'm a little unclear on. They calculate the total expected biomass across the region as the sum of the area weighted densities in each knot (i.e. if there are two patches of 1km2 each, and then density in 1 is 10 and the other is 5), then the total abundance estimate is 15, though you need to be careful in your units on this, i.e. this only works since the density is in the units of the cells. 
+
+So, to translate. You use spatial-delta-glm to estimate a bunch of densities at each knot. You then calculate the total abundance across the domain as the sum of the density per unit area in that knot times the area encompassed by that knot. So, that gives you both a total abundance index at the spatial resolution that you want, along with the spatial distribution of that abundance. 
+
+Cool. 
+
+Let's take a look at a single-species example using VAST just to make sure that I'm understanding all the things that get spit out, comparing them to the "raw" survey estimates of biomass. 
+
+
+
+```{r test-vast}
+
+raw_arrow <- fish_data %>% 
+  filter(survey == 'WCGBTS', Sci %in% c("Atheresthes_stomias", 'Microstomus_pacificus')) %>% 
+  dplyr::rename(
+    Lon = Long,
+    Catch_KG = Wt,
+    spp  = Sci
+  ) %>%
+  mutate(AreaSwept_km2 = AreaSept_ha / 1e2) %>% 
+  select(Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG,spp) %>% 
+  na.omit() %>% 
+  mutate(Vessel = as.factor(Vessel),
+         spp = as.factor(spp)) %>% 
+  as.data.frame() #note that this breaks if it's a tibble, should make a bit more flexible
+
+
+test <-
+  vasterize_index(
+  raw_data = raw_arrow,
+  run_dir = run_dir,
+  nstart = 10,
+  region = 'California_current',
+  n_x = 1000
+  )
+  
+Version <-  "VAST_v2_4_0"
+
+Method <-  'Mesh'
+
+n_x = c(1000) # Number of knots
+
+Kmeans_Config = list("randomseed" = 1,
+                     "nstart" = 100, #the number of times that the k-means algorithm is run while searching for the best solution (default=100)
+                     "iter.max" = 1e3)
+
+# Really no idea what almost any of these actually do
+FieldConfig = c(
+  "Omega1" = 1,
+  "Epsilon1" = 1,
+  "Omega2" = 1,
+  "Epsilon2" = 1
+)
+
+RhoConfig = c(
+  "Beta1" = 0,
+  "Beta2" = 0,
+  "Epsilon1" = 0,
+  "Epsilon2" = 0
+)
+
+OverdispersionConfig = c("Vessel" = 0, "VesselYear" = 0)
+
+ObsModel = c(2, 0)
+
+Options =  c(
+  "SD_site_density" = 0,
+  "SD_site_logdensity" = 0,
+  "Calculate_Range" = 1,
+  "Calculate_evenness" = 0,
+  "Calculate_effective_area" = 1,
+  "Calculate_Cov_SE" = 0,
+  'Calculate_Synchrony' = 0,
+  'Calculate_Coherence' = 0
+)
+
+region <- 'California_current'
+
+vast_file <-  paste0(run_dir, 'VAST_output/')
+
+dir.create(vast_file)
+
+strata_limits <- data.frame('STRATA' = "All_areas")
+
+extrapolation_list <- SpatialDeltaGLMM::Prepare_Extrapolation_Data_Fn(Region = region, strata.limits = strata_limits)
+
+
+spatial_list <-  SpatialDeltaGLMM::Spatial_Information_Fn(
+  grid_size_km = 25,
+  n_x = n_x,
+  Method = Method,
+  Lon = raw_arrow[, 'Lon'],
+  Lat = raw_arrow[, 'Lat'],
+  Extrapolation_List = extrapolation_list,
+  randomseed = Kmeans_Config[["randomseed"]],
+  nstart = Kmeans_Config[["nstart"]],
+  iter.max = Kmeans_Config[["iter.max"]],
+  DirPath = vast_file,
+  Save_Results = FALSE
+)
+
+
+raw_arrow <-  cbind(raw_arrow, "knot_i" = Spatial_List$knot_i)
+
+
+tmb_data <-  Data_Fn(
+  "Version" = Version,
+  "FieldConfig" = FieldConfig,
+  "OverdispersionConfig" = OverdispersionConfig,
+  "RhoConfig" = RhoConfig,
+  "ObsModel" = ObsModel,
+  "c_i" = rep(0, nrow(raw_arrow)),
+  "b_i" = raw_arrow[, 'Catch_KG'],
+  "a_i" = raw_arrow[, 'AreaSwept_km2'],
+  "v_i" = as.numeric(raw_arrow[, 'Vessel']) - 1,
+  "s_i" = raw_arrow[, 'knot_i'] - 1,
+  "t_iz" = raw_arrow[, 'Year'],
+  "a_xl" = Spatial_List$a_xl,
+  "MeshList" = Spatial_List$MeshList,
+  "GridList" = Spatial_List$GridList,
+  "Method" = Spatial_List$Method,
+  "Options" = Options
+)
+
+tmb_list <-  Build_TMB_Fn(
+  "TmbData" = tmb_data,
+  "RunDir" = vast_file,
+  "Version" = Version,
+  "RhoConfig" = RhoConfig,
+  "loc_x" = Spatial_List$loc_x,
+  "Method" = Method
+)
+
+obj <-  tmb_list[["Obj"]]
+
+opt <-  TMBhelper::Optimize(
+  obj = obj,
+  lower = tmb_list[["Lower"]],
+  upper = tmb_list[["Upper"]],
+  getsd = TRUE,
+  savedir = vast_file,
+  bias.correct = FALSE
+)
+
+
+report <-  obj$report()
+
+# Save = list(
+#   "Opt" = Opt,
+#   "Report" = Report,
+#   "ParHat" = Obj$env$parList(Opt$par),
+#   "TmbData" = TmbData
+# )
+# save(Save, file = paste0(DateFile, "Save.RData"))
+
+map_details_list <-  SpatialDeltaGLMM::MapDetails_Fn(
+  "Region" = region,
+  "NN_Extrap" = spatial_list$PolygonList$NN_Extrap,
+  "Extrapolation_List" = extrapolation_list
+)
+# Decide which years to plot
+year_set <-  seq(min(raw_arrow[, 'Year']), max(raw_arrow[, 'Year']))
+
+years_2_include <-  which(year_set %in% sort(unique(raw_arrow[, 'Year'])))
+
+#god damn it Dens_xt is in log space
+dens_xt <-
+  SpatialDeltaGLMM::PlotResultsOnMap_Fn(
+    plot_set = c(3),
+    MappingDetails = map_details_list[["MappingDetails"]],
+    Report = report,
+    Sdreport = opt$SD,
+    PlotDF = map_details_list[["PlotDF"]],
+    MapSizeRatio = map_details_list[["MapSizeRatio"]],
+    Xlim = map_details_list[["Xlim"]],
+    Ylim = map_details_list[["Ylim"]],
+    FileName = ,
+    ,
+    ,
+    Year_Set = year_set,
+    Years2Include = years_2_include,
+    Rotate = map_details_list[["Rotate"]],
+    Cex = map_details_list[["Cex"]],
+    Legend = map_details_list[["Legend"]],
+    zone = map_details_list[["Zone"]],
+    mar = c(0, 0, 2, 0),
+    oma = c(3.5, 3.5, 0, 0),
+    cex = 1.8,
+    plot_legend_fig = FALSE
+  )
+
+
+vast_arrow = cbind(
+  "density" = as.vector(dens_xt),
+  "year" = year_set[col(dens_xt)],
+  "e_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'E_km'],
+  "n_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'N_km']
+) %>%
+  as_data_frame() %>%
+  mutate(knot = as.numeric(factor(paste(e_km, n_km)))) %>%
+  arrange(knot, year) %>% 
+  mutate(exp_density = exp(density))
+
+SpatialDeltaGLMM::Plot_data_and_knots(
+  Extrapolation_List = extrapolation_list,
+  Spatial_List = spatial_list,
+  Data_Geostat = raw_arrow,
+  PlotDir = vast_file
+  ) #plot map locations
+  # check and make sure you're not hitting bounds, and that gradients are near 0
+  DT::datatable(opt$diagnostics[, c('Param', 'Lower', 'MLE', 'Upper', 'final_gradient')])
+  
+
+encounter_prob <-
+  SpatialDeltaGLMM::Check_encounter_prob(Report = report,
+  Data_Geostat = raw_arrow,
+  DirName = vast_file)
+  
+
+# get overall index
+# 
+index <-
+  SpatialDeltaGLMM::PlotIndex_Fn(
+  DirName = vast_file,
+  TmbData = tmb_data,
+  Sdreport = opt[["SD"]],
+  Year_Set = year_set,
+  Years2Include = years_2_include,
+  use_biascorr = TRUE
+  )
+  
+
+vast <- index$Table %>% 
+  select(Year,Estimate_metric_tons) %>% 
+  rename(abundance = Estimate_metric_tons) %>% 
+  mutate(source = 'vast')
+
+raw <- raw_arrow %>% 
+  group_by(Year) %>% 
+  summarise(abundance = sum(Catch_KG) * 100) %>% 
+  mutate(source = 'raw')
+
+assess_vast <- raw %>% 
+  bind_rows(vast) %>% 
+  set_names(tolower(colnames(.)))
+
+assess_vast %>% 
+  ggplot(aes(year, abundance, color = source)) + 
+  geom_line()
+
+```
+
+OK, that all works, you'll need to convert that to a useful function, but it works. 
+
+I'd like to understand better how it's calculating the overall index, and see if I can write my own function to do it, so that I can apply that same function to your GFW estimates... Aha. It's basically just the sum of the knots plus the bias correction. You'll need to think about the bias correction problem with the GFW, but you'll cross that bridge once you get there. 
+
+So, to compare once you get GFW working, it will basically be the sum of the predicted densities at each point scaled by the area of the point. So, if the knot density is 10 fish per km2, and there are 10km2 per knot, then the total abundance at that knot it 100. You'll just need to be careful about units. 
+
+## Multispecies
+
+Let's take a look and see how different it is. Hopefully it's the same, in which case your next order of business if to build a useful wrapper for VAST for single or multi-species cases. Looks like it runs about the same, with the exception that for some unholy reason c_i appears to the the species index, aha, standing for species category. Good lord. see `?Data_Fn` for better explanations
 
 
 # Fit Models

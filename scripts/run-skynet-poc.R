@@ -149,6 +149,7 @@ Record = ThorsonUtilities::bundlelist(
 )
 save(Record, file = paste0(DateFile, "Record.RData"))
 capture.output(Record, file = paste0(DateFile, "Record.txt"))
+
 strata.limits <- data.frame('STRATA' = "All_areas")
 
 Extrapolation_List = SpatialDeltaGLMM::Prepare_Extrapolation_Data_Fn(Region = Region, strata.limits = strata.limits)
