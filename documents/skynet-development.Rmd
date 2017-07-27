@@ -3,6 +3,7 @@ title: "Skynet Development"
 output: html_document
 ---
 
+
 This is a sketchpad for developing the tools and code needed to evaluate project skynet. As much as possible, use functions to do all the critical steps that you will then call into use for the formal run script. Use this space to think outloud and examine/debug outputs of scripts. 
 
 # Load things
@@ -12,18 +13,19 @@ set.seed(42)
 knitr::opts_chunk$set(message = F, warning = F)
 library(bigrquery)
 library(lubridate)
-library(tmap)
 library(leaflet)
 library(rgdal)
 library(FishData)
 library(ggmap)
-library(tidyverse)
 library(stringr)
 library(viridis)
 library(purrr)
 library(VAST)
 library(TMB)
 library(trelliscopejs)
+library(ggjoy)
+library(tidyverse)
+
 
 demons::load_functions('../functions')
 
@@ -107,7 +109,7 @@ fish_maps <- fish_data %>%
   mutate(rlat = round(lat * (1/lat_lon_res)) / ((1/lat_lon_res)),
          rlon = round(long * (1/lat_lon_res)) / ((1/lat_lon_res))) %>% 
   group_by(survey, year, sci, rlat, rlon) %>% 
-  summarise(mean_density = mean(wt, na.rm = T)) %>% 
+  dplyr::summarise(mean_density = mean(wt, na.rm = T)) %>% 
   group_by(survey, year, rlat, rlon) %>% 
   summarise(total_mean_density = sum(mean_density)) #%>% 
   # na.omit()
@@ -648,7 +650,7 @@ Let's take a look at a single-species example using VAST just to make sure that 
 ```{r test-vast}
 
 raw_arrow <- fish_data %>% 
-  filter(survey == 'WCGBTS', Sci %in% c("Atheresthes_stomias", 'Microstomus_pacificus')) %>% 
+  filter(survey == 'WCGBTS', Sci == "Atheresthes_stomias") %>% 
   dplyr::rename(
     Lon = Long,
     Catch_KG = Wt,
@@ -657,7 +659,8 @@ raw_arrow <- fish_data %>%
   mutate(AreaSwept_km2 = AreaSept_ha / 1e2) %>% 
   select(Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG,spp) %>% 
   na.omit() %>% 
-  mutate(Vessel = as.factor(Vessel),
+  set_names(tolower(colnames(.))) %>% 
+  mutate(Vessel = as.factor(vessel),
          spp = as.factor(spp)) %>% 
   as.data.frame() #note that this breaks if it's a tibble, should make a bit more flexible
 
@@ -671,220 +674,6 @@ test <-
   n_x = 1000
   )
   
-Version <-  "VAST_v2_4_0"
-
-Method <-  'Mesh'
-
-n_x = c(1000) # Number of knots
-
-Kmeans_Config = list("randomseed" = 1,
-                     "nstart" = 100, #the number of times that the k-means algorithm is run while searching for the best solution (default=100)
-                     "iter.max" = 1e3)
-
-# Really no idea what almost any of these actually do
-FieldConfig = c(
-  "Omega1" = 1,
-  "Epsilon1" = 1,
-  "Omega2" = 1,
-  "Epsilon2" = 1
-)
-
-RhoConfig = c(
-  "Beta1" = 0,
-  "Beta2" = 0,
-  "Epsilon1" = 0,
-  "Epsilon2" = 0
-)
-
-OverdispersionConfig = c("Vessel" = 0, "VesselYear" = 0)
-
-ObsModel = c(2, 0)
-
-Options =  c(
-  "SD_site_density" = 0,
-  "SD_site_logdensity" = 0,
-  "Calculate_Range" = 1,
-  "Calculate_evenness" = 0,
-  "Calculate_effective_area" = 1,
-  "Calculate_Cov_SE" = 0,
-  'Calculate_Synchrony' = 0,
-  'Calculate_Coherence' = 0
-)
-
-region <- 'California_current'
-
-vast_file <-  paste0(run_dir, 'VAST_output/')
-
-dir.create(vast_file)
-
-strata_limits <- data.frame('STRATA' = "All_areas")
-
-extrapolation_list <- SpatialDeltaGLMM::Prepare_Extrapolation_Data_Fn(Region = region, strata.limits = strata_limits)
-
-
-spatial_list <-  SpatialDeltaGLMM::Spatial_Information_Fn(
-  grid_size_km = 25,
-  n_x = n_x,
-  Method = Method,
-  Lon = raw_arrow[, 'Lon'],
-  Lat = raw_arrow[, 'Lat'],
-  Extrapolation_List = extrapolation_list,
-  randomseed = Kmeans_Config[["randomseed"]],
-  nstart = Kmeans_Config[["nstart"]],
-  iter.max = Kmeans_Config[["iter.max"]],
-  DirPath = vast_file,
-  Save_Results = FALSE
-)
-
-
-raw_arrow <-  cbind(raw_arrow, "knot_i" = Spatial_List$knot_i)
-
-
-tmb_data <-  Data_Fn(
-  "Version" = Version,
-  "FieldConfig" = FieldConfig,
-  "OverdispersionConfig" = OverdispersionConfig,
-  "RhoConfig" = RhoConfig,
-  "ObsModel" = ObsModel,
-  "c_i" = rep(0, nrow(raw_arrow)),
-  "b_i" = raw_arrow[, 'Catch_KG'],
-  "a_i" = raw_arrow[, 'AreaSwept_km2'],
-  "v_i" = as.numeric(raw_arrow[, 'Vessel']) - 1,
-  "s_i" = raw_arrow[, 'knot_i'] - 1,
-  "t_iz" = raw_arrow[, 'Year'],
-  "a_xl" = Spatial_List$a_xl,
-  "MeshList" = Spatial_List$MeshList,
-  "GridList" = Spatial_List$GridList,
-  "Method" = Spatial_List$Method,
-  "Options" = Options
-)
-
-tmb_list <-  Build_TMB_Fn(
-  "TmbData" = tmb_data,
-  "RunDir" = vast_file,
-  "Version" = Version,
-  "RhoConfig" = RhoConfig,
-  "loc_x" = Spatial_List$loc_x,
-  "Method" = Method
-)
-
-obj <-  tmb_list[["Obj"]]
-
-opt <-  TMBhelper::Optimize(
-  obj = obj,
-  lower = tmb_list[["Lower"]],
-  upper = tmb_list[["Upper"]],
-  getsd = TRUE,
-  savedir = vast_file,
-  bias.correct = FALSE
-)
-
-
-report <-  obj$report()
-
-# Save = list(
-#   "Opt" = Opt,
-#   "Report" = Report,
-#   "ParHat" = Obj$env$parList(Opt$par),
-#   "TmbData" = TmbData
-# )
-# save(Save, file = paste0(DateFile, "Save.RData"))
-
-map_details_list <-  SpatialDeltaGLMM::MapDetails_Fn(
-  "Region" = region,
-  "NN_Extrap" = spatial_list$PolygonList$NN_Extrap,
-  "Extrapolation_List" = extrapolation_list
-)
-# Decide which years to plot
-year_set <-  seq(min(raw_arrow[, 'Year']), max(raw_arrow[, 'Year']))
-
-years_2_include <-  which(year_set %in% sort(unique(raw_arrow[, 'Year'])))
-
-#god damn it Dens_xt is in log space
-dens_xt <-
-  SpatialDeltaGLMM::PlotResultsOnMap_Fn(
-    plot_set = c(3),
-    MappingDetails = map_details_list[["MappingDetails"]],
-    Report = report,
-    Sdreport = opt$SD,
-    PlotDF = map_details_list[["PlotDF"]],
-    MapSizeRatio = map_details_list[["MapSizeRatio"]],
-    Xlim = map_details_list[["Xlim"]],
-    Ylim = map_details_list[["Ylim"]],
-    FileName = ,
-    ,
-    ,
-    Year_Set = year_set,
-    Years2Include = years_2_include,
-    Rotate = map_details_list[["Rotate"]],
-    Cex = map_details_list[["Cex"]],
-    Legend = map_details_list[["Legend"]],
-    zone = map_details_list[["Zone"]],
-    mar = c(0, 0, 2, 0),
-    oma = c(3.5, 3.5, 0, 0),
-    cex = 1.8,
-    plot_legend_fig = FALSE
-  )
-
-
-vast_arrow = cbind(
-  "density" = as.vector(dens_xt),
-  "year" = year_set[col(dens_xt)],
-  "e_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'E_km'],
-  "n_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'N_km']
-) %>%
-  as_data_frame() %>%
-  mutate(knot = as.numeric(factor(paste(e_km, n_km)))) %>%
-  arrange(knot, year) %>% 
-  mutate(exp_density = exp(density))
-
-SpatialDeltaGLMM::Plot_data_and_knots(
-  Extrapolation_List = extrapolation_list,
-  Spatial_List = spatial_list,
-  Data_Geostat = raw_arrow,
-  PlotDir = vast_file
-  ) #plot map locations
-  # check and make sure you're not hitting bounds, and that gradients are near 0
-  DT::datatable(opt$diagnostics[, c('Param', 'Lower', 'MLE', 'Upper', 'final_gradient')])
-  
-
-encounter_prob <-
-  SpatialDeltaGLMM::Check_encounter_prob(Report = report,
-  Data_Geostat = raw_arrow,
-  DirName = vast_file)
-  
-
-# get overall index
-# 
-index <-
-  SpatialDeltaGLMM::PlotIndex_Fn(
-  DirName = vast_file,
-  TmbData = tmb_data,
-  Sdreport = opt[["SD"]],
-  Year_Set = year_set,
-  Years2Include = years_2_include,
-  use_biascorr = TRUE
-  )
-  
-
-vast <- index$Table %>% 
-  select(Year,Estimate_metric_tons) %>% 
-  rename(abundance = Estimate_metric_tons) %>% 
-  mutate(source = 'vast')
-
-raw <- raw_arrow %>% 
-  group_by(Year) %>% 
-  summarise(abundance = sum(Catch_KG) * 100) %>% 
-  mutate(source = 'raw')
-
-assess_vast <- raw %>% 
-  bind_rows(vast) %>% 
-  set_names(tolower(colnames(.)))
-
-assess_vast %>% 
-  ggplot(aes(year, abundance, color = source)) + 
-  geom_line()
-
 ```
 
 OK, that all works, you'll need to convert that to a useful function, but it works. 
@@ -898,7 +687,238 @@ So, to compare once you get GFW working, it will basically be the sum of the pre
 Let's take a look and see how different it is. Hopefully it's the same, in which case your next order of business if to build a useful wrapper for VAST for single or multi-species cases. Looks like it runs about the same, with the exception that for some unholy reason c_i appears to the the species index, aha, standing for species category. Good lord. see `?Data_Fn` for better explanations
 
 
+```{r}
+
+# , Sci %in% c("Atheresthes_stomias", 'Microstomus_pacificus')
+raw <- fish_data %>% 
+  filter(survey == 'WCGBTS') %>% 
+  dplyr::rename(
+    Lon = Long,
+    Catch_KG = Wt,
+    spp  = Sci
+  ) %>%
+  mutate(AreaSwept_km2 = AreaSept_ha / 1e2) %>% 
+  select(Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG,spp) %>% 
+  set_names(tolower(colnames(.))) %>% 
+  na.omit() %>% 
+  as.data.frame() #note that this breaks if it's a tibble, should make a bit more flexible
+
+
+species_tallies <- raw %>% 
+  group_by(year, spp) %>% 
+  summarise(nobs = length(spp),
+            num_zeros = sum(catch_kg == 0),
+            num_pos = sum(catch_kg > 0)) %>% 
+  group_by(spp) %>% 
+  summarise(missed = any(num_pos == 0)) %>% 
+  filter(missed ==F)
+
+spp_to_include <- species_tallies$spp
+
+
+raw <- raw %>% 
+  filter(spp %in% spp_to_include) %>% 
+    mutate(vessel = as.factor(vessel),
+         spp = as.factor(spp))
+
+test_all <-
+  vasterize_index(
+  raw_data = raw,
+  run_dir = run_dir,
+  nstart = 100,
+  region = 'California_current',
+  n_x = 1000
+  )
+```
+OK I think D_xcy is the multispecies output
+
+
 # Fit Models
+
+go back to your old friend alaska pollock as a test. 
+
+```{r}
+
+alaska_pollock <- fish_data %>% 
+  filter(survey == 'EBSBTS', Sci == 'Gadus_chalcogrammus') %>%  dplyr::rename(
+    Lon = Long,
+    Catch_KG = Wt,
+    spp  = Sci
+  ) %>%
+  mutate(AreaSwept_km2 = 1 , Vessel = 'missing') %>% 
+  select(Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG,spp) %>% 
+  set_names(tolower(colnames(.))) %>% 
+  as.data.frame() %>% 
+  na.omit() %>% 
+  filter(year >=2012) %>% 
+    mutate(vessel = as.factor(vessel),
+         spp = as.factor(spp))  #note that this breaks if it's a tibble, should make a bit more flexible
+
+set.seed(53)
+vast_alaska_pollock <-
+  vasterize_index(
+  raw_data = alaska_pollock,
+  run_dir = run_dir,
+  nstart = 100,
+  region = 'Eastern_Bering_Sea',
+  n_x = 1000
+  )
+
+save(file = paste0(run_dir,'vast_alaska_pollock.Rdata'),vast_alaska_pollock)
+
+ebsbts_trawlers <- gfw_data %>% 
+  filter(survey == "ebsbts_gfw") %>% 
+  unnest() %>% 
+  filter(inferred_label_allyears == 'trawlers')
+```
+
+OK, all up and running. Now let's make sure that you're merging to knot data appropriately. The thing here is now you have densities by "knot", and those are in eastings and northings, which is a goddamn nightmare. Would really prefer to get these in units of lat-lon. 
+
+```{r}
+
+utm_coords <-
+  SpatialDeltaGLMM::Convert_LL_to_UTM_Fn(
+    Lon = ebsbts_trawlers$rounded_lon,
+    Lat = ebsbts_trawlers$rounded_lat,
+    zone = 32,
+    flip_around_dateline = 1
+  ) %>%
+  dplyr::rename(e_km = X, n_km = Y) %>%
+  select(e_km, n_km)
+
+ebsbts_trawlers <- ebsbts_trawlers %>%
+  bind_cols(utm_coords)
+
+
+knots <- vast_alaska_pollock$spatial_densities %>%
+  select(knot, e_km, n_km) %>%
+  unique()
+```
+
+How the hell to deal with knots. What I'd like to get is a simple way to use the `sf` package for moving back and forth from UTM to lat-lon
+
+
+```{r}
+
+knots <- knots %>% 
+  select(e_km, n_km, knot)
+
+library(rgdal)
+
+a <- st_multipoint(as.matrix(knots), dim = 'XYM')
+
+b <- st_sfc(a, crs =2077) #this turns it into an actual sfc object
+
+d <- st_sf(data.frame(a = 1, b = b))
+
+CRS("+proj=utm")
+
+# A data frame of all the CRSs can be created:
+# EPSG <- make_EPSG()
+```
+
+```{r}
+sf::
+
+nearest_knot <-
+  RANN::nn2(knots %>% select(-knot), utm_coords, k = 1)
+
+ebsbts_trawlers$knot <- knots$knot[nearest_knot$nn.idx]
+
+ebsbts_trawlers$distance <- nearest_knot$nn.dists
+
+
+knot_pairing_plot <- ebsbts_trawlers %>%
+  filter(distance <= quantile(ebsbts_trawlers$distance, 0.75)) %>%
+  select(e_km, n_km, knot) %>%
+  unique() %>%
+  ggplot() +
+  geom_point(aes(e_km, n_km, color = factor(knot)),
+             show.legend = F,
+             alpha = 0.25) +
+  geom_text(
+    data = knots,
+    aes(e_km, n_km, label = knot, color = knot %>% factor()),
+    show.legend = F
+  )
+
+
+
+
+
+skynet_data <- ebsbts_trawlers %>%
+  group_by(year, rounded_lat, rounded_lon) %>% 
+  summarise(num_vessels = length(unique(mmsi)),
+            total_hours = sum(total_hours),
+            total_engine_hours = sum(total_hours * inferred_engine_power),
+            knot = unique(knot),
+            dist_from_port = mean(mean_distance_from_port),
+            dist_from_shore = mean(mean_distance_from_shore),
+            mean_vessel_length = mean(inferred_length)) %>% 
+  left_join(vast_alaska_pollock$spatial_densities, by = c('year', 'knot')) %>%
+  ungroup() %>%
+  mutate(
+    vessel_hours = total_engine_hours * num_vessels) %>%
+  group_by(rounded_lat, rounded_lon) %>%
+  arrange(year) %>%
+  mutate(
+    total_engine_hours_lag1 = lag(total_engine_hours, 1),
+    total_engine_hours_lag2 = lag(total_engine_hours, 2),
+    total_engine_hours_lag3 = lag(total_engine_hours, 3),
+    port_engine_hours = dist_from_port * total_engine_hours,
+    port_hours = dist_from_port * total_hours,
+    port_numbers = dist_from_port * num_vessels,
+    shore_numbers = dist_from_shore * num_vessels,
+    shore_hours = dist_from_shore * total_hours,
+    shore_engine_hours = dist_from_shore * total_engine_hours,
+    large_vessels = num_vessels * mean_vessel_length
+  ) %>%
+  ungroup() %>% {
+    if (log_space == F) {
+      mutate(., density = exp(density))
+    } else {
+      .
+    }
+
+  } %>%
+  # mutate(density = lag(density, 1)) %>%
+  filter(total_engine_hours > 0,
+         density > 0,
+         is.na(density) == F) #fix this later, need to include zeros
+
+fitControl <- trainControl(## 10-fold CV
+  method = "repeatedcv",
+  number = 10,
+  ## repeated ten times
+  repeats = 10)
+
+skynet_sandbox <- modelr::crossv_kfold(skynet_data, 5)
+
+#center and scale things now
+
+
+rf_model <- train(
+  density ~ total_engine_hours +
+    total_hours +
+    large_vessels +
+    port_hours +
+    port_engine_hours +
+    port_numbers +
+    shore_hours +
+    shore_engine_hours +
+    shore_numbers +
+    num_vessels +
+    mean_vessel_length,
+  data = skynet_sandbox$train[[1]],
+  method = "rf",
+  trControl = fitControl,
+  do.trace = 10
+)
+
+skynet_sandbox$train[[1]]
+```
+
+
 
 Fit a series of models on the data at different aggregation levels
 

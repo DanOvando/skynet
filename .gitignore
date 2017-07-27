@@ -15,4 +15,5 @@ VAST_output/
 *.httr-oauth
 *.csv
 *.docx
+*.key
 

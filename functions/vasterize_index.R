@@ -73,9 +73,9 @@ vasterize_index <- function(raw_data,
 
   spatial_list <-  SpatialDeltaGLMM::Spatial_Information_Fn(
     n_x = n_x,
-    Method = Method,
-    Lon = raw_data[, 'Lon'],
-    Lat = raw_data[, 'Lat'],
+    Method = method,
+    Lon = raw_data[, 'lon'],
+    Lat = raw_data[, 'lat'],
     Extrapolation_List = extrapolation_list,
     randomseed = Kmeans_Config[["randomseed"]],
     nstart = Kmeans_Config[["nstart"]],
@@ -85,21 +85,21 @@ vasterize_index <- function(raw_data,
   )
 
 
-  raw_data <-  cbind(raw_data, "knot_i" = Spatial_List$knot_i)
+  raw_data <-  cbind(raw_data, "knot_i" = spatial_list$knot_i)
 
 
   tmb_data <-  Data_Fn(
-    "Version" = Version,
+    "Version" = version,
     "FieldConfig" = FieldConfig,
     "OverdispersionConfig" = overdispersion_config,
     "RhoConfig" = RhoConfig,
     "ObsModel" = obs_model,
     "c_i" = as.numeric(raw_data[, 'spp']) - 1,
-    "b_i" = raw_data[, 'Catch_KG'],
-    "a_i" = raw_data[, 'AreaSwept_km2'],
-    "v_i" = as.numeric(raw_data[, 'Vessel']) - 1,
+    "b_i" = raw_data[, 'catch_kg'],
+    "a_i" = raw_data[, 'areaswept_km2'],
+    "v_i" = as.numeric(raw_data[, 'vessel']) - 1,
     "s_i" = raw_data[, 'knot_i'] - 1,
-    "t_iz" = raw_data[, 'Year'],
+    "t_iz" = raw_data[, 'year'],
     "a_xl" = spatial_list$a_xl,
     "MeshList" = spatial_list$MeshList,
     "GridList" = spatial_list$GridList,
@@ -109,7 +109,7 @@ vasterize_index <- function(raw_data,
   tmb_list <-  Build_TMB_Fn(
     "TmbData" = tmb_data,
     "RunDir" = vast_file,
-    "Version" = Version,
+    "Version" = version,
     "RhoConfig" = RhoConfig,
     "loc_x" = spatial_list$loc_x,
     "Method" = method
@@ -135,11 +135,10 @@ vasterize_index <- function(raw_data,
   )
   # Decide which years to plot
   year_set <-
-    seq(min(raw_data[, 'Year']), max(raw_data[, 'Year']))
+    seq(min(raw_data[, 'year']), max(raw_data[, 'year']))
 
   years_2_include <-
-    which(year_set %in% sort(unique(raw_data[, 'Year'])))
-
+    which(year_set %in% sort(unique(raw_data[, 'year'])))
   #god damn it Dens_xt is in log space
   dens_xt <-
     SpatialDeltaGLMM::PlotResultsOnMap_Fn(
@@ -187,8 +186,19 @@ vasterize_index <- function(raw_data,
     rename(abundance = Estimate_metric_tons) %>%
     mutate(source = 'vast')
 
+  spatial_densities = cbind(
+    "density" = as.vector(dens_xt),
+    "year" = year_set[col(dens_xt)],
+    "e_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'E_km'],
+    "n_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'N_km']
+  ) %>%
+    as_data_frame() %>%
+    mutate(knot = as.numeric(factor(paste(e_km, n_km)))) %>%
+    arrange(knot, year)
+
   outlist <-
     list(
+      spatial_densities = spatial_densities,
       spatial_index = dens_xt,
       time_index = vast_index,
       report = report,
