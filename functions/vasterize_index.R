@@ -198,6 +198,8 @@ vasterize_index <- function(raw_data,
 
   outlist <-
     list(
+      extrapolation_list = extrapolation_list,
+      spatial_list = spatial_list,
       spatial_densities = spatial_densities,
       spatial_index = dens_xt,
       time_index = vast_index,
