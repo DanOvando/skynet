@@ -49,14 +49,16 @@ create_skynet_data <-
                           years = unique(skynet_data$year)) %>%
       spread(variable, mean_value)
 
+
+    skynet_data <- skynet_data %>%
+      left_join(flat_covars,
+                by = c('rounded_lat' = 'rlat', 'rounded_lon' = 'rlon', 'year'))
+
     if (nrow(skynet_data) != nrow(gfw_data)){
 
       stop('joins have gone off the rails')
 
     }
-
-    skynet_data <- skynet_data %>%
-      left_join(flat_covars,
-                by = c('rounded_lat' = 'rlat', 'rounded_lon' = 'rlon', 'year'))
+    return(skynet_data)
 
   }
