@@ -1,0 +1,42 @@
+---
+title: "Learning SF"
+output: html_notebook
+---
+
+This is a notebook for learning the `sf` spatial analysis package, to help better deal with spatial files when you get them, specifically in support of skynet
+
+Specifically, your goal is to be able to more seamlesslely move back and forth from UTM stuff in from spatialdeltaGLM to lat-lons when you get them, and to be able to do a better job making maps and other joyous things. 
+
+```{r}
+library(tidyverse)
+library(sf)
+library(maps)
+library(ggmap)
+
+```
+
+`st_` refers to spatial and temporal 
+
+`sf` is the data table containing the spatial stuff
+
+`sfc` is the list column of geometries for a given feature
+
+`sfg` makes up the components of each list component in `sfc`
+
+```{r}
+
+nc <- st_read(system.file("shape/nc.shp", package="sf"))
+
+
+class(nc)
+
+head(nc, n = 6)
+```
+So suppose that I want to look more at the actual geometries of each area, can access as a column, or use st_geometry as long as the object is of class `sf`
+
+```{r}
+
+nc_geom <- st_geometry(nc)
+
+```
+
