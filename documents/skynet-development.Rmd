@@ -20,10 +20,14 @@ library(ggmap)
 library(stringr)
 library(viridis)
 library(purrr)
+library(purrrlyr)
+library(modelr)
 library(VAST)
 library(TMB)
 library(trelliscopejs)
 library(ggjoy)
+library(modelr)
+library(caret)
 library(tidyverse)
 
 
@@ -135,27 +139,6 @@ mapfoo <- function(dens){
   
 }
 
-
-# wtf <- a %>% 
-#   filter(survey == 'WCGBTS') %>% 
-#   unnest()
-# 
-# b <- qmplot(rlon, rlat, color = total_mean_density, data = wtf) + 
-#   facet_wrap(~year)
-
-# a <- fish_maps %>% 
-#   ungroup() %>% 
-#   filter(rlon < 0, year > 2006) %>% 
-#   nest(-survey, .key = densities) %>% 
-#   mutate(density_map = map_plot(densities, mapfoo))
-# 
-# trelliscope(a, name = 'blah', panel_col = 'density_map', self_contained = F)
-#   
-#   
-# quick_map(dat = dat, lat_var = quo(rlat), lon_var = quo(rlon),
-#           plot_var = quo(total_mean_density),facet_var = quo(year))
-
-
 ```
 
 Great, that all looks good (finally), though there is something a little off with the AIBTS data on the other side of the international date line... should examine that a little later. 
@@ -181,6 +164,8 @@ survey_bbox
 survey_names <- paste0(fishdata_names$survey %>% tolower(),'_gfw')
 
 ```
+
+
 
 OK I went into google bigquery and set up a series of queries that produce tables of the form *<survey>_gfw*, and saved them under the skynet project in our bigquery account. Let's try and grab those things now. 
 
@@ -258,6 +243,9 @@ trelliscope(
 Ok, working the 0.25 degree unit seems to work nicely. Those GFW data are saved. 
 
 At some point though you'll need to make a more intelligent decision about the spatial scale that you want to aggregate things to
+
+finding bounding boxes from data
+
 
 ## CHL-A
 
@@ -607,6 +595,8 @@ wave_data %>%
 
 All in all looks pretty good. THere's some odd stuff in the west coast data since technically speaking the bounding box encompasses the sierras, but that shouldn't be a problem once you're matching to GFW, just makes the plots look a little weird. But, should check the data one more time once they are merged
 
+
+
 # Vastify FishData
 
 Good lord it's amazing how long that can take. OK, now that you've got all the data in here, let's run it through `spatial-delta-GLM`. Before you do that, let's put together a vignette explaining what the hell it is actually doing, since I confess to viewing it as a black box at this point. 
@@ -762,7 +752,7 @@ vast_alaska_pollock <-
   run_dir = run_dir,
   nstart = 100,
   region = 'Eastern_Bering_Sea',
-  n_x = 1000
+  n_x = 100
   )
 
 ggmap::qmplot(x = approx_long, y = approx_lat, data = vast_alaska_pollock$spatial_list$loc_x_lat_long, color = 'red')
@@ -779,37 +769,6 @@ OK! that works, you're up and running now. Now, for the implementation of all th
 
 The stored eastings and northings from SDGLMM are "flipped" in some instances, and so aren't techincally right. You build a new function in there called convert_utm_to_ll_fn that deals with that, and now store the actual lat-longs of the knot coordinates. 
 
-```{r, eval = F}
-
-
-long_2_utm <- function(long) {
-    (floor((long + 180)/6) %% 60) + 1
-  
-  # https://stackoverflow.com/questions/9186496/determining-utm-zone-to-convert-from-longitude-latitude
-}
-
-projfoo <- function(lon,lat,zone){
-
-  project(cbind(lon, lat), paste0("+proj=utm +zone=",zone," ellps=WGS84")) %>% as.data.frame() %>% 
-    set_names(c('easting','northing'))
-}
-
-ebs_locs <- ebs_locs %>% 
-  mutate(utm_zone = long2UTM(rounded_lon)) %>%
-  {
-  bind_cols(.,pmap_df(list(lat = .$rounded_lat, lon = .$rounded_lon, zone = .$utm_zone), projfoo))
-  }
-
-
-ebs_locs %>% 
-  ggplot() + 
-  geom_sf(aes(fill = easting), shape = 21) + 
-  scale_fill_viridis()
-
-```
-
-
-
 Now the good news is the `nn2` doesn't really require any units, so you can define nearest neighbor by lat-lon, since I don't really get how to deal with the trans-zone thing otherwise. 
 
 Now that you've got this going,  let's build the database by merging GFW with 
@@ -822,15 +781,46 @@ ebs_trawlers <- gfw_data %>%
   unnest() %>% 
   filter(inferred_label_allyears == 'trawlers')
 
-gfw_data <- ebs_trawlers
+skynet_data <- ebs_trawlers %>%
+  group_by(year, rounded_lat, rounded_lon) %>% 
+  summarise(num_vessels = length(unique(mmsi)),
+            total_hours = sum(total_hours),
+            total_engine_hours = sum(total_hours * inferred_engine_power),
+            dist_from_port = mean(mean_distance_from_port),
+            dist_from_shore = mean(mean_distance_from_shore),
+            mean_vessel_length = mean(inferred_length),
+            no_take_mpa = any(is.na(mpant) == F),
+            restricted_use_mpa =  any(is.na(mparu) == F)
+            ) %>% 
+  ungroup() %>%
+  mutate(
+    vessel_hours = total_engine_hours * num_vessels,
+    any_fishing = total_engine_hours > 0) %>%
+  group_by(rounded_lat, rounded_lon) %>%
+  arrange(year) %>%
+  mutate(
+    total_engine_hours_lag1 = lag(total_engine_hours, 1),
+    total_engine_hours_lag2 = lag(total_engine_hours, 2),
+    total_engine_hours_lag3 = lag(total_engine_hours, 3),
+    port_engine_hours = dist_from_port * total_engine_hours,
+    port_hours = dist_from_port * total_hours,
+    port_numbers = dist_from_port * num_vessels,
+    shore_numbers = dist_from_shore * num_vessels,
+    shore_hours = dist_from_shore * total_hours,
+    shore_engine_hours = dist_from_shore * total_engine_hours,
+    large_vessels = num_vessels * mean_vessel_length
+  ) 
+
+# gfw_data <- skynet_data
 
 fish_data <- vast_alaska_pollock$spatial_densities
 
 fish_knots <- vast_alaska_pollock$spatial_list$loc_x_lat_long
 
+
 skynet_data <-
 create_skynet_data(
-gfw_data = gfw_data,
+gfw_data = skynet_data,
 fish_data = fish_data,
 fish_knots = fish_knots,
 surveys = 'EBSBTS',
@@ -845,85 +835,224 @@ sst_data = sst_data
 
 Booya, you're back in business.  now
 
-## prepare model
+## Interpolate environmental data
+
+Environmental data doesn't seem to match up perfectly with the other data; you get a lot of missing entries. Let's try and fill in the gaps a bit, though obviuosly you'll need to test sensitivity of results to these choices. 
+
+So, for example, year 2012, rounded_lat = 53.75, rounded_lon = -166.25 is lestaed as NA for chl. What's going on there?
 
 
 ```{r}
 
+a <- wave_data %>% 
+  filter(survey == 'EBSBTS') %>% 
+  select(survey, wave_height ) %>% 
+  unnest()
 
 
+ skynet_data %>% 
+   group_by(rounded_lat, rounded_lon) %>% 
+   summarise(percent_missing = mean(is.na(wind_speed))) %>% 
+   ggplot(aes(rounded_lon, rounded_lat, fill = factor(percent_missing))) + 
+   geom_tile()
 
-reg_data <- ebsbts_trawlers %>%
-  group_by(year, rounded_lat, rounded_lon) %>% 
-  summarise(num_vessels = length(unique(mmsi)),
-            total_hours = sum(total_hours),
-            total_engine_hours = sum(total_hours * inferred_engine_power),
-            knot = unique(knot),
-            dist_from_port = mean(mean_distance_from_port),
-            dist_from_shore = mean(mean_distance_from_shore),
-            mean_vessel_length = mean(inferred_length)) %>% 
-  left_join(vast_alaska_pollock$spatial_densities, by = c('year', 'knot')) %>%
-  ungroup() %>%
-  mutate(
-    vessel_hours = total_engine_hours * num_vessels) %>%
-  group_by(rounded_lat, rounded_lon) %>%
-  arrange(year) %>%
-  mutate(
-    total_engine_hours_lag1 = lag(total_engine_hours, 1),
-    total_engine_hours_lag2 = lag(total_engine_hours, 2),
-    total_engine_hours_lag3 = lag(total_engine_hours, 3),
-    port_engine_hours = dist_from_port * total_engine_hours,
-    port_hours = dist_from_port * total_hours,
-    port_numbers = dist_from_port * num_vessels,
-    shore_numbers = dist_from_shore * num_vessels,
-    shore_hours = dist_from_shore * total_hours,
-    shore_engine_hours = dist_from_shore * total_engine_hours,
-    large_vessels = num_vessels * mean_vessel_length
-  ) %>%
-  ungroup() %>% {
-    if (log_space == F) {
-      mutate(., density = exp(density))
-    } else {
-      .
-    }
+  b <- skynet_data %>% 
+   group_by(rounded_lat, rounded_lon) %>% 
+   summarise(percent_missing = mean(is.na(mean_altitude)),
+             th = sum(total_hours)) 
+  
+  ggmap::qmplot(rounded_lon, rounded_lat, color = percent_missing, data = b)
+ 
+ggmap::qmplot(rlon, rlat, color = mean_chlorophyll, data = a )
 
-  } %>%
-  # mutate(density = lag(density, 1)) %>%
-  filter(total_engine_hours > 0,
-         density > 0,
-         is.na(density) == F) #fix this later, need to include zeros
-
-fitControl <- trainControl(## 10-fold CV
-  method = "repeatedcv",
-  number = 10,
-  ## repeated ten times
-  repeats = 10)
-
-skynet_sandbox <- modelr::crossv_kfold(skynet_data, 5)
-
-#center and scale things now
-
-
-rf_model <- train(
-  density ~ total_engine_hours +
-    total_hours +
-    large_vessels +
-    port_hours +
-    port_engine_hours +
-    port_numbers +
-    shore_hours +
-    shore_engine_hours +
-    shore_numbers +
-    num_vessels +
-    mean_vessel_length,
-  data = skynet_sandbox$train[[1]],
-  method = "rf",
-  trControl = fitControl,
-  do.trace = 10
-)
-
-skynet_sandbox$train[[1]]
 ```
+
+Aha, so part of the problem is simply a bounding box problem
+
+sst is bounding box
+
+Wave data is just a different resolution
+
+
+
+## prepare model
+
+The goal here is a tidy framework for running various models. 
+
+A model will be defined by the independent variable, the dependent variable,  the data that go into it, and the structure of the model that is fit. 
+
+So step one will be a function that takes the supplied data and prepares it for the model. 
+
+From there, another function will take the data and the desired model form and run the model, returning a few useful outputs (the model, rmse, whatever)
+
+So looking at the "decent" model fits that you got in run-skynet-poc.R
+
+That model was using raw, not log, densities. No center and scaling of variables. 100 knots, not 1000. Filtered out places with total_engine_hours = 0, density = 0, is.na(density) = F. 
+
+
+
+```{r}
+
+skynet_names <- colnames(skynet_data)
+
+do_not_scale <- c('year','rounded_lat','rounded_lon','no_take_mpa', 'restricted_use_mpa','knot','distance','any_fishing') # variables that should not be centered and scaled
+
+do_scale <- skynet_names[ !skynet_names %in% do_not_scale]
+
+skynet_data <- skynet_data %>%
+  filter(total_hours > 0) %>% 
+  ungroup() %>%
+ purrrlyr::dmap_at(do_scale, ~ (.x - mean(.x, na.rm = T)) / (2 * sd(.x, na.rm = T))) #center and scale variables that should be
+
+dep_var <- c('log_density')
+
+ind_vars <-
+  c(paste(
+  skynet_names[!skynet_names %in% c(dep_var,
+  'year',
+  'rounded_lat',
+  'rounded_lon',
+  'knot',
+  'distance')], collapse = '+'),
+  paste(
+ c('total_hours' ,
+    'large_vessels' ,
+    'port_hours' ,
+    'port_engine_hours' ,
+    'port_numbers' ,
+    'shore_hours' ,
+    'shore_engine_hours' ,
+    'shore_numbers' ,
+    'dist_from_port' ,
+    'dist_from_shore' ,
+    'num_vessels' ,
+    'mean_vessel_length'),
+ collapse = '+'
+  ),
+   paste(
+ c(
+    'large_vessels' ,
+    'port_numbers' ,
+    'dist_from_port' ,
+    'dist_from_shore' ,
+    'mean_vessel_length'),
+ collapse = '+'
+  )
+  )
+
+models <- 'rf'
+
+test_train_data <- modelr::crossv_kfold(skynet_data, k = 2)
+
+skynet_models <-  purrr::cross_df(list(
+  dep_var = dep_var,
+  ind_vars = list(ind_vars[[2]]),
+  temp = list(test_train_data),
+  model = models
+)) %>% 
+  unnest(temp, .drop = F) %>% 
+  mutate(ind_vars = map(ind_vars, unlist))
+
+
+```
+
+Booya, now let's try fitting...
+
+```{r}
+
+sfm <- safely(fit_skynet)
+
+skynet_models <- skynet_models %>%
+  mutate(fitted_model = pmap(
+  list(
+  dep_var = dep_var,
+  ind_vars = ind_vars,
+  model = model,
+  training = train, 
+  testing = test
+  ),
+  sfm,
+  fitcontrol_number = 10,
+  fitcontrol_repeats = 10))
+
+wee <- map(skynet_models$fitted_model,'result')
+
+a <- wee[[1]]
+
+a$model$finalModel
+
+arg <- skynet_models$test[[1]] %>% 
+  as_data_frame() %>% 
+  na.omit() %>% 
+  ungroup() %>% 
+  mutate(ld_hat = predict(a$model$finalModel, newdata = .))
+
+arg %>% 
+  ggplot(aes(log_density, ld_hat)) + 
+  geom_point() + 
+  geom_abline(aes(intercept = 0, slope = 1))
+
+
+huh <- a$model$trainingData %>% 
+  mutate(ld_hat = a$model$finalModel$predicted)
+
+huh %>% 
+  ggplot(aes(.outcome, ld_hat)) + 
+  geom_point() + 
+  geom_abline(aes(intercept = 0, slope = 1))
+
+
+```
+
+
+And you have a working model! Let spend some time now reminding yourself and writing down what the actual diagnostics should be here. 
+
+```{r}
+wtf <- huh %>% 
+  summarise(r2 = 1 - (sum((.outcome - ld_hat)^2) / sum((.outcome - mean(.outcome))^2)),
+            mse = mean((.outcome - ld_hat) ^2 ),
+            vary = var(.outcome)
+            ) %>% 
+  mutate(r22 = 1 - mse / vary)
+
+R2 <- 1 - (sum((actual-predicted)^2)/sum((actual-mean(actual))^2))
+
+r22 <- 1 - (last(a$model$finalModel$mse) / var(huh$.outcome))
+
+
+wtf <- lm(mpg ~ hp, data = mtcars)
+
+mse <- modelr::rmse(wtf, mtcars)^2
+
+vary <- var(mtcars$mpg)
+
+1 - mse / vary
+
+```
+
+```{r}
+
+set.seed(131)
+
+    fit_control <- trainControl(method = 'repeatedcv',
+                                number = 5,
+                                repeats = 5)
+
+ozone.rf <- caret::train(Ozone ~.,
+             data = airquality, 
+             na.action = na.omit, 
+             tnControl = fit_control, 
+             do.trace = T)
+
+ozone.rf <- randomForest(Ozone ~ ., data=airquality, mtry=3,
+                         importance=TRUE, na.action=na.omit)
+
+ozone.rf$rsq
+
+
+```
+
+
 
 ## fit models 
 

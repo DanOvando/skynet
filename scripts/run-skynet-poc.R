@@ -279,7 +279,7 @@ fishing_connection <- DBI::dbConnect(bigrquery::dbi_driver(),
 
 
 ebs_raw <- fishing_connection %>%
-  tbl("ebs_w_vessels") %>%
+  tbl("ebsbts_gfw") %>%
   collect(n = Inf)
 
 ebs <- ebs_raw %>%
