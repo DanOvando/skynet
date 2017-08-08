@@ -722,6 +722,10 @@ test_all <-
 ```
 OK I think D_xcy is the multispecies output
 
+Now need to figure out how you actually interpret and get the multi-species outputs
+
+The key is in the extraction step of `PlotResultsOnMap_Fn.r`
+
 # Test Model Fit
 
 go back to your old friend alaska pollock as a test. 

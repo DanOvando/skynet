@@ -24,6 +24,7 @@ library(trelliscopejs)
 library(ggjoy)
 library(modelr)
 library(caret)
+library(taxize)
 library(tidyverse)
 
 demons::load_functions('functions')
@@ -43,15 +44,19 @@ write(run_description, file = paste0(run_dir, 'description.txt'))
 
 # set run options ---------------------------------------------------------
 
-query_fishdata <-  T
+query_fishdata <-  F
 
-query_gfw <- T
+query_gfw <- F
 
-query_environmentals <-  T
+query_environmentals <-  F
 
-query_mpas <-  T
+query_mpas <-  F
 
 vasterize <-  T
+
+fished_only <-  T
+
+hack_zeros <-  T
 
 gfw_project <- "ucsb-gfw"
 
@@ -61,6 +66,10 @@ lat_lon_res <-
   0.25 # round data to intervels of 0.25 degrees lat lon, as in 56.25
 
 num_knots <-  100
+
+species_list <- c('Gadus_chalcogrammus') #, 'Hippoglossoides_elassodon','Gadus_macrocephalus')
+
+survey_list <- 'ebsbts'
 
 # get fishdata ------------------------------------------------------------
 
@@ -111,7 +120,7 @@ survey_bbox <- fish_data %>%
 
 survey_bbox
 
-survey_names <- paste0(fishdata_names$survey %>% tolower(), '_gfw')
+survey_names <- paste0(fish_data$survey %>% tolower(), '_gfw') %>% unique()
 
 # query_gfw ---------------------------------------------------------------
 
@@ -417,44 +426,156 @@ if (query_mpas == T) {
 }
 
 
+
+# perform filters and data processing ---------------------------------------------------------
+
+# decide species that go in
+# for now, query FAO for species fished... this is hacky though since means that depends on static data...
+
+fao <- data.table::fread("~/Box Sync/Databases/FAO/FAO_Capture_1950to2012.csv", header = T) %>%
+  as_data_frame() %>%
+  filter(isscaap_group < 60) # get fao data
+
+fao_species <- unique(fao$sciname) # unique fao species
+
+species_seen <- fish_data$Sci %>% unique() %>%
+  str_replace('_',' ') # species in fishdata
+
+safe_syns <- safely(taxize::synonyms)
+
+species_data <- data_frame(sci_name = species_seen) %>%
+  filter(is.na(sci_name) == F) %>%
+  mutate(worms = map(sci_name, taxize::get_wormsid, ask = F)) %>%
+  mutate(worms_id = map(worms, `[[`,1) %>% as.character()) %>% # extract the worms id
+  filter(is.na(worms_id) == F) %>%
+  mutate(known_synonyms = map(worms_id %>% as.numeric(), safe_syns, db = 'worms'))
+
+species_data <- species_data %>%
+  mutate(syn_results = map(known_synonyms,'result')) %>%
+  mutate(syns = map(syn_results,`[[`,1)) %>%
+  mutate(sci_syns = map(syns, "scientificname")) # extract synonyms
+
+
+check_fao <- function(sci, syns, faos){
+
+  in_fao <- sci %in% faos | any(syns %in% faos)
+
+}
+
+fished_species <- species_data %>%
+  mutate(in_fao = map2_lgl(sci_name, sci_syns, check_fao, fao_species)) %>%
+  select(sci_name, sci_syns, in_fao) %>%
+  filter(in_fao == T) # find species whose primary name or synonyms are in fao database
+
+# if (fished_only == T){ # include only fished species
+#
+#   fish_data <- fish_data %>%
+#     filter(str_replace(Sci, '_',' ') %in% fished_species$sci_name)
+#
+# }
+# sci2comm(fished_species$sci_name)
+
+
+# MAJOR HACK TO DEAL WITH PERFECTLY OBSERVED SPECIES FIX FIX FIX FIX ONCE VAST IS FIXED
+# can't run species that are perfectly observed at this point, so for now going to do a
+# MAJOR hack and for species without any zeros, convert values below some quantile threshold to zeros
+
+if (hack_zeros == T) {
+
+hack_foo <- function(x){
+
+  min_wt <- min(x$Wt)
+
+  if (min_wt > 0){
+
+    min_quantile <- quantile(x$Wt,0.025) %>% as.numeric()
+
+    x$Wt[x$Wt <=min_quantile ] <-  0
+
+  }
+
+  return(x)
+}
+
+fish_data <- fish_data %>%
+  nest(-survey,-Sci,- Year) %>%
+  mutate(hackdat = map(data,hack_foo )) %>%
+  select(-data) %>%
+  unnest()
+} # close hack zeros
+
+
+fish_data <- fish_data %>%
+  filter(is.na(Sci) == F)
+
 # vasterize ---------------------------------------------------------------
 
+species_list <- unique(fish_data$Sci)
 
+# species_list <- c('Gadus_macrocephalus')
 
-alaska_pollock <- fish_data %>%
-  filter(survey == 'ebsbts', Sci == 'Gadus_chalcogrammus') %>%  dplyr::rename(Lon = Long,
+subset_fish_data <- fish_data %>%
+  filter(survey %in% survey_list , Sci %in% species_list) %>%  dplyr::rename(Lon = Long,
                                                                               Catch_KG = Wt,
                                                                               spp  = Sci) %>%
   mutate(AreaSwept_km2 = 1 , Vessel = 'missing') %>%
   select(Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG, spp) %>%
   set_names(tolower(colnames(.))) %>%
-  as.data.frame() %>%
-  na.omit() %>%
   filter(year >= 2012) %>%
+  group_by(year, spp) %>%
+  mutate(seen_types = length(unique(catch_kg > 0))) %>%
+  filter(seen_types == 2,
+         spp != 'Paguridae') %>%
+  select(-seen_types) %>%
+  ungroup() %>%
   mutate(vessel = as.factor(vessel),
-         spp = as.factor(spp))  #note that this breaks if it's a tibble, should make a bit more flexible
+         spp = as.factor(spp)) %>%
+  as.data.frame() #note that this breaks if it's a tibble, should make a bit more flexible
 
-set.seed(53)
+
+# arg <- subset_fish_data %>%
+#   group_by(year,spp) %>%
+#   summarise(nobs = mean(catch_kg > 0)) %>%
+#   ggplot(aes(spp, nobs)) +
+#   geom_col() +
+#   coord_flip() +
+#   facet_wrap(~year)
+
+set.seed(42)
 
 if (vasterize == T) {
-  vast_alaska_pollock <-
+  vast_fish <-
     vasterize_index(
-      raw_data = alaska_pollock,
+      raw_data = subset_fish_data,
       run_dir = run_dir,
       nstart = 100,
       region = 'Eastern_Bering_Sea',
-      n_x = num_knots
+      n_x = num_knots,
+      obs_model = c(2,0)
     )
 
-  # ggmap::qmplot(x = approx_long, y = approx_lat, data = vast_alaska_pollock$spatial_list$loc_x_lat_long, color = 'red')
+  # vast_fish$spatial_list$loc_x_lat_long
+  #
+  # vast_fish$spatial_densities
+#
+#   ggmap::qmplot(
+#     x = approx_long,
+#     y = approx_lat,
+#     data = vast_fish$spatial_densities,
+#     color = density
+#   ) +
+#     facet_wrap(~species) +
+#     scale_color_viridis()
 
-  save(file = paste0(run_dir, 'vast_alaska_pollock.Rdata'),
-       vast_alaska_pollock)
+  save(file = paste0(run_dir, 'vast_fish.Rdata'),
+       vast_fish)
 } else {
-  load(file = paste0(run_dir, 'vast_alaska_pollock.Rdata'))
+  load(file = paste0(run_dir, 'vast_fish.Rdata'))
 
 }
 # build database ----------------------------------------------------------
+
+# pre-process gfw data
 
 ebs_trawlers <- gfw_data %>%
   filter(survey == "ebsbts_gfw") %>%
@@ -491,16 +612,31 @@ skynet_data <- ebs_trawlers %>%
     large_vessels = num_vessels * mean_vessel_length
   )
 
-fish_data <- vast_alaska_pollock$spatial_densities
 
-fish_knots <- vast_alaska_pollock$spatial_list$loc_x_lat_long
+# pre process fishdata
 
+if (fished_only == T){ # include only fished species
+
+  total_fish_data <- vast_fish$spatial_densities  %>%
+    filter(str_replace(species, '_',' ') %in% fished_species$sci_name)
+
+} else {
+  total_fish_data <- vast_fish$spatial_densities
+}
+
+
+total_fish_data <- total_fish_data %>%
+  group_by(knot, year) %>%
+  summarise(density = sum(density))
+
+
+# aggregate data
 
 skynet_data <-
   create_skynet_data(
     gfw_data = skynet_data,
-    fish_data = fish_data,
-    fish_knots = fish_knots,
+    fish_data = total_fish_data,
+    fish_knots = vast_fish$spatial_list$loc_x_lat_long,
     surveys = 'ebsbts_gfw',
     topo_data = topo_data,
     wind_data = wind_data,
@@ -515,6 +651,9 @@ skynet_data <-
 #   summarise(percent_missing = mean(is.na(mean_altitude))) %>%
 #   ggplot(aes(rounded_lon, rounded_lat, fill = factor(percent_missing))) +
 #   geom_tile()
+
+# qmplot(rounded_lon, rounded_lat, color = log(density), data = skynet_data) +
+#   scale_color_viridis()
 
 # prepare models ----------------------------------------------------------
 
@@ -611,6 +750,21 @@ ind_vars <-
         'random_var'
       ),
       collapse = '+'
+    ),
+    paste(
+      c(
+        'port_numbers' ,
+        'dist_from_port' ,
+        'dist_from_shore' ,
+        'mean_vessel_length',
+        'm_below_sea_level',
+        'mean_analysed_sst',
+        'mean_chlorophyll',
+        'wind_speed',
+        'wind_angle',
+        'random_var'
+      ),
+      collapse = '+'
     )
   )
 
@@ -620,7 +774,7 @@ test_train_data <- modelr::crossv_kfold(skynet_data, k = 2)
 
 skynet_models <-  purrr::cross_df(list(
   dep_var = dep_var,
-  ind_vars = list(ind_vars[[5]]),
+  ind_vars = list(ind_vars[[6]]),
   temp = list(test_train_data),
   model = models
 )) %>%

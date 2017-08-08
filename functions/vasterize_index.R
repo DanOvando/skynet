@@ -88,6 +88,10 @@ vasterize_index <- function(raw_data,
   raw_data <-  cbind(raw_data, "knot_i" = spatial_list$knot_i)
 
 
+  year_key <-
+
+  species_key <-
+
   tmb_data <-  Data_Fn(
     "Version" = version,
     "FieldConfig" = FieldConfig,
@@ -140,30 +144,39 @@ vasterize_index <- function(raw_data,
   years_2_include <-
     which(year_set %in% sort(unique(raw_data[, 'year'])))
   #god damn it Dens_xt is in log space
-  dens_xt <-
-    SpatialDeltaGLMM::PlotResultsOnMap_Fn(
-      plot_set = c(3),
-      MappingDetails = map_details_list[["MappingDetails"]],
-      Report = report,
-      Sdreport = opt$SD,
-      PlotDF = map_details_list[["PlotDF"]],
-      MapSizeRatio = map_details_list[["MapSizeRatio"]],
-      Xlim = map_details_list[["Xlim"]],
-      Ylim = map_details_list[["Ylim"]],
-      FileName = ,
-      ,
-      ,
-      Year_Set = year_set,
-      Years2Include = years_2_include,
-      Rotate = map_details_list[["Rotate"]],
-      Cex = map_details_list[["Cex"]],
-      Legend = map_details_list[["Legend"]],
-      zone = map_details_list[["Zone"]],
-      mar = c(0, 0, 2, 0),
-      oma = c(3.5, 3.5, 0, 0),
-      cex = 1.8,
-      plot_legend_fig = FALSE
-    )
+  # dens_xt <-
+  #   SpatialDeltaGLMM::PlotResultsOnMap_Fn(
+  #     plot_set = c(3),
+  #     MappingDetails = map_details_list[["MappingDetails"]],
+  #     Report = report,
+  #     Sdreport = opt$SD,
+  #     PlotDF = map_details_list[["PlotDF"]],
+  #     MapSizeRatio = map_details_list[["MapSizeRatio"]],
+  #     Xlim = map_details_list[["Xlim"]],
+  #     Ylim = map_details_list[["Ylim"]],
+  #     FileName = ,
+  #     ,
+  #     ,
+  #     Year_Set = year_set,
+  #     Years2Include = years_2_include,
+  #     Rotate = map_details_list[["Rotate"]],
+  #     Cex = map_details_list[["Cex"]],
+  #     Legend = map_details_list[["Legend"]],
+  #     zone = map_details_list[["Zone"]],
+  #     mar = c(0, 0, 2, 0),
+  #     oma = c(3.5, 3.5, 0, 0),
+  #     cex = 1.8,
+  #     plot_legend_fig = FALSE
+  #   )
+
+  spatial_densities <- report$D_xcy %>%
+    reshape2::melt() %>%
+    as_data_frame() %>%
+    set_names(c('knot','species','year','density')) %>%
+    mutate(species = factor(species, labels = unique(raw_data$spp) %>% as.character()) %>% as.character(),
+           year = factor(year, labels = unique(raw_data$year) %>% as.numeric()) %>% as.character() %>% as.numeric()) %>%
+    left_join(spatial_list$loc_x_lat_long, by = 'knot')
+
 
   diagnostics <-
     opt$diagnostics[, c('Param', 'Lower', 'MLE', 'Upper', 'final_gradient')]
@@ -182,26 +195,24 @@ vasterize_index <- function(raw_data,
 
 
   vast_index <- index$Table %>%
-    select(Year, Estimate_metric_tons) %>%
+    select(Year,Unit, Estimate_metric_tons) %>%
     rename(abundance = Estimate_metric_tons) %>%
     mutate(source = 'vast')
 
-  spatial_densities = cbind(
-    "density" = as.vector(dens_xt),
-    "year" = year_set[col(dens_xt)],
-    "e_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'E_km'],
-    "n_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'N_km']
-  ) %>%
-    as_data_frame() %>%
-    mutate(knot = as.numeric(factor(paste(e_km, n_km)))) %>%
-    arrange(knot, year)
-
+  # spatial_densities = cbind(
+  #   "density" = as.vector(dens_xt),
+  #   "year" = year_set[col(dens_xt)],
+  #   "e_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'E_km'],
+  #   "n_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'N_km']
+  # ) %>%
+  #   as_data_frame() %>%
+  #   mutate(knot = as.numeric(factor(paste(e_km, n_km)))) %>%
+  #   arrange(knot, year)
   outlist <-
     list(
       extrapolation_list = extrapolation_list,
       spatial_list = spatial_list,
       spatial_densities = spatial_densities,
-      spatial_index = dens_xt,
       time_index = vast_index,
       report = report,
       obj = obj,
