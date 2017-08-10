@@ -10,9 +10,7 @@ quick_map <- function(dat,lat_var, lon_var, plot_var, facet_var){
     x = lon,
     y = lat,
     data = dat2,
-    color = log(var),
-    maptype = 'toner-lite',
-    source = 'google'
+    color = log(var)
   ) +
     scale_color_viridis(guide = F) +
     facet_wrap( ~ facet) +

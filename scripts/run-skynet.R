@@ -7,6 +7,7 @@
 # prep run ----------------------------------------------------------
 
 set.seed(42)
+rm(list = ls())
 library(bigrquery)
 library(lubridate)
 library(leaflet)
@@ -29,7 +30,7 @@ library(tidyverse)
 
 demons::load_functions('functions')
 
-run_name <- 'testing'
+run_name <- 'full-test'
 
 run_description <- 'development of full paper'
 
@@ -44,19 +45,29 @@ write(run_description, file = paste0(run_dir, 'description.txt'))
 
 # set run options ---------------------------------------------------------
 
-query_fishdata <-  F
+run_models <-  T
 
-query_gfw <- F
+query_fishdata <-  F # get trawl survey data or load saved
 
-query_environmentals <-  F
+query_gfw <- F # get gfw data or load saved
 
-query_mpas <-  F
+query_environmentals <-  F #get environmental data or load saved
 
-vasterize <-  T
+query_mpas <-  F # get mpa data or load saved
 
-fished_only <-  T
+query_synonyms <-  F
 
-hack_zeros <-  T
+vasterize <-  T # run vast or load saved object
+
+fished_only <-  T # only include fished species in model fitting
+
+hack_zeros <-  T # hack zeros into perfectly observed species
+
+include_all_species <-  T #include all species in VAST
+
+bottom_gears_only <- T # only include bottom gear
+
+clip_gfw  <-  T
 
 gfw_project <- "ucsb-gfw"
 
@@ -67,9 +78,11 @@ lat_lon_res <-
 
 num_knots <-  100
 
-species_list <- c('Gadus_chalcogrammus') #, 'Hippoglossoides_elassodon','Gadus_macrocephalus')
+min_year <-  2012
 
-survey_list <- 'ebsbts'
+species_list <- c('Gadus_chalcogrammus', 'Hippoglossoides_elassodon','Gadus_macrocephalus')
+
+survey_list <- c('ebsbts','goabts','aibts','wcgbts')
 
 # get fishdata ------------------------------------------------------------
 
@@ -77,16 +90,20 @@ if (query_fishdata == T) {
   fishdata_names <- tribble(
     ~ survey,
     ~ survey_name,
+    ~ survey_region,
     #--/--
     'EBSBTS',
-    'eastern bering sea bottom trawl survey',
-    # 'WCGBTS','west coast groundfish bottom trawl survey',
-    # 'WCGHL', 'West_coast_groundfish_hook_and_line',
+    'eastern bering sea bottom trawl survey','eastern_bering_sea',
+    'WCGBTS','west coast groundfish bottom trawl survey', 'california_current',
+    'WCGHL', 'West_coast_groundfish_hook_and_line','wcghl_domain',
     'GOABTS',
-    'gulf of alaska bottom trawl survey',
+    'gulf of alaska bottom trawl survey','gulf_of_alaska',
     'AIBTS',
-    'aluetian islands bottom trawl survey'
+    'aluetian islands bottom trawl survey','aleutian_islands'
   )
+
+  sdcr  <- safely(download_catch_rates)
+
   fish_data <- fishdata_names %>%
     mutate(survey_data = map(
       survey,
@@ -98,7 +115,18 @@ if (query_fishdata == T) {
     mutate(survey = tolower(survey))
 
   save(file = 'data/fish_data.Rdata', fish_data)
-
+#
+#   a = fish_data %>%
+#     mutate(rlat = round(Lat,2),
+#            rlong = round(Long,2)) %>%
+#     group_by(rlat,rlong) %>%
+#     summarise(tw = sum(Wt, na.rm = T)) %>%
+#     filter(rlong > -160, rlong < 0)
+#
+#   qmplot(rlong, rlat, color = log(tw), data = a) +
+#     scale_color_viridis() +
+#     theme_minimal()
+#
 } else {
   load("data/fish_data.Rdata")
 
@@ -121,6 +149,8 @@ survey_bbox <- fish_data %>%
 survey_bbox
 
 survey_names <- paste0(fish_data$survey %>% tolower(), '_gfw') %>% unique()
+
+
 
 # query_gfw ---------------------------------------------------------------
 
@@ -194,9 +224,7 @@ if (query_environmentals == T) {
       x = rlon,
       y = rlat,
       data = dat,
-      color = log(mean_chlorophyll),
-      maptype = 'toner-lite',
-      source = 'google'
+      color = log(mean_chlorophyll)
     ) +
       scale_color_viridis(guide = F) +
       facet_wrap( ~ year) +
@@ -208,6 +236,10 @@ if (query_environmentals == T) {
 
   chl_data <-  chl_data %>%
     mutate(plots = map_plot(chl_a, chl_plot_foo))
+
+  a <- chl_data$chl_a[[4]]
+
+  qmplot(rlon, rlat, color = mean_chlorophyll, data = a)
 
   save(file = 'data/chl_env_data.Rdata', chl_data)
 
@@ -236,9 +268,7 @@ if (query_environmentals == T) {
       x = rlon,
       y = rlat,
       data = dat,
-      color = log(mean_analysed_sst),
-      maptype = 'toner-lite',
-      source = 'google'
+      color = log(mean_analysed_sst)
     ) +
       scale_color_viridis(guide = F) +
       facet_wrap( ~ year) +
@@ -404,7 +434,7 @@ if (query_mpas == T) {
     data_frame(mpa_type = c('no_take_mpas_id', 'restricted_use_mpas_id'))
 
   fishing_connection <- DBI::dbConnect(bigrquery::dbi_driver(),
-                                       project = project,
+                                       project = gfw_project,
                                        dataset = 'regions_ids')
 
   mpa_ids <- mpa_ids %>%
@@ -431,6 +461,8 @@ if (query_mpas == T) {
 
 # decide species that go in
 # for now, query FAO for species fished... this is hacky though since means that depends on static data...
+
+if (query_synonyms == T) {
 
 fao <- data.table::fread("~/Box Sync/Databases/FAO/FAO_Capture_1950to2012.csv", header = T) %>%
   as_data_frame() %>%
@@ -467,6 +499,13 @@ fished_species <- species_data %>%
   select(sci_name, sci_syns, in_fao) %>%
   filter(in_fao == T) # find species whose primary name or synonyms are in fao database
 
+save(file = 'data/fished_species.Rdata', fished_species)
+
+} else {
+
+  load(file = 'data/fished_species.Rdata')
+
+}
 # if (fished_only == T){ # include only fished species
 #
 #   fish_data <- fish_data %>%
@@ -508,51 +547,66 @@ fish_data <- fish_data %>%
 fish_data <- fish_data %>%
   filter(is.na(Sci) == F)
 
-# vasterize ---------------------------------------------------------------
+if (bottom_gears_only == T) {
 
+gfw_data <- gfw_data %>%
+  unnest() %>%
+  filter(inferred_label_allyears == 'trawlers' | inferred_sublabel_allyears == 'pots_and_traps') %>%
+  nest(-survey)
+}
+
+gfw_data <- gfw_data %>%
+  filter(survey %in%  paste0(survey_list,'_gfw'))
+
+if (include_all_species == T) {
 species_list <- unique(fish_data$Sci)
+}
 
-# species_list <- c('Gadus_macrocephalus')
 
 subset_fish_data <- fish_data %>%
   filter(survey %in% survey_list , Sci %in% species_list) %>%  dplyr::rename(Lon = Long,
-                                                                              Catch_KG = Wt,
-                                                                              spp  = Sci) %>%
+                                                                             Catch_KG = Wt,
+                                                                             spp  = Sci) %>%
   mutate(AreaSwept_km2 = 1 , Vessel = 'missing') %>%
-  select(Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG, spp) %>%
+  select(survey,survey_region,Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG, spp) %>%
   set_names(tolower(colnames(.))) %>%
-  filter(year >= 2012) %>%
-  group_by(year, spp) %>%
+  filter(year >= min_year) %>%
+  group_by(survey,year, spp) %>%
   mutate(seen_types = length(unique(catch_kg > 0))) %>%
-  filter(seen_types == 2,
-         spp != 'Paguridae') %>%
-  select(-seen_types) %>%
+  group_by(survey,spp) %>%
+  mutate(seen_every_year = any(seen_types < 2)) %>%
+  filter(seen_every_year == F) %>%
+  select(-seen_types,-seen_every_year) %>%
   ungroup() %>%
-  mutate(vessel = as.factor(vessel),
-         spp = as.factor(spp)) %>%
-  as.data.frame() #note that this breaks if it's a tibble, should make a bit more flexible
+  # mutate(vessel = as.factor(vessel),
+  #        spp = as.factor(spp)) %>%
+  as.data.frame() %>%
+  nest(-survey,-survey_region) #note that this breaks if it's a tibble, should make a bit more flexible
 
 
-# arg <- subset_fish_data %>%
-#   group_by(year,spp) %>%
-#   summarise(nobs = mean(catch_kg > 0)) %>%
-#   ggplot(aes(spp, nobs)) +
-#   geom_col() +
-#   coord_flip() +
-#   facet_wrap(~year)
+# vasterize ---------------------------------------------------------------
 
 set.seed(42)
 
 if (vasterize == T) {
-  vast_fish <-
-    vasterize_index(
-      raw_data = subset_fish_data,
-      run_dir = run_dir,
-      nstart = 100,
-      region = 'Eastern_Bering_Sea',
-      n_x = num_knots,
-      obs_model = c(2,0)
-    )
+
+  # a = subset_fish_data$data[[1]] %>%
+  #   group_by(year, spp) %>%
+  #   summarise(ps = mean(catch_kg > 0)) %>%
+  #   ggplot(aes(spp, ps)) +
+  #   geom_col() +
+  #   facet_wrap(~year) +
+  #   coord_flip()
+
+  vast_fish <- subset_fish_data %>%
+    mutate(vasterized_data = purrr::pmap(list(region = survey_region,
+                                       raw_data = data),
+                                  vasterize_index,
+                                    run_dir = run_dir,
+                                    nstart = 100,
+                                    n_x = num_knots,
+                                    obs_model = c(2,0)
+                                  ))
 
   # vast_fish$spatial_list$loc_x_lat_long
   #
@@ -577,13 +631,9 @@ if (vasterize == T) {
 
 # pre-process gfw data
 
-ebs_trawlers <- gfw_data %>%
-  filter(survey == "ebsbts_gfw") %>%
+skynet_data <- gfw_data %>%
   unnest() %>%
-  filter(inferred_label_allyears == 'trawlers')
-
-skynet_data <- ebs_trawlers %>%
-  group_by(year, rounded_lat, rounded_lon) %>%
+  group_by(survey,year, rounded_lat, rounded_lon) %>%
   summarise(
     num_vessels = length(unique(mmsi)),
     total_hours = sum(total_hours),
@@ -610,41 +660,70 @@ skynet_data <- ebs_trawlers %>%
     shore_hours = dist_from_shore * total_hours,
     shore_engine_hours = dist_from_shore * total_engine_hours,
     large_vessels = num_vessels * mean_vessel_length
-  )
+  ) %>%
+  ungroup()
 
 
 # pre process fishdata
 
+knots  <- vast_fish %>%
+  select(survey, vasterized_data) %>%
+  mutate(knots = map(vasterized_data, c('spatial_list','loc_x_lat_long'))) %>%
+  select(-vasterized_data) %>%
+  mutate(survey = paste0(survey, '_gfw'))
+
 if (fished_only == T){ # include only fished species
 
-  total_fish_data <- vast_fish$spatial_densities  %>%
+  total_fish_data <- vast_fish %>%
+    mutate(spatial_densities = map(vasterized_data,'spatial_densities')) %>%
+    select(survey, spatial_densities) %>%
+    unnest() %>%
     filter(str_replace(species, '_',' ') %in% fished_species$sci_name)
 
 } else {
-  total_fish_data <- vast_fish$spatial_densities
+  total_fish_data <- vast_fish %>%
+    mutate(spatial_densities = map(vasterized_data,'spatial_densities')) %>%
+    select(survey, spatial_densities) %>%
+    unnest()
 }
 
 
 total_fish_data <- total_fish_data %>%
-  group_by(knot, year) %>%
-  summarise(density = sum(density))
-
+  group_by(survey,knot, year) %>%
+  summarise(density = sum(density)) %>%
+  ungroup() %>%
+  mutate(survey = paste0(survey, '_gfw')) %>%
+  nest(-survey, .key = fish_data)
 
 # aggregate data
 
-skynet_data <-
-  create_skynet_data(
-    gfw_data = skynet_data,
-    fish_data = total_fish_data,
-    fish_knots = vast_fish$spatial_list$loc_x_lat_long,
-    surveys = 'ebsbts_gfw',
-    topo_data = topo_data,
-    wind_data = wind_data,
-    chl_data = chl_data,
-    wave_data = wave_data,
-    sst_data = sst_data
-  )
 
+skynet_data <- skynet_data %>%
+  nest(-survey, .key = gfw_data) %>%
+  left_join(total_fish_data, by = 'survey') %>%
+  left_join(knots, by = 'survey')
+
+
+if (clip_gfw == T){
+
+   skynet_data <- skynet_data %>%
+     mutate(gfw_data = map2(knots, gfw_data, clip_gfw_to_fishdata))
+}
+
+skynet_data <- skynet_data %>%
+  mutate(combo_data = pmap(list(gfw_data = gfw_data,
+                                fish_data = fish_data,
+                                fish_knots = knots,
+                                surveys = survey),
+                           create_skynet_data,
+                           topo_data = topo_data,
+                           wind_data = wind_data,
+                           chl_data = chl_data,
+                           wave_data = wave_data,
+                           sst_data = sst_data
+                           )) %>%
+  select(survey, combo_data) %>%
+  unnest()
 
 # skynet_data %>%
 #   group_by(rounded_lat, rounded_lon) %>%
@@ -652,8 +731,9 @@ skynet_data <-
 #   ggplot(aes(rounded_lon, rounded_lat, fill = factor(percent_missing))) +
 #   geom_tile()
 
-# qmplot(rounded_lon, rounded_lat, color = log(density), data = skynet_data) +
-#   scale_color_viridis()
+qmplot(rounded_lon, rounded_lat, color = factor(knot), data = skynet_data %>% filter(rounded_lon > -175, survey == 'goabts_gfw', is.na(density) == F)) +
+  scale_color_viridis_d(guide = F)
+
 
 # prepare models ----------------------------------------------------------
 
@@ -670,7 +750,8 @@ do_not_scale <-
     'distance',
     'any_fishing',
     'log_density',
-    'density'
+    'density',
+    'survey'
   ) # variables that should not be centered and scaled
 
 do_scale <- skynet_names[!skynet_names %in% do_not_scale]
@@ -807,9 +888,9 @@ save(file = paste0(run_dir, 'skynet_models.Rdata'),
 
 } else {
 
-  load()
-
+  load(file = paste0(run_dir, 'skynet_models.Rdata'))
 }
+
 # diagnose models ---------------------------------------------------------
 
 wee <- map(skynet_models$fitted_model,'result')
@@ -829,7 +910,10 @@ arg <- skynet_models$test[[1]] %>%
 arg %>%
   ggplot(aes(log_density, ld_hat)) +
   geom_point() +
-  geom_abline(aes(intercept = 0, slope = 1))
+  geom_abline(aes(intercept = 0, slope = 1)) +
+  labs(x = 'Observed Multi-Species Density',
+y = 'Predicted Multi-Species Density', title = 'Testing data omitted from model fitting') +
+  hrbrthemes::theme_ipsum()
 
 
 huh <- a$model$trainingData %>%

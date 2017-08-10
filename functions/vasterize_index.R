@@ -25,6 +25,13 @@ vasterize_index <- function(raw_data,
                             calculate_cov_se = 0,
                             calculate_synchrony = 0,
                             calculate_coherence = 0) {
+
+  raw_data <- as.data.frame(raw_data) %>%
+  mutate(vessel = as.factor(vessel),
+         spp = as.factor(spp))
+
+  years <- min(raw_data$year):max(raw_data$year)
+
   Kmeans_Config = list("randomseed" = randomseed,
                        "nstart" = nstart,
                        #the number of times that the k-means algorithm is run while searching for the best solution (default=100)
@@ -58,8 +65,7 @@ vasterize_index <- function(raw_data,
     'Calculate_Coherence' = calculate_coherence
   )
 
-
-  vast_file <-  paste0(run_dir, 'VAST_output/')
+  vast_file <-  paste0(getwd(),'/',run_dir, 'VAST_output')
 
   if (dir.exists(vast_file) == F) {
     dir.create(vast_file)
@@ -87,12 +93,7 @@ vasterize_index <- function(raw_data,
 
   raw_data <-  cbind(raw_data, "knot_i" = spatial_list$knot_i)
 
-
-  year_key <-
-
-  species_key <-
-
-  tmb_data <-  Data_Fn(
+  tmb_data <-  VAST::Data_Fn(
     "Version" = version,
     "FieldConfig" = FieldConfig,
     "OverdispersionConfig" = overdispersion_config,
@@ -110,7 +111,7 @@ vasterize_index <- function(raw_data,
     "Method" = spatial_list$Method,
     "Options" = options
   )
-  tmb_list <-  Build_TMB_Fn(
+  tmb_list <-  VAST::Build_TMB_Fn(
     "TmbData" = tmb_data,
     "RunDir" = vast_file,
     "Version" = version,
@@ -138,11 +139,7 @@ vasterize_index <- function(raw_data,
     "Extrapolation_List" = extrapolation_list
   )
   # Decide which years to plot
-  year_set <-
-    seq(min(raw_data[, 'year']), max(raw_data[, 'year']))
 
-  years_2_include <-
-    which(year_set %in% sort(unique(raw_data[, 'year'])))
   #god damn it Dens_xt is in log space
   # dens_xt <-
   #   SpatialDeltaGLMM::PlotResultsOnMap_Fn(
@@ -168,15 +165,18 @@ vasterize_index <- function(raw_data,
   #     cex = 1.8,
   #     plot_legend_fig = FALSE
   #   )
-
   spatial_densities <- report$D_xcy %>%
     reshape2::melt() %>%
     as_data_frame() %>%
     set_names(c('knot','species','year','density')) %>%
     mutate(species = factor(species, labels = unique(raw_data$spp) %>% as.character()) %>% as.character(),
-           year = factor(year, labels = unique(raw_data$year) %>% as.numeric()) %>% as.character() %>% as.numeric()) %>%
+           year = factor(year, labels = years) %>% as.character() %>% as.numeric()) %>%
     left_join(spatial_list$loc_x_lat_long, by = 'knot')
 
+  year_set <- years
+
+  years_2_include <-
+    which(year_set %in% years)
 
   diagnostics <-
     opt$diagnostics[, c('Param', 'Lower', 'MLE', 'Upper', 'final_gradient')]
