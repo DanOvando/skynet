@@ -65,7 +65,7 @@ hack_zeros <-  T # hack zeros into perfectly observed species
 
 include_all_species <-  T #include all species in VAST
 
-bottom_gears_only <- T # only include bottom gear
+bottom_gears_only <- F # only include bottom gear
 
 clip_gfw  <-  T
 
@@ -76,13 +76,23 @@ gfw_dataset <- 'skynet'
 lat_lon_res <-
   0.25 # round data to intervels of 0.25 degrees lat lon, as in 56.25
 
-num_knots <-  100
-
 min_year <-  2012
 
 species_list <- c('Gadus_chalcogrammus', 'Hippoglossoides_elassodon','Gadus_macrocephalus')
 
-survey_list <- c('ebsbts','goabts','aibts','wcgbts')
+survey_list <- c('ebsbts','goabts','aibts','wcgbts', 'wcghl')
+
+
+knots_per_survey <-tribble(
+  ~survey,
+  ~knots,
+  #--/--
+  'ebsbts',200,
+  'goabts',200,
+  'aibts', 200,
+  'wcgbts', 1000,
+  'wcghl',100
+)
 
 # get fishdata ------------------------------------------------------------
 
@@ -132,6 +142,8 @@ if (query_fishdata == T) {
 
 }
 
+fish_data <- fish_data %>%
+  left_join(knots_per_survey, by = 'survey')
 
 survey_bbox <- fish_data %>%
   filter(Long < 0) %>%
@@ -568,7 +580,7 @@ subset_fish_data <- fish_data %>%
                                                                              Catch_KG = Wt,
                                                                              spp  = Sci) %>%
   mutate(AreaSwept_km2 = 1 , Vessel = 'missing') %>%
-  select(survey,survey_region,Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG, spp) %>%
+  select(survey,survey_region,knots,Year, Lat, Lon, Vessel, AreaSwept_km2, Catch_KG, spp) %>%
   set_names(tolower(colnames(.))) %>%
   filter(year >= min_year) %>%
   group_by(survey,year, spp) %>%
@@ -581,7 +593,7 @@ subset_fish_data <- fish_data %>%
   # mutate(vessel = as.factor(vessel),
   #        spp = as.factor(spp)) %>%
   as.data.frame() %>%
-  nest(-survey,-survey_region) #note that this breaks if it's a tibble, should make a bit more flexible
+  nest(-survey,-survey_region,-knots) #note that this breaks if it's a tibble, should make a bit more flexible
 
 
 # vasterize ---------------------------------------------------------------
@@ -600,11 +612,11 @@ if (vasterize == T) {
 
   vast_fish <- subset_fish_data %>%
     mutate(vasterized_data = purrr::pmap(list(region = survey_region,
-                                       raw_data = data),
+                                       raw_data = data,
+                                       n_x = knots),
                                   vasterize_index,
                                     run_dir = run_dir,
                                     nstart = 100,
-                                    n_x = num_knots,
                                     obs_model = c(2,0)
                                   ))
 
@@ -670,7 +682,20 @@ knots  <- vast_fish %>%
   select(survey, vasterized_data) %>%
   mutate(knots = map(vasterized_data, c('spatial_list','loc_x_lat_long'))) %>%
   select(-vasterized_data) %>%
-  mutate(survey = paste0(survey, '_gfw'))
+  mutate(survey = paste0(survey, '_gfw')) #%>%
+  # mutate(knot_plot =  map(knots, ~ quick_map(
+  #   .x,
+  #   lat_var = quo(approx_lat),
+  #   lon_var = quo(approx_long),
+  #   plot_var = quo(knot))))
+
+
+# quick_map(knots$knots[[4]],lat_var = quo(approx_lat),
+#           lon_var = quo(approx_long),
+#           plot_var = quo(knot), min_lon = -160)
+
+qmplot(approx_long,approx_lat, color = knot, data = knots$knots[[1]] )
+
 
 if (fished_only == T){ # include only fished species
 

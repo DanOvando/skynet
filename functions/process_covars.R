@@ -1,3 +1,13 @@
+#' process environmental covariates
+#' takes environmental covariates and spreads them for inclusion in skynet data
+#' @param covar the data to be dealt with
+#' @param surveys survey to include
+#' @param years  year
+#' @param non_data_vars variables that aren't data
+#'
+#' @return mean variable by space and time
+#' @export
+#'
 process_covars <- function(covar,
                            surveys,
                            years = 2012:2016,

@@ -1,3 +1,16 @@
+#' Create Skynet Data
+#' \code{create_skynet_data} creates a dataframe stictching together gfw, fishdata, and environmental data
+#' @param gfw_data gfw data
+#' @param fish_data fishdata data
+#' @param fish_knots fishdata knot locations
+#' @param surveys the survey being used
+#' @param cap_distance logical indicating whether to set maximum distance from knot included
+#' @param distance_quantile max distance quantile included in knot distance
+#' @param ... space for arbitrary environmental parameters
+#'
+#' @return a stitched dataframe
+#' @export
+#'
 create_skynet_data <-
   function(gfw_data,
            fish_data,
@@ -69,7 +82,7 @@ create_skynet_data <-
 
     if (cap_distance == T) {
       skynet_data <- skynet_data %>%
-        filter(distance <= quantile(skynet_data$distance, 0.75))
+        filter(distance <= quantile(skynet_data$distance, distance_quantile))
 
     }
 

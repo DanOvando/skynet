@@ -1,3 +1,39 @@
+#' Apply VAST to survey data
+#'
+#' \code{vasterize_index} takes survey data and applies the VAST model
+#' to provide standardized spatio-temporal abundance indicies
+#'
+#' @param raw_data the survey data in question
+#' @param region the general region, see VAST documentation
+#' @param run_dir the directory results will be stored in
+#' @param version the vast version to use
+#' @param method grid or mesh method
+#' @param strata
+#' @param n_x
+#' @param randomseed
+#' @param nstart
+#' @param iter.max
+#' @param omega1
+#' @param epsilon1
+#' @param omega2
+#' @param epsilon2
+#' @param beta1
+#' @param beta2
+#' @param vessel
+#' @param vessel_year
+#' @param obs_model a vector with the statistical model for the "delta" model
+#' @param sd_site_density
+#' @param sd_site_logdensity
+#' @param calculate_range
+#' @param calculate_evenness
+#' @param calculate_effective_area
+#' @param calculate_cov_se
+#' @param calculate_synchrony
+#' @param calculate_coherence
+#'
+#' @return a list of cleaned up outputs from VAST
+#' @export
+#'
 vasterize_index <- function(raw_data,
                             region = 'California_current',
                             run_dir = '../results/',
@@ -25,6 +61,7 @@ vasterize_index <- function(raw_data,
                             calculate_cov_se = 0,
                             calculate_synchrony = 0,
                             calculate_coherence = 0) {
+
 
   raw_data <- as.data.frame(raw_data) %>%
   mutate(vessel = as.factor(vessel),

@@ -674,7 +674,7 @@ So, to compare once you get GFW working, it will basically be the sum of the pre
 
 ## Multispecies
 
-Let's take a look and see how different it is. Hopefully it's the same, in which case your next order of business if to build a useful wrapper for VAST for single or multi-species cases. Looks like it runs about the same, with the exception that for some unholy reason c_i appears to the the species index, aha, standing for species category. Good lord. see `?Data_Fn` for better explanations
+Let's take a look and see how different it is. Hopefully it's the same, in which case your next order of business if to build a useful wrapper for VAST for single or multi-species cases. Looks like it runs about the same, with the exception c_i appears to the the species index, aha, standing for species category. Good lord. see `?Data_Fn` for better explanations
 
 
 ```{r, eval = F}

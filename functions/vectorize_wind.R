@@ -1,8 +1,12 @@
+#' vectorize wind
+#' calculates wind angle and speed from wind vectors
+#' @param x_wind x wind vector
+#' @param y_wind y wind vector
+#'
+#' @return wind angle and speed
+#' @export
+#'
 vectorize_wind <- function(x_wind, y_wind){
-#
-#   x_wind <- 10
-#
-#   y_wind <- -10
 
   wind_angle <-  180/pi * atan2(y_wind , x_wind)
 
