@@ -785,6 +785,8 @@ skynet_models <-  purrr::cross_df(list(
 
 sfm <- safely(fit_skynet)
 
+if (run_models == T) {
+
 skynet_models <- skynet_models %>%
   slice(1) %>%
   mutate(fitted_model = pmap(
@@ -800,6 +802,14 @@ skynet_models <- skynet_models %>%
     fitcontrol_repeats = 2
   ))
 
+save(file = paste0(run_dir, 'skynet_models.Rdata'),
+     skynet_models)
+
+} else {
+
+  load()
+
+}
 # diagnose models ---------------------------------------------------------
 
 wee <- map(skynet_models$fitted_model,'result')
