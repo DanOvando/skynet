@@ -1077,3 +1077,20 @@ You will test
   - in time
 
 Your objective right now is to get to metrics. Specifically, compare performance of different models to achieve the above, and write up a summary of what works and what doesn't, and then see what you can do to improve the model. 
+
+# 2017-08-10 - alpha version alive
+
+OK, the model now works from raw data to model fitting with just about every bell and whistle you could possible need. Eventually will need to bring in some more surveys, and tune up the VAST process a lot more carefully, but you're in business. 
+
+So what are the next steps? At it's face the model is looking seriously promising: R^2^ is about 0.75 for an off the shelf guess, and can make the case at least that it's a hell of a lot more reliable so far than the PRM ever looked. 
+
+But, there's still a long way to go. 
+
+Step 1, need to make a concrete set of diagnostic metrics and plots for each model run. Once that is established and running smooth, ou can then pass any number of crazy model runs to the diagnostic functions. 
+
+Once that is up and running, you then need to run a guantlet of alternate model forms and data inputs (e.g. leaving out regions and years, running on deltas instead of raws, ranks instead of raw values etc. )
+
+
+
+
+
