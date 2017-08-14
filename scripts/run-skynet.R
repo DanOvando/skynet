@@ -802,53 +802,54 @@ map_plot_foo
 temp_maps <- skynet_data %>%
   nest(-survey)
 
+map_plot_foo <- function(survey,dat, run_dir) {
+
+  a <-  dat %>%
+    group_by(rounded_lat, rounded_lon, year) %>%
+    summarise(density = unique(density),
+              gfw_hours = unique(total_hours),
+              knot = unique(knot)) %>%
+    gather('variable','value', density,gfw_hours) %>%
+    group_by(variable, year) %>%
+    mutate(value = value / max(value))
+
+
+  a <-  a %>%
+    dplyr::mutate(geometry = purrr::map2(rounded_lon, rounded_lat, ~ sf::st_point(
+      x = c(.x, .y), dim = 'XY'
+    ))) %>%
+    ungroup() %>%
+    mutate(geometry = sf::st_sfc(geometry, crs =
+                                   "+proj=longlat +datum=WGS84 +no_defs")) %>%
+    sf::st_sf() %>%
+    select(year, variable, value, geometry)
+
+
+  coast_map <-  ne_download(scale = 'medium', category = 'physical', type = 'coastline') %>%
+    sf::st_as_sf()
+
+  bbox <- sf::st_bbox(a)
+
+  var_map <- a %>%
+    ggplot() +
+    geom_sf(data = coast_map) +
+    geom_sf(aes(color = value),size = 0.01, alpha = 0.5) +
+    facet_grid(variable ~ year) +
+    coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+             ylim = c(bbox['ymin'], bbox['ymax'])) +
+    scale_color_viridis()
+
+  ggsave(filename = paste0(run_dir,survey,'_map.pdf'),var_map,
+         height = 10, width = 10)
+
+}
+
 walk2(temp_maps$survey, temp_maps$data, ~map_plot_foo(survey = .x,
                                                       dat = .y, run_dir = run_dir))
 
 # map_plot_foo(temp_maps$survey[[1]], dat = temp_maps$data[[1]],
 #              run_dir = run_dir)
 
-map_plot_foo <- function(survey,dat, run_dir) {
-
-a <-  dat %>%
-  group_by(rounded_lat, rounded_lon, year) %>%
-  summarise(density = unique(density),
-            gfw_hours = unique(total_hours),
-            knot = unique(knot)) %>%
-  gather('variable','value', density,gfw_hours) %>%
-  group_by(variable, year) %>%
-  mutate(value = value / max(value))
-
-
-a <-  a %>%
-  dplyr::mutate(geometry = purrr::map2(rounded_lon, rounded_lat, ~ sf::st_point(
-    x = c(.x, .y), dim = 'XY'
-  ))) %>%
-  ungroup() %>%
-  mutate(geometry = sf::st_sfc(geometry, crs =
-                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
-  sf::st_sf() %>%
-  select(year, variable, value, geometry)
-
-
-coast_map <-  ne_download(scale = 'medium', category = 'physical', type = 'coastline') %>%
-  sf::st_as_sf()
-
-bbox <- sf::st_bbox(a)
-
-var_map <- a %>%
-  ggplot() +
-  geom_sf(data = coast_map) +
-  geom_sf(aes(color = value),size = 0.1, alpha = 0.5) +
-  facet_grid(variable ~ year) +
-  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
-           ylim = c(bbox['ymin'], bbox['ymax'])) +
-  scale_color_viridis()
-
-ggsave(filename = paste0(run_dir,survey,'_map.pdf'),var_map,
-       height = 10, width = 10)
-
-}
 
 # a %>%
 #   filter(survey == 'ebsbts_gfw') %>%
