@@ -45,7 +45,7 @@ write(run_description, file = paste0(run_dir, 'description.txt'))
 
 # set run options ---------------------------------------------------------
 
-run_models <-  F
+run_models <-  F # fit statistical models to data
 
 query_fishdata <-  F # get trawl survey data or load saved
 
@@ -55,7 +55,7 @@ query_environmentals <-  F #get environmental data or load saved
 
 query_mpas <-  F # get mpa data or load saved
 
-query_synonyms <-  F
+query_synonyms <-  F # look up synonyms for each species
 
 vasterize <-  F # run vast or load saved object
 
@@ -67,7 +67,7 @@ include_all_species <-  T #include all species in VAST
 
 bottom_gears_only <- F # only include bottom gear
 
-clip_gfw  <-  T
+clip_gfw  <-  T # clip GFW data to extent of trawl surveys
 
 gfw_project <- "ucsb-gfw"
 
@@ -102,13 +102,13 @@ if (query_fishdata == T) {
     ~ survey_name,
     ~ survey_region,
     #--/--
-    'EBSBTS',
+    'ebsbts',
     'eastern bering sea bottom trawl survey','eastern_bering_sea',
-    'WCGBTS','west coast groundfish bottom trawl survey', 'california_current',
-    'WCGHL', 'West_coast_groundfish_hook_and_line','wcghl_domain',
-    'GOABTS',
+    'wcgbts','west coast groundfish bottom trawl survey', 'california_current',
+    'wcghl', 'West_coast_groundfish_hook_and_line','wcghl_domain',
+    'goabts',
     'gulf of alaska bottom trawl survey','gulf_of_alaska',
-    'AIBTS',
+    'aibts',
     'aluetian islands bottom trawl survey','aleutian_islands'
   )
 
@@ -160,7 +160,7 @@ survey_bbox <- fish_data %>%
 
 survey_bbox
 
-survey_names <- paste0(fish_data$survey %>% tolower(), '_gfw') %>% unique()
+survey_names <-fish_data$survey %>% tolower() %>% unique()
 
 
 
@@ -188,7 +188,6 @@ if (query_gfw == T) {
 
       )
     )
-
   save(file = 'data/gfw_data.Rdata', gfw_data)
 
 } else {
@@ -206,6 +205,37 @@ gfw_bbox <- gfw_data %>%
     min_lon = min(rounded_lon, na.rm = T),
     max_lon = max(rounded_lon, na.rm = T)
   )
+
+# process gfw data
+
+merge_known_and_inferred <- function(known, inferred, cap = NA){
+
+  if (is.na(cap)){ cap <-  1.1 * max(inferred, na.rm = T)}
+
+out <- ifelse(is.na(known), pmin(inferred,cap), known)
+
+}
+gfw_data <- gfw_data %>%
+  unnest() %>%
+  mutate(
+    engine_power = map2_dbl(
+      known_engine_power,
+      inferred_engine_power,
+      merge_known_and_inferred,
+      cap = 1.1 * max(inferred_engine_power, na.rm = T)),
+      vessel_length = map2_dbl(
+        known_length,
+        inferred_length,
+        merge_known_and_inferred,
+        cap = 150
+    ),
+    tonnage = map2_dbl(
+      known_tonnage,
+      inferred_tonnage,
+      merge_known_and_inferred,
+      cap = 1.1 * max(inferred_tonnage, na.rm = T))
+    ) %>%
+  nest(-survey)
 
 
 # query environmental data ------------------------------------------------
@@ -316,17 +346,17 @@ if (query_environmentals == T) {
     )
 
 
-  wave_data <- wave_data %>%
-    mutate(plots = map_plot(
-      wave_height,
-      ~ quick_map(
-        .x,
-        lat_var = quo(rlat),
-        lon_var = quo(rlon),
-        plot_var = quo(mean_Thgt),
-        facet_var = quo(year)
-      )
-    ))
+  # wave_data <- wave_data %>%
+  #   mutate(plots = map_plot(
+  #     wave_height,
+  #     ~ quick_map(
+  #       .x,
+  #       lat_var = quo(rlat),
+  #       lon_var = quo(rlon),
+  #       plot_var = quo(mean_Thgt),
+  #       facet_var = quo(year)
+  #     )
+  #   ))
 
   save(file = 'data/wave_env_data.Rdata', wave_data)
 
@@ -368,17 +398,17 @@ if (query_environmentals == T) {
 
 
 
-  wind_data <- wind_data %>%
-    mutate(plots = map_plot(
-      wind_vectors,
-      ~ quick_map(
-        .x,
-        lat_var = quo(rlat),
-        lon_var = quo(rlon),
-        plot_var = quo(wind_speed),
-        facet_var = quo(year)
-      )
-    ))
+  # wind_data <- wind_data %>%
+  #   mutate(plots = map_plot(
+  #     wind_vectors,
+  #     ~ quick_map(
+  #       .x,
+  #       lat_var = quo(rlat),
+  #       lon_var = quo(rlon),
+  #       plot_var = quo(wind_speed),
+  #       facet_var = quo(year)
+  #     )
+  #   ))
 
   save(file = 'data/wind_env_data.Rdata', wind_data)
 
@@ -411,17 +441,17 @@ if (query_environmentals == T) {
 
 
 
-  topo_data <- topo_data %>%
-    mutate(plots = map_plot(
-      altitude,
-      ~ quick_map(
-        .x,
-        lat_var = quo(rlat),
-        lon_var = quo(rlon),
-        plot_var = quo(m_below_sea_level),
-        facet_var = quo(mean_altitude_units)
-      )
-    ))
+  # topo_data <- topo_data %>%
+  #   mutate(plots = map_plot(
+  #     altitude,
+  #     ~ quick_map(
+  #       .x,
+  #       lat_var = quo(rlat),
+  #       lon_var = quo(rlon),
+  #       plot_var = quo(m_below_sea_level),
+  #       facet_var = quo(mean_altitude_units)
+  #     )
+  #   ))
 
   save(file = 'data/topo_env_data.Rdata', topo_data)
 
@@ -568,7 +598,7 @@ gfw_data <- gfw_data %>%
 }
 
 gfw_data <- gfw_data %>%
-  filter(survey %in%  paste0(survey_list,'_gfw'))
+  filter(survey %in%  survey_list)
 
 if (include_all_species == T) {
 species_list <- unique(fish_data$Sci)
@@ -686,8 +716,8 @@ skynet_data <- gfw_data %>%
 knots  <- vast_fish %>%
   select(survey, vasterized_data) %>%
   mutate(knots = map(vasterized_data, c('spatial_list','loc_x_lat_long'))) %>%
-  select(-vasterized_data) %>%
-  mutate(survey = paste0(survey, '_gfw')) #%>%
+  select(-vasterized_data)
+
   # mutate(knot_plot =  map(knots, ~ quick_map(
   #   .x,
   #   lat_var = quo(approx_lat),
@@ -722,7 +752,6 @@ total_fish_data <- total_fish_data %>%
   group_by(survey,knot, year) %>%
   summarise(density = sum(density)) %>%
   ungroup() %>%
-  mutate(survey = paste0(survey, '_gfw')) %>%
   nest(-survey, .key = fish_data)
 
 # aggregate data
@@ -797,7 +826,6 @@ ggsave(filename = paste0(run_dir,variable,'_plot.pdf'),p)
 walk(plot_vars, ~plot_covariates(dat = skynet_data, variable = .x, run_dir = run_dir))
 
 
-map_plot_foo
 
 temp_maps <- skynet_data %>%
   nest(-survey)
@@ -825,9 +853,13 @@ map_plot_foo <- function(survey,dat, run_dir) {
     select(year, variable, value, geometry)
 
 
-  coast_map <-  ne_download(scale = 'medium', category = 'physical', type = 'coastline') %>%
+  coast_map <-  rnaturalearth::ne_download(scale = 'medium', category = 'physical', type = 'coastline') %>%
     sf::st_as_sf()
 
+  save(file = "data/coast_map.Rdata", coast_map)
+  load(file = "data/coast_map.Rdata")
+
+  sf::write_sf()
   bbox <- sf::st_bbox(a)
 
   var_map <- a %>%
