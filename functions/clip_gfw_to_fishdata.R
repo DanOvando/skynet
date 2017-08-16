@@ -57,5 +57,7 @@ masked_gfw_coords <- as_data_frame(masked_gfw) %>% {
 #
 clipped_gfw <- gfw_dat %>%
   left_join(masked_gfw_coords, by = c('rounded_lon', 'rounded_lat')) %>%
-  filter(in_poly == T)
+  filter(in_poly == T) %>%
+  select(-in_poly)
+
 }

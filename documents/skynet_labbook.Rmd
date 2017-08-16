@@ -1090,7 +1090,14 @@ Step 1, need to make a concrete set of diagnostic metrics and plots for each mod
 
 Once that is up and running, you then need to run a guantlet of alternate model forms and data inputs (e.g. leaving out regions and years, running on deltas instead of raws, ranks instead of raw values etc. )
 
+# 2016-08-15 - model fitting
 
+Rather than trying insane combinations of independent variables, why not build the filtration process in; will take a bit longer for each individual run but saves a lot of time in hunting over random variables. 
 
+For tree-based methods; pass a model with all the ind vars of a certain type and  a random variable. Then, drop all variables less important than the random variable, and retune and re-predict.
 
+For linear regression, do your backwards selection
 
+For structural, well just the usual there I suppose. 
+
+Going to borrow heavily from run-skynet-poc to get this working. 

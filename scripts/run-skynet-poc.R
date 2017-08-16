@@ -441,7 +441,8 @@ skynet_data <- trawl_fishing_by_knot %>%
 # expand this more later, for now let's focus on getting all the models up and running well
 skynet_sandbox <- modelr::crossv_kfold(skynet_data, 5)
 
-# prep maching learning ---------------------------------------------------
+
+s# prep maching learning ---------------------------------------------------
 
 fitControl <- trainControl(## 10-fold CV
   method = "repeatedcv",
