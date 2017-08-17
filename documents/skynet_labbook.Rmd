@@ -1130,3 +1130,27 @@ could also use `caret:preProcess` to fill in missing data, but let's tackle that
 # 2017-08-16 v1.0 live
 
 it livessss
+
+OK, so things aren't looking great for the out of sample world at the moment. Model works great when it's job is to predict things inside the study region, even if outside of study time. But, it falls apart trying to be fit on alaska and then predict the west coast, as you somewhat would suspect
+
+So, solutions
+
+- center and scale by region rather than globally, so that variables are extreme for the region, not locally. 
+
+- Include log-density in center-scaling so that it's about relative magnitude, and trends, not absolute values. i.e. predicting high density as a funciton of high effort, low temperature, low productivity, etc. 
+
+- Let's just take a look at that and see what happens
+
+- the other thing is that you're missing tons of wind data... something is going wrong in the wind vector vonverson, but the data aren't working 
+
+- Make and check a delta method, that is predicting changes in abundance instead of current values
+
+- Make a GFW-only model 
+
+- Test out structural and linear models as well. 
+
+- Do something else for a bit today. 
+
+
+
+

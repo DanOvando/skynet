@@ -45,7 +45,7 @@ write(run_description, file = paste0(run_dir, 'description.txt'))
 
 # set section options (what to run) ---------------------------------------------------------
 
-run_models <-  F # fit statistical models to data
+run_models <-  T # fit statistical models to data
 
 vasterize <-  F # run vast or load saved object
 
@@ -66,6 +66,8 @@ query_coastal_map <-  F # get coastal map or load
 
 # set run options (how to run) ---------------------------------------------------------
 
+center_and_scale <-  T # center and scale some data?
+
 fished_only <-  T # only include fished species in predictive model fitting
 
 hack_zeros <-  T # hack zeros into perfectly observed species
@@ -77,6 +79,8 @@ include_all_species <-  T #include all species in VAST
 bottom_gears_only <- F # only include bottom gear
 
 clip_gfw  <-  T # clip GFW data to extent of trawl surveys
+
+vars_to_drop <- c('wind_speed','wind_angle')
 
 gfw_project <- "ucsb-gfw"
 
@@ -1001,6 +1005,9 @@ if (plot_data == T) {
 }
 # prepare models ----------------------------------------------------------
 
+skynet_data <- skynet_data %>%
+  select(-one_of(vars_to_drop))
+
 skynet_names <- colnames(skynet_data)
 
 do_not_scale <-
@@ -1013,17 +1020,19 @@ do_not_scale <-
     'knot',
     'distance',
     'any_fishing',
-    'log_density',
-    'density',
+    # 'log_density',
+    # 'density',
     'survey'
   ) # variables that should not be centered and scaled
 
-do_scale <- skynet_names[!skynet_names %in% do_not_scale]
+if (center_and_scale == T) {
+  do_scale <- skynet_names[!skynet_names %in% do_not_scale]
 
-skynet_data <- skynet_data %>%
-  ungroup() %>%
-  purrrlyr::dmap_at(do_scale, ~ (.x - mean(.x, na.rm = T)) / (2 * sd(.x, na.rm = T))) #center and scale variables that should be
-
+  skynet_data <- skynet_data %>%
+    group_by(survey) %>%
+    purrrlyr::dmap_at(do_scale, ~ (.x - mean(.x, na.rm = T)) / (2 * sd(.x, na.rm = T))) %>%  #center and scale variables that should be
+    ungroup()
+}
 dep_var <- c('log_density')
 
 never_ind_vars <-
@@ -1050,14 +1059,44 @@ lm_candidate_vars <-  skynet_names[!skynet_names %in% c(dep_var,
                                                           never_ind_vars)]
 models <- 'rf'
 
+
+
+delta_skynet <- skynet_data %>%
+  select(-contains('lag')) %>%
+  gather(variable, value,-survey,
+         -year,
+         -rounded_lat,
+         -rounded_lon,
+         -dist_from_port,
+         -dist_from_shore,
+         -no_take_mpa,
+         -restricted_use_mpa,
+         -any_fishing,
+         -m_below_sea_level,
+         -random_var,
+         -knot,
+         -distance
+         ) %>%
+  group_by(survey, variable, rounded_lat, rounded_lon) %>%
+  arrange(year) %>%
+  mutate(lag_value = lag(value,1)) %>%
+  mutate(delta_value = value - lag_value) %>%
+  select(-value, -lag_value) %>%
+  spread(variable, delta_value) %>%
+  na.omit() %>%
+  ungroup()
+
 data_sources <- tibble(
 lag_0_skynet_data = list(skynet_data %>%
   select(-contains('lag')) %>%
   na.omit()),
+
 lag_1_skynet_data = list(skynet_data %>%
   select(-total_engine_hours_lag2, -total_engine_hours_lag3) %>%
-  na.omit())) %>%
+  na.omit()),
+delta_skynet = list(delta_skynet)) %>%
   gather(data_subset, data)
+
 
 # lag_2_skynet_data <- skynet_data %>%
 #   select(-total_engine_hours_lag3) %>%
@@ -1129,7 +1168,7 @@ generate_test_training <- function(dat, test_set, kfolds = 2, cut_year = 2014) {
 
 test_train_data <- purrr::cross_df(list(
   test_sets = c('random','alaska','west_coast','historic'),
-  data_subset = c('lag_0_skynet_data', 'lag_1_skynet_data')
+  data_subset = c('lag_0_skynet_data','delta_skynet')
 )) %>%
   left_join(data_sources, by = 'data_subset')
 
@@ -1160,6 +1199,7 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
+    # filter(data_subset == 'delta_skynet') %>%
     mutate(fitted_model = pmap(
       list(
         dep_var = dep_var,
@@ -1168,8 +1208,8 @@ if (run_models == T) {
         testing = test
       ),
       sfm,
-      fitcontrol_number = 10,
-      fitcontrol_repeats = 10,
+      fitcontrol_number = 2,
+      fitcontrol_repeats = 2,
       never_ind_vars = never_ind_vars,
       tree_candidate_vars = tree_candidate_vars,
       lm_candidate_vars = lm_candidate_vars
@@ -1233,9 +1273,15 @@ save_foo <- function(test_plot,
 
 }
 
-pwalk(list(test_plot = skynet_models$test_plot,
-  test_region = skynet_models$test_sets,
-                          data_set = skynet_models$data_subset),save_foo, run_dir = run_dir)
+pwalk(
+  list(
+    test_plot = skynet_models$test_plot,
+    test_region = skynet_models$test_sets,
+    data_set = skynet_models$data_subset
+  ),
+  save_foo,
+  run_dir = run_dir
+)
 
 # wee <- map(skynet_models$fitted_model, c('result'))
 #
