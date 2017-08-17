@@ -1127,3 +1127,6 @@ could also use `caret:preProcess` to fill in missing data, but let's tackle that
 - Use that tuned model to predict training data (either kfold, other regions, other years, etc.)
 - Take what you judge to be the best model. Tune it to all the data, and use for global domination. 
 
+# 2017-08-16 v1.0 live
+
+it livessss
