@@ -66,7 +66,7 @@ query_coastal_map <-  F # get coastal map or load
 
 # set run options (how to run) ---------------------------------------------------------
 
-fished_only <-  T # only include fished species in model fitting
+fished_only <-  T # only include fished species in predictive model fitting
 
 hack_zeros <-  T # hack zeros into perfectly observed species
 
@@ -1184,33 +1184,86 @@ if (run_models == T) {
 
 # diagnose models ---------------------------------------------------------
 
-wee <- map(skynet_models$fitted_model, 'result')
+mse_foo <- function(dat, dep_var, pred_var) {
+  obs <- dat[,dep_var]
 
-a <- wee[[1]]
+  pred <- dat[,pred_var]
 
-a$model$finalModel
+  mse <- mean((obs - pred)^2)
+}
 
-varImpPlot(a$model$finalModel)
+diagnostic_plot_foo <- function(data,
+                                r2,
+                                dep_var,
+                                test_region,
+                                data_set){
 
-arg <- skynet_models$test[[1]] %>%
-  as_data_frame() %>%
-  na.omit() %>%
-  ungroup() %>%
-  mutate(ld_hat = predict(a$model$finalModel, newdata = .))
-
-arg %>%
-  ggplot(aes(log_density, ld_hat)) +
-  geom_point() +
-  geom_abline(aes(intercept = 0, slope = 1)) +
-  labs(x = 'Observed Multi-Species Density',
-       y = 'Predicted Multi-Species Density', title = 'Testing data omitted from model fitting') +
-  hrbrthemes::theme_ipsum()
+  data %>%
+    ggplot(aes_(as.name(dep_var), ~ pred)) +
+    geom_abline(aes(intercept = 0, slope = 1), color = 'red', linetype = 2) +
+    geom_point(alpha = 0.75) +
+    labs(title = paste0('Test Region is ', test_region,'; R2 = ', r2),
+         subtitle = paste0('Data Subset ', data_set))
 
 
-huh <- a$model$trainingData %>%
-  mutate(ld_hat = a$model$finalModel$predicted)
+}
 
-huh %>%
-  ggplot(aes(.outcome, ld_hat)) +
-  geom_point(aes(color = mean_analysed_sst)) +
-  geom_abline(aes(intercept = 0, slope = 1))
+
+skynet_models <- skynet_models %>%
+  mutate(test_data = map(fitted_model, c('result', 'test_predictions'))) %>%
+  mutate(
+    mse = map2_dbl(test_data, dep_var, mse_foo, pred_var = 'pred'),
+    var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
+    psuedo_r2 = round(1 - mse / var_y, 2)
+  ) %>%
+  mutate(test_plot = pmap(list(data = test_data,
+                               r2 = psuedo_r2,
+                               test_region = test_sets,
+                               data_set = data_subset,
+                               dep_var = dep_var),diagnostic_plot_foo))
+
+save_foo <- function(test_plot,
+                     test_region,
+                     data_set,
+                     run_dir) {
+
+  ggsave(filename = paste0(run_dir,test_region,'-',data_set,'.pdf'), test_plot,
+         height = 8, width = 8)
+
+
+}
+
+pwalk(list(test_plot = skynet_models$test_plot,
+  test_region = skynet_models$test_sets,
+                          data_set = skynet_models$data_subset),save_foo, run_dir = run_dir)
+
+# wee <- map(skynet_models$fitted_model, c('result'))
+#
+# a <- wee[[3]]
+#
+# a$model$finalModel
+#
+# varImpPlot(a$model$finalModel)
+#
+# arg <- skynet_models$test[[3]] %>%
+#   as_data_frame() %>%
+#   na.omit() %>%
+#   ungroup() %>%
+#   mutate(ld_hat = predict(a$model$finalModel, newdata = .))
+#
+# arg %>%
+#   ggplot(aes(log_density, ld_hat)) +
+#   geom_point() +
+#   geom_abline(aes(intercept = 0, slope = 1)) +
+#   labs(x = 'Observed Multi-Species Density',
+#        y = 'Predicted Multi-Species Density', title = 'Testing data omitted from model fitting') +
+#   hrbrthemes::theme_ipsum()
+#
+#
+# huh <- a$model$trainingData %>%
+#   mutate(ld_hat = a$model$finalModel$predicted)
+#
+# huh %>%
+#   ggplot(aes(.outcome, ld_hat)) +
+#   geom_point(aes(color = mean_analysed_sst)) +
+#   geom_abline(aes(intercept = 0, slope = 1))

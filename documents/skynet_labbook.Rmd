@@ -1,4 +1,4 @@
-z---
+---
 title: "Skynet Lab Notebook"
 date: "`r Sys.Date()`"
 output: html_document
@@ -1101,3 +1101,29 @@ For linear regression, do your backwards selection
 For structural, well just the usual there I suppose. 
 
 Going to borrow heavily from run-skynet-poc to get this working. 
+
+Also, what the hell do to with missing values. 
+
+The point of this phase is in deciding which model to use. 
+
+At the end of the day, presumably, you're going to want OOB predictions of the best model fit to all the data. 
+
+How you pick the best model is a bit tricky. Suppose that you pick the best model as the one that does the best job predicting WCGHL while trained on all others. How then do you want to produce the "final" model? Presumably trained on as much data as possible, so including WCGHL, though only useing OOB samples for final "obs vs predicted" plots. i.e. it really wouldn't seem to make much sense to train the model, and arbitrarily leave out some data as training in the final model structure? But I should read the book on this one some more. 
+
+So if that's the vission. DON'T OVERENGINEER THIS THING. If at the end of the day you're going to try and include all the data from the "best" model, then don't go crazy on data selection on the tuning phase. 
+
+Given that data aren't missing randomly (e.g. the lags), it doesn't seem fair to compare performance across models that fundamentally have access to different kinds of data. 
+
+
+So with that in mind, what the hell do you want to do about. 
+
+could also use `caret:preProcess` to fill in missing data, but let's tackle that next, since that would just be a special case of the process below
+
+- Break the data into data classes no lags, lag 1, lag 2, delta. 
+  - pass a 'must_have' variable in there somewhow
+- Filter down to candidate variables, and run na.omit
+- That will leave you with a complete dataset for each data class
+- Then, run variable selection on a model tuned to those data
+- Use that tuned model to predict training data (either kfold, other regions, other years, etc.)
+- Take what you judge to be the best model. Tune it to all the data, and use for global domination. 
+
