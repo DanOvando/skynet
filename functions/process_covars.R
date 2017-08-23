@@ -17,12 +17,11 @@ process_covars <- function(covar,
     select(which(colnames(.) != 'plots')) %>% #get rid of any plot columns in there
     select(survey, ncol(.)) %>%
     unnest()
-
   non_data_vars <-
     c(which(colnames(covar) %in% non_data_vars), which(str_detect(colnames(covar), 'units'))) #locations of variables besides data that you want
 
   covar <- covar %>%
-    gather(variable, value,-non_data_vars)
+    tidyr::gather(variable, value,-eval(non_data_vars))
 
 
   if (any(str_detect(colnames(covar), 'year')) == F) {

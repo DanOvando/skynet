@@ -68,6 +68,8 @@ query_coastal_map <-  F # get coastal map or load
 
 center_and_scale <-  T # center and scale some data?
 
+gfw_vars_only <-  T
+
 fished_only <-  T # only include fished species in predictive model fitting
 
 hack_zeros <-  T # hack zeros into perfectly observed species
@@ -769,10 +771,10 @@ knots  <- vast_fish %>%
 #           lon_var = quo(approx_long),
 #           plot_var = quo(knot), min_lon = -160)
 
-qmplot(approx_long,
-       approx_lat,
-       color = knot,
-       data = knots$knots[[1]])
+# qmplot(approx_long,
+#        approx_lat,
+#        color = knot,
+#        data = knots$knots[[1]])
 
 
 if (fished_only == T) {
@@ -1049,10 +1051,19 @@ never_ind_vars <-
   )
 
 
+gfw_vars <-
+  skynet_names[str_detect(skynet_names,
+                          '(vessel)|(distance)|(length)|(hours)|(engine)|(port)|(shore)|(mpa)')]
 
 tree_candidate_vars <-  skynet_names[!skynet_names %in% c(dep_var,
                                                                 never_ind_vars) & str_detect(skynet_names, '_interaction')
  == F]
+
+if (gfw_vars_only == T){
+
+  tree_candidate_vars <-  c(tree_candidate_vars[tree_candidate_vars %in% gfw_vars],'random_var')
+
+}
 
 
 lm_candidate_vars <-  skynet_names[!skynet_names %in% c(dep_var,
