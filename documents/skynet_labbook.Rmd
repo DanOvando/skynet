@@ -1151,6 +1151,41 @@ So, solutions
 
 - Do something else for a bit today. 
 
+# 2017-08-28 Getting structural model running
 
+What needs to happen to get the structural model up and running? 
+
+First things first let's get the bare bones version up and running. 
+
+That will involve passing a set of "structural variables" to the function, which will go into the cost function and the q function. 
+
+Then good old MLE
+
+From there, you need to develop a way to do it "fleet by fleet", but let's walk before we run
+
+Per Juan's suggestion, you can try running it a) without the variable tuning and b) tuning but based off of conditional importance from party::varimp
+
+So, you can certainly play around with a few other options in terms of the algorithm and model selection, specifically trying out cforest, gbm, etc., see if that works
+
+
+# 2017-10-27 Update from David
+
+Number of satellites has changed dramatically over time, with more and more coming up. That means that in the early years there were way less satellites running around
+
+Read "the use and misuse of global AIS data"
+
+# 2017-11-28 Check in with Juan and David
+
+Check and make sure that the query returns the same number of rows if you comment out the MPA thing
+
+Don't use best_label
+
+Might be good to add an "or" statement to both inferred and known vessels 
+
+Move things over to cloud storage to save space
+
+Add join to "good_segments"
+
+Can also filter out spoofing  (greater than 1.01) and offsetting (true or false, you want false) both in vessel_info table
 
 

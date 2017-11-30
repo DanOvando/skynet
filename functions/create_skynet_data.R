@@ -24,7 +24,6 @@ create_skynet_data <-
       select(rounded_lon, rounded_lat)
     nearest_knot <-
       RANN::nn2(fish_knots %>% select(-knot), gfw_latlon_coords, k = 1)
-
     gfw_data$knot <- fish_knots$knot[nearest_knot$nn.idx]
 
     gfw_data$distance <- nearest_knot$nn.dists
