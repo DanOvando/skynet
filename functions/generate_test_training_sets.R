@@ -5,6 +5,7 @@ generate_test_training <-
            cut_year = 2014) {
     if (test_set == 'random') {
       out <- modelr::crossv_kfold(dat, k = kfolds, id = 'test_set') %>%
+        mutate(train_set = 'random') %>%
         mutate(test_set = 'random') %>%
         slice(1)
 
@@ -21,7 +22,9 @@ generate_test_training <-
           train = list(resample(train, 1:nrow(train))),
           test = list(resample(test, 1:nrow(test))),
           test_set = 'west_coast'
-        )
+        ) %>%
+        mutate(train_set = 'not_west_coast')
+
 
     }
 
@@ -37,7 +40,9 @@ generate_test_training <-
           train = list(resample(train, 1:nrow(train))),
           test = list(resample(test, 1:nrow(test))),
           test_set = 'alaska'
-        )
+        ) %>%
+        mutate(train_set = 'west_coast')
+
 
     }
     if (test_set == 'historic') {
@@ -52,7 +57,9 @@ generate_test_training <-
           train = list(resample(train, 1:nrow(train))),
           test = list(resample(test, 1:nrow(test))),
           test_set = paste0('year_gr_than_', cut_year)
-        )
+        ) %>%
+        mutate(train_set =  paste0('year_leq_than_', cut_year))
+
 
     }
 
@@ -68,7 +75,8 @@ generate_test_training <-
           train = list(resample(train, 1:nrow(train))),
           test = list(resample(test, 1:nrow(test))),
           test_set = 'ebs-ai'
-        )
+        ) %>%
+        mutate(train_set = 'goabts')
 
     }
 
@@ -84,7 +92,10 @@ generate_test_training <-
           train = list(resample(train, 1:nrow(train))),
           test = list(resample(test, 1:nrow(test))),
           test_set = 'goa-ai'
-        )
+        ) %>%
+        mutate(train_set = 'ebsbts')
+
+
 
     }
 

@@ -1188,4 +1188,8 @@ Add join to "good_segments"
 
 Can also filter out spoofing  (greater than 1.01) and offsetting (true or false, you want false) both in vessel_info table
 
+Might be good to get rid of "at port" fishing activity
+
+So filter out by distance from shore/port (meters) and by speed (knots)
+
 

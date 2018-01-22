@@ -207,7 +207,7 @@ partial_foo <- function(variable) {
 }
 
 
-partial_plot  <- data_frame(variable = rf_model$finalModel$xNames) %>% 
+partial_plot <- data_frame(variable = rf_model$finalModel$xNames) %>% 
   mutate(varname = map(variable, as.name)) %>% 
   mutate(partials = map(.$varname, partial_foo))
 

@@ -1,0 +1,404 @@
+---
+title: "Fish from Space"
+author: "Dan Ovando"
+output:
+  bookdown::html_document2: null
+  bookdown::pdf_document2: null
+  html_document: default
+linkcolor: blue
+bibliography: dissertation.bib
+biblio-style: apalike
+---
+
+```{r, include=F}
+knitr::opts_chunk$set(message = F, warning = F, echo = F ,
+                      fig.width = 8, fig.height = 10, eval = T)
+```
+
+```{r}
+
+library(randomForest)
+library(stringr)
+library(modelr)
+library(broom)
+library(hrbrthemes)
+library(viridis)
+library(sf)
+library(ggmap)
+library(caret)
+library(extrafont)
+library(tidyverse)
+
+
+# run options -------------------------------------------------------------
+
+run_name <- 'v1.0'
+
+run_dir <- here::here('results',run_name)
+
+fig_theme <- theme_ipsum(base_size = 14)
+
+theme_set(fig_theme)
+
+load(here::here("results", run_name,'skynet_data.Rdata'))
+
+load(here::here("results", run_name,'skynet_models.Rdata'))
+
+load(here::here("results", run_name,'vast_fish.Rdata'))
+
+load(file = here::here("data","global_map.Rdata"))
+
+load(file = here::here('data','fish_prices.Rdata'))
+
+
+```
+
+
+# Introduction
+
+Effective fisheries management requires some ability for managers and stakeholders to estimate and react to the abundance of fish in the ocean. The history of fisheries science is laregely concerned with developing and improving our ability to accomplish this difficult task, starting from early models of growth overfishing and leading up to multi-species bio-geo-economic models. While the field has made dramatic advances in our ability to assess fisheries, by and large we have found two solutions to this problem: Fit highly complex integrated statistical models to diverse data streams, or utilize increasing levels of statistical wizardy to try and squeeze more information out of limited data stream. This later practice has been both promising and concerning. The majority of fisheries in the world lack the resources for fully integrated stock assessments, and so depend on this world of "data limited stock assessment". While there has beentremendous growth in this field, a rough survey of the literature reveals that while the statistical methods have changed, nearly all DLAs rely on the same streams of information that would have been available to a fisheires scientist in the 1800s: lengths, captures, and catch per unit effort.
+
+It is high time that we expanded not only the statistical methods of fisheries, but also the actual sources of data available for monitoring fish populations. GFW.... etc. 
+
+This paper rests on a simple hypothesis: all else equal, fishermen would rather fish where there are more fish. Following this logic then, the amount and location of fishing effort observed must be in some way reflective of the abundance of fish at those locations at that time. To that end, we could simply use GFW to observe where fishermen are, and by extension estimate the relative change in abundance and distribution of fish in reponse to changes in the amoung and location of fishing effort. Unfortuantely, life is not so kind. A vast array of other factors influence where and how much fishermen choose to fish, e.g. cost, local knowldege, past experience, and safety. The goal of this project then is to develop a model that estimates the abundance of fish as a function of observed fishermne behavior, controlling for other factors that influence the decision of where, when, and how much to fish. 
+
+
+# Methods
+
+## Data
+
+Primary data were collected from two sources: Global Fishing Watch (GFW) provides our data on the amount and location of fishing effort, along with availabl covaraiates such as vessel size, distance from shore/port, etc. Estimates of fish abundance in space and time were obtained from their relevant surveys through the `FishData` package. The following two data sections provide summaries of the data as well as descriptions of relevant data processing steps taken. 
+
+### Survey Data
+
+`FishData` provides access to numerous fishery independent research surveys throughout the world. For now, we focus on the surveys conducted along the west coast of North America
+
+  - Eastern Bering Sea Bottom Trawl Survey (EBSBTS)
+  - Aleutian Islands Bottom Trawl Survey (AIBTS)
+  - Gulf of Alaska Bottom Trawl Survey (GOABTS)
+  - West Coast Groundfish Bottom Trawl Survey (WCBTS)
+  - West Coast Groundfish Hook and Line Survey
+  
+See Fig.\@ref(fig:fish-map) for map of availabl survey data
+
+```{r fish-map, fig.cap='Estimated knot locations for each fishery independent survey'}
+
+knots <- vast_fish %>%
+  select(survey, vasterized_data) %>%
+  mutate(knots = map(vasterized_data, c('spatial_list', 'loc_x_lat_long'))) %>%
+  select(-vasterized_data) %>%
+  unnest() %>%
+  mutate(recenter_lon = ifelse(approx_long < 0, 180 + (180 - abs(approx_long)), approx_long))
+  
+  
+  
+  pacific_map <- global_map %>%
+  as("Spatial") %>%
+  maptools::nowrapRecenter() %>%
+  sf::st_as_sf()
+  
+  
+  map_knots <-  knots %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, approx_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  
+  bbox <- sf::st_bbox(map_knots)
+  
+  knot_map <- map_knots %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = survey), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  scale_color_viridis_d()
+  
+  knot_map
+      
+```
+
+
+Each of the surveys contains a variety of different species and time series of coverage
+
+```{r}
+
+fish_summary <- vast_fish %>% 
+  select(survey, data) %>% 
+  unnest() %>% 
+  group_by(survey, spp, year) %>%
+  summarise(mean_catch = mean(catch_kg, na.rm = T)) %>% 
+  group_by(survey, spp) %>% 
+  mutate(scaled_catch = (mean_catch - mean(mean_catch, na.rm = T))) %>% 
+  ungroup()
+
+fish_summary %>% 
+  ggplot(aes(year, scaled_catch, color = spp)) + 
+  geom_path(show.legend = F) + 
+  facet_wrap(~survey, scales = 'free_y')
+
+```
+
+
+
+```{r}
+fish_summary <- vast_fish %>% 
+  select(survey, data) %>% 
+  unnest() %>% 
+  group_by(survey, spp, year) %>% 
+  summarise(total_catch = sum(catch_kg),
+            n = length(catch_kg))
+
+fish_summary %>% 
+  ggplot(aes(year, total_catch, fill = spp)) + 
+  geom_col(show.legend = F) + 
+  facet_wrap(~survey, scales = 'free_y')
+
+
+```
+
+
+Survey data come in their "raw" form, which requires standardization to account for differences in vessel characteristics, spatio-temporal correlation structures, and the presence of zeros. This standardization was performed using the `VAST` package, which implements a spatial delta-generalized linear mixed model accross multiple species. The result of the VAST process provides standardized estimates of species abundance in space and time. 
+
+Surveyed species also varied substantially in their abundance and economic importance. We mark species encountered in the surveys as "fished" if their name, or a synomim for their name identified through the `taxize` package in R, was found with the @FAOXX catch records. For each species, we also obtained price estiamtes using @Melnychuck2016 as well (Fig. \@ref(fig:price-plot)). 
+
+
+```{r}
+
+skynet_data %>% 
+  group_by(spec)
+
+```
+
+
+### GFW Data
+
+EBSTS data for Alaska pollock go back to `r min(ebs_species$Year)`, up through `r max(ebs_species$Year)` (Fig. \@ref(fig:cpue-trend)).
+
+```{r cpue-trend, fig.cap='Median CPUE of Alaska pollock over time'}
+
+ebs_species %>% 
+  group_by(Year) %>% 
+  dplyr::summarise(median_cpue = median(Catch_KG)) %>% 
+  ggplot(aes(Year, median_cpue)) + 
+  geom_line()
+
+```
+
+These data cover a broad spatial range, 
+
+```{r}
+qmplot(
+  x = Lon,
+  y = Lat,
+  data = ebs_species %>% filter(Year > 2012),
+  color = log(Catch_KG),
+  alpha = 0.75
+) +
+  scale_color_viridis() +
+  facet_wrap( ~ Year) +
+  theme_classic() + 
+  labs(caption = 'Log Density of Alaska Pollock')
+```
+
+
+### Merged Data
+
+We can take these data and link the EBSBTS data and GFW data together. To do that, we pass the EBSTS trawl survey data to Spatial Delta GLM package developed by Jim Thorson, which overlays a standardized grid of densities at a series of "knots" over the sample space. I then snapped each observed location of fishing in the GFW data to the nearest knot
+
+
+```{r knot-plot, fig.cap='Visualizationg of GFW to EBSTS pairing. Colored numbers represent position of EBSTS knots, colored dots show locations of corresponding GFW points'}
+
+knot_pairing_plot
+```
+
+Through this pairing process,we can then calculate the total hours fished, total engine hours fished, total number of vessels, mean vessel length, mean distance from shore, and mean distance from port associated with each knot, and by extension the EBSTS derived density of Alaska pollock at that knot. We can also create interaction terms as needed, such as the interaction of the number of vessels at a knot and the distance from shore for that knot. We can then take a look at the visual correlations between these variables and EBSBTS densities of Alaska pollock (Fig.\@ref(fig:var-cor)). 
+
+```{r var-cor, fig.cap= 'Smoothed visual correlations between covariates and observed densities of Alaska pollock'}
+
+skynet_data %>% 
+  select(-knot, -e_km, -n_km, -year) %>% 
+  gather('variable','value', -density) %>% 
+  ggplot() + 
+  geom_smooth(aes(value, density, color = variable), show.legend = F) + 
+  labs(y = 'Density of Alaska Pollock') +
+  facet_wrap(~variable, scales = 'free') + 
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        strip.text = element_text(size = 8),
+        panel.spacing = unit(.1, 'lines'))
+  
+
+```
+
+
+
+
+## Model
+
+We can of course construct a wide array of candidate models that relate fish abundance and relevant covaraites to fishing decisions, from simple distance-from-shore based cost corrections, to highly specificed models of captial investment and knowledge accrual. The relevant question then is how do we test the performance of these alternative models? We accomplish this by pairing GFW data with fishery independent survey data (e.g. the West Coast Groundfish Bottom Trawl Survey) avaliable from `FishData`XX. These data provide annual indicies of abundance in space and time for a wide range of commercially important species.  
+
+By pairing these data then, we can compare the ability of candidate models to use GFW data (and other globally available data, such as esitmates of wind, waves, and productivity) to predict relevant abundance data available from FishData. As the ultimate goal of this model is to use GFW to predict abundance indices in places where fishery independent samples are not available,we will use out-of-sample predictive power as our metric of model performance, specifically root-mean squared error (RMSE) of data held out of the training of the model.
+
+We fit a series of candidate models to the data, defined in terms of 
+
+- Data Splitting: the data used for training and testin. 
+    - Random splits (train on a random subset, predict the remaining subset)
+    - Regional splits (e.g. train on eastern bering sea, predict US west coast)
+    - Temporal splits (train on 2010-2012, predict 2013-2014)
+
+- Predictive goal:
+    - Absolute abundance in space in time
+    - Changes in abundance in space and time
+  
+- Model Mechanics: 
+    - Machine learning (random forests, gradient boosted models)
+    - Linear regresion (mostly as a simplistic example)
+    - Structural modeling (fitting of structural economic models, e.g. ideal free distribution)
+    
+
+We fit factorial combinations of each of these components, allowing us to evaluate model preformance from a variety of relevant angles. The comparison between the machine learning and structural modeling approaches are worth discussing forther for a brief moment. While different in their mechanics, all the candidate machine learning models are black box models whose sole objective is to maximize the predictive power of the model. The user specifies some model options, but the model decides which data are important and how those data relate to each other. This allows these algorithms to fit highly non-linear models (if the data demand it), without the need to specify exactly how factors such as costs, safety, and abundance interact to affect fishing behavior. As a result, machine learning models can serve as an effective benchmark for the best possible ability of GFW data to predict fish abundance. The disadvantage is that, while new techniques are emerging for interpreting machine learning model fits, they are inherently black boxes and as such do not permit us to really interpret the meaning of specific coefficients. 
+
+This stands in contrast to the structural modeling approach, in which we write out a functional form for the relationship between between GFW data, and the fit that specified model to the data. This has the advantage of interpretability, but opens us up to errors in model specification. By running both, we can compare the machine learning and structural approach and see how much the interpretability of the structural model "costs" us in terms of predictive power, relative to the benchmark of the machine learning model. 
+
+Each model was designed using a separate subset of data, so as to isolate  initial model design from the data that will eventually be used to judge model performance. 
+
+Below I provide high-level summaries of each of the models, purely to aid in understanding (more detailed descriptions will be provided in furture drafts)
+
+## Machine Learning
+
+Two machine learning algorithms, random forests (rf) and generalized boosted regression modeling (gbm), were evaluated. Tuning parameters of each method were selected using the `caret` package on an isolated set of data, and since the random forest performed better than the gbm model, for brevity's sake I will only present results of the random forest here. 
+
+A random forest works by fitting a series of regression trees. Each regression tree takes a sub-sample of the training data, and a sub sample of the independent variables provided for model fitting. The algorithm then determines the variable and variable split (e.g. vessel size and vessel size above 30ft) that provides the greatest explanatory power in estimating density of the "out of bag" samples (the part of the training data that were not included in the tree), and creates that as the first node. The next two nodes are selected in the same process, and so on and so forth, down to a specified tree depth tuned through the `caret` package. Each tree provides a high-variance, low bias estimator of densities. The random forest then averages over hundreds of trees to reduce this variance and provide an improved estimate of density as a function of provided covariates. The advantage of this approach is that it makes no assumptions about error distributions or linearity of parameters, and actively pushes back against over fitting by prioritizing out-of-sample prediction, and sub sampling of the provided independent variables (lots and lots of literature on this). 
+
+## OLS
+
+As a counterbalance to the mysteries of the random forest algorithm, I also fit a simple linear OLS model to the data. Variable selection was made be backwards AIC selection (fitting the model with all parameters, dropping the least significant variable, refitting the model, repeat process until a minimum AIC value is reached). This is not a perfect model selection process, but again this serves simply to attempt to compare a reasonably tuned linear model to a reasonably tuned random forest. Though I will note that I did not include interaction terms at this time. 
+
+## Structural 
+
+Lastly, we fit a structural model in the form of @Miller2016 to the data. The key of this model assumption here is that fishermen conform to an ideal free distribution, and so marginal profits are equal across appropriate groups in space and time, at the unit of year and "knot", a knot being a geographic region of constant abundance estimated per the methods of @Thorson2016. 
+
+Following @Miller2016, we consider marginal profits per unit effort as being 
+
+$$ \pi_{y,k} = pCPUE_{y,k}e^{-qE_{y,k}} - c_{y,k}  $$
+
+where for year *y* at knot *k*, *p* is price, CPUE is the index of abundance prior to any fishing effort occurring (our index of abundance, *q* is catchability, *E* is effort, and *c* are variable costs). 
+
+@Miller2016 was primarily interested in estimating quota price aspects of *c*, taking as data *p*, *CPUE*, *E*, and other components of *c* (fuel, labor, ice, etc.). We are instead interested in estimating CPUE as a function of other variable, and so we can rearrange this equation as
+
+$$ CPUE_{y,k} = \frac{\pi_{y,k} + c_{y,k}}{pe^{-qE_{y,k}}}$$
+
+Similar to @Miller2016 we assume for now that $\pi_{y,k}$ is zero, though this is clearly not accurate given that many of the fisheries sampled by this model are highly regulated and in some cases rationalized (however, changing $\pi_{y,k}$ to positive values had little effect on the fit of the model). *p* is taken from @Melnychuk2016, and $E_{y,k}$ is observed from GFW. 
+
+That leaves *q* and *c* as unknown parameters. While we do not have the high resolution logbook data available to @Miller2016, we could certainly obtain data on fuel and labor prices for this model. However, at this time, I simply assume that $c_{y,k}$ is a function of the distance of a knot *k* from port, the mean vessel size used at knot *k* in year *y*, and the interaction of these terms (under the assumption that cost of large vessels increase with distance). 
+
+$$ c_{y,k} = \beta_{1}pd_{k} + \beta_{2}vs_{y,k} + \beta_{3}pd_{k}vs_{y,k} $$
+
+Where $pd_{k}$ is the distance from port of knot *k* and $vs_{y,k}$ is the mean vessel length observed fishing at knot *k* in year *y*. 
+
+We fit the model through maximum likelihood, per
+
+$$[q, \beta_{1}, \beta_{2},\beta_{3} | log(CPUE_{y,k}()] \propto normal(log(CPUE_{y,k}) | f(q, \beta_{1}, \beta_{2},\beta_{3} ),\sigma)$$
+
+Repeated initial values and a jittered while loop were used to ensure model convergence (though a full Bayesian implementation will improve on this at a later date). We could of course again include either informative priors on the $\beta$ parameters based on fuel and labor costs, or directly incorporate those data, but this provides a useful starting point. 
+
+```{r, eval = F}
+
+p <- 10
+cpue <- 100
+q <- .1
+effort <- 0:100
+cost <- 200
+
+mp <- p * cpue * exp(-q*effort) - cost
+
+plot(effort,mp)
+
+```
+
+
+
+
+# Results 
+
+## Machine Learning
+
+The random forest allows us to classify each variable by its "importance", a measure of the degree to which the fit of the model decreases when that variable is omitted from the model. The model estimates that distance from port and shore are the most important variables, along with "shore numbers", the interaction between distance from shore and number of vessels. Interestingly, total hours of fishing estimated by GFW were not particularly important. However, clearly many of these parameters are highly colinear and so the importance of some variables may be confounded, further work will be needed to improve variable selection (Fig. \@ref(fig:var-imp)). 
+
+```{r var-imp, fig.cap='Variable importance plot from model using random forest to predict density of Alaska pollock'}
+
+varImpPlot(rf_model$finalModel)
+
+```
+
+We can also construct partial dependence plots, which visualize the marginal effect of each independent variable (Fig. \@ref(fig:partial-plot)). 
+
+```{r partial-plot, fig.cap='Partial dependence plots of variables in random forest'}
+
+partial_foo <- function(variable) {
+  
+  eval(parse(text = paste0('a <- randomForest::partialPlot(rf_model$finalModel
+, skynet_sandbox$train[[1]] %>% as.data.frame() %>% remove_missing() %>% as.data.frame(),', variable,', plot = F)')))
+  
+
+}
+
+
+partial_plot <- data_frame(variable = rf_model$finalModel$xNames) %>% 
+  mutate(varname = map(variable, as.name)) %>% 
+  mutate(partials = map(.$varname, partial_foo))
+
+partial_plot <- partial_plot %>% 
+  mutate(partial = map(.$partials, as_data_frame)) %>% 
+  select(variable, partial) %>% 
+  unnest()
+
+
+partial_plot %>% 
+  ggplot() + 
+  geom_line(aes(x,y, color = variable), show.legend = F) + 
+  labs(y = 'Predicted Density') +
+  facet_wrap(~variable, scales = 'free')
+
+```
+
+
+# Other
+We can start with evaluating performance of the K-fold cross validation. Plotting observed densities (log CPUE) from the test data to values predicted for those densities, using the models trained on the training data, we see that the random forest model performs the best in terms of RMSE and R^2^. The linear model has a lower RMSE, though also a much R^2^ than the structural model (Fig. \@ref(fig:perf-plot), Fig. \@ref(fig:rmse-plot)). 
+
+```{r perf-plot, fig.cap='Observed vs predicted log CPUE for test data from models trained on training data'}
+
+performance_plot
+
+```
+
+```{r rmse-plot, fig.cap= 'RMSE and R2 of each model on test data'}
+rmse_plot
+```
+
+We can repeat the same exercise, but now comparing the performance of models trained on pre-2015 data and tested on 2015 data (Fig. \@ref(fig:time-perf-plot), Fig. \@ref(fig:time-rmse-plot))8
+
+
+```{r time-perf-plot, fig.cap='Observed vs predicted log CPUE for test data (2015) from models trained on training data (pre 2015)'}
+time_performance_plot
+```
+
+```{r time-rmse-plot, fig.cap= 'RMSE and R2 of each model on test (2015) data'}
+time_rmse_plot
+```
+
+# Summary
+
+So far the GFW data show a limited but promising ability to predict CPUEs outside of sample (both through K-fold cross validation and through omission of the most recent data). 
+
+There is clearly a lot of work to be done from here, and I think that improvements in model fit can be achieved through rescaling of coefficients (e.g. we don't really care about absolute CPUE, but rather the trend). We will also need to explore the ability of the model to perform across different aggregations of fleets and species. The structural model can also be improved by integration of additional data on fuel and labor costs. 
+
+Early results suggest then that this idea isn't insane. The most rigorous approach then will be a careful development and comparison of machine learning and structural models. However so far the machine learning approach is in the front of the pack by a decent distance. 
+
+# Works Cited
+
+

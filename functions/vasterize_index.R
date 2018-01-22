@@ -61,11 +61,9 @@ vasterize_index <- function(raw_data,
                             calculate_cov_se = 0,
                             calculate_synchrony = 0,
                             calculate_coherence = 0) {
-
-
   raw_data <- as.data.frame(raw_data) %>%
-  mutate(vessel = as.factor(vessel),
-         spp = as.factor(spp))
+    mutate(vessel = as.factor(vessel),
+           spp = as.factor(spp))
 
   years <- min(raw_data$year):max(raw_data$year)
 
@@ -102,7 +100,7 @@ vasterize_index <- function(raw_data,
     'Calculate_Coherence' = calculate_coherence
   )
 
-  vast_file <-  paste0(getwd(),'/',run_dir, 'VAST_output')
+  vast_file <-  paste0(getwd(), '/', run_dir, 'VAST_output')
 
   if (dir.exists(vast_file) == F) {
     dir.create(vast_file)
@@ -205,9 +203,11 @@ vasterize_index <- function(raw_data,
   spatial_densities <- report$D_xcy %>%
     reshape2::melt() %>%
     as_data_frame() %>%
-    set_names(c('knot','species','year','density')) %>%
-    mutate(species = factor(species, labels = unique(raw_data$spp) %>% as.character()) %>% as.character(),
-           year = factor(year, labels = years) %>% as.character() %>% as.numeric()) %>%
+    set_names(c('knot', 'species', 'year', 'density')) %>%
+    mutate(
+      species = factor(species, labels = unique(raw_data$spp) %>% as.character()) %>% as.character(),
+      year = factor(year, labels = years) %>% as.character() %>% as.numeric()
+    ) %>%
     left_join(spatial_list$loc_x_lat_long, by = 'knot')
 
   year_set <- years
@@ -219,23 +219,29 @@ vasterize_index <- function(raw_data,
     opt$diagnostics[, c('Param', 'Lower', 'MLE', 'Upper', 'final_gradient')]
 
   # get overall index
-  #
+
   index <-
-    SpatialDeltaGLMM::PlotIndex_Fn(
-      DirName = vast_file,
-      TmbData = tmb_data,
-      Sdreport = opt[["SD"]],
-      Year_Set = year_set,
-      Years2Include = years_2_include,
-      use_biascorr = TRUE
+    (
+      SpatialDeltaGLMM::PlotIndex_Fn(
+        DirName = vast_file,
+        TmbData = tmb_data,
+        Sdreport = opt[["SD"]],
+        Year_Set = year_set,
+        Years2Include = years_2_include,
+        use_biascorr = TRUE
+      )
     )
 
+  # if (is.null(index$error)) {
+  #   index <- index$result
 
   vast_index <- index$Table %>%
-    select(Year,Unit, Estimate_metric_tons) %>%
+    select(Year, Unit, Estimate_metric_tons) %>%
     rename(abundance = Estimate_metric_tons) %>%
     mutate(source = 'vast')
-
+  # } else {
+  #   vast_index <- list()
+  # }
   # spatial_densities = cbind(
   #   "density" = as.vector(dens_xt),
   #   "year" = year_set[col(dens_xt)],
@@ -245,6 +251,7 @@ vasterize_index <- function(raw_data,
   #   as_data_frame() %>%
   #   mutate(knot = as.numeric(factor(paste(e_km, n_km)))) %>%
   #   arrange(knot, year)
+
   outlist <-
     list(
       extrapolation_list = extrapolation_list,
