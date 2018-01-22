@@ -50,8 +50,6 @@ fit_models <- function(training,
   )
 
 
-  performance <- test
-
   performance <- performance %>%
     mutate(
       rf = predict(rf_model, newdata = .),

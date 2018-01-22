@@ -174,7 +174,7 @@ We fit a series of candidate models, and here present a random forest, a linear 
 
 Each model was designed using a separate subset of data, so as to isolate  initial model design from the data that will eventually be used to judge model performance. 
 
-We conduct two test of performance. One uses K-fold cross validation, in which the paired EBSBTS and GFW data were then separated into 10 splits of training and test data. Each of the models is fit to the training data (or subsets of the training data in the case of the machine learning algorithms). The fitted model was then used predict the densities of the training data sets, allowing us to estimate out-of-sample RMSE across 10 iterations of training and test data. 
+We conduct two test of performance. One uses K-fold cross validation, in which the paired EBSBTS and GFW data were then separated into 10 splits of training and test data. Each of the models is fit to the training data (or subsets of the training data in the case of the machine learning algorithms). The fitted model was then used predict the densities of the training data sets, allowing us to estimate out-of-sample RMSE across  10 iterations of training and test data. 
 
 One goal of this project though is to be able to predict time-trends of abundance as well. To explore the ability of the model to capture trends in data that it was not trained on, we also fit each of the models to pre-2016 data, and then used the fitted models to predict data from the year 2016. 
 
@@ -207,7 +207,7 @@ partial_foo <- function(variable) {
 }
 
 
-partial_plot  <- data_frame(variable = rf_model$finalModel$xNames) %>% 
+partial_plot <- data_frame(variable = rf_model$finalModel$xNames) %>% 
   mutate(varname = map(variable, as.name)) %>% 
   mutate(partials = map(.$varname, partial_foo))
 
