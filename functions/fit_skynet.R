@@ -19,7 +19,7 @@ fit_skynet <- function(dep_var,
                        never_ind_vars,
                        survey_prices,
                        tree_candidate_vars,
-                       lm_candidate_vars,
+                       lm_candidate_vars = NA,
                        structural_vars = c(
                          'log_density',
                          'dist_from_port',
@@ -245,11 +245,9 @@ fit_skynet <- function(dep_var,
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|')))
 
-
     testing_frame <- testing %>%
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|')))
-
 
     struct_data <- list(
       data = as.matrix(independent_data %>%
@@ -305,9 +303,9 @@ fit_skynet <- function(dep_var,
       as_data_frame() %>%
       mutate(pred = testing_prediction)
 
-    out_testing %>%
-      ggplot(aes(log_density, pred, color = total_hours > 0)) +
-      geom_point()
+    # out_testing %>%
+    #   ggplot(aes(log_density, pred, color = total_hours > 0)) +
+    #   geom_point()
 
   } #close structural
 

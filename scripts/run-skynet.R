@@ -26,32 +26,32 @@ library(taxize)
 library(gbm)
 library(tidyverse)
 
-demons::load_functions('functions')
+demons::load_functions("functions")
 
-run_name <- 'v1.0'
+run_name <- "v1.0"
 
-run_description <- 'development of full paper'
+run_description <- "development of full paper"
 
-run_dir <- file.path('results', run_name, '')
+run_dir <- file.path("results", run_name, "")
 
 if (dir.exists(run_dir) == F) {
   dir.create(run_dir)
 }
 
-write(run_description, file = paste0(run_dir, 'description.txt'))
+write(run_description, file = paste0(run_dir, "description.txt"))
 
 
 # set section options (what to run) ---------------------------------------------------------
 
-run_models <-  T # fit statistical models to data
+run_models <- T # fit statistical models to data
 
-vasterize <-  F # run vast or load saved object
+vasterize <- F # run vast or load saved object
 
-raw_fish <-  F
+raw_fish <- F
 
-plot_data <-  F # plot covariates and maps
+plot_data <- F # plot covariates and maps
 
-query_fishdata <-  F # get trawl survey data or load saved
+query_fishdata <- F # get trawl survey data or load saved
 
 query_gfw <- F # get gfw data or load saved
 
@@ -63,70 +63,74 @@ min_speed <- 0.01
 
 max_speed <- 20
 
-query_environmentals <-  F #get environmental data or load saved
+query_environmentals <- F # get environmental data or load saved
 
-query_mpas <-  F # get mpa data or load saved
+query_mpas <- F # get mpa data or load saved
 
-query_synonyms <-  F # look up synonyms for each species
+query_synonyms <- F # look up synonyms for each species
 
-query_coastal_map <-  F # get coastal map or load
+query_coastal_map <- F # get coastal map or load
 
-query_prices <-  F # get exvessel price data for observed species
+query_prices <- F # get exvessel price data for observed species
 
 # set run options (how to run) ---------------------------------------------------------
 
-center_and_scale <-  T # center and scale some data?
+center_and_scale <- T # center and scale some data?
 
-gfw_vars_only <-  F
+gfw_vars_only <- F
 
 fished_only <-
   T # only include fished species in predictive model fitting
 
-hack_zeros <-  T # hack zeros into perfectly observed species
+hack_zeros <- T # hack zeros into perfectly observed species
 
 survey_years_only <-
-  T #only include years that were actually surveyed
+  T # only include years that were actually surveyed
 
-include_all_species <-  T #include all species in VAST
+include_all_species <- T # include all species in VAST
 
 bottom_gears_only <- T # only include bottom gear
 
 clip_gfw <- T # clip GFW data to extent of trawl surveys
 
-vars_to_drop <- c('wind_speed', 'wind_angle')
+vars_to_drop <- c("wind_speed", "wind_angle")
 
 gfw_project <- "ucsb-gfw"
 
-gfw_dataset <- 'skynet'
+gfw_dataset <- "skynet"
 
-max_percent_missing <-  0.25
+max_percent_missing <- 0.25
 
 lat_lon_res <-
   0.25 # round data to intervels of 0.25 degrees lat lon, as in 56.25
 
-min_year <-  2012
+min_year <- 2012
 
 species_list <-
-  c('Gadus_chalcogrammus',
-    'Hippoglossoides_elassodon',
-    'Gadus_macrocephalus')
+  c(
+    "Gadus_chalcogrammus",
+    "Hippoglossoides_elassodon",
+    "Gadus_macrocephalus"
+  )
 
 # survey_list <- c('ebsbts', 'goabts', 'aibts', 'wcgbts', 'wcghl')
-survey_list <- c('ebsbts', 'goabts', 'aibts', 'wcgbts','wcghl')
+survey_list <- c("ebsbts", "goabts", "aibts", "wcgbts", "wcghl")
 
-knots_per_survey <- tribble(~ survey,
-                            ~ knots,
-                            #--/--
-                            'ebsbts',
-                            200,
-                            'goabts',
-                            200,
-                            'aibts',
-                            200,
-                            'wcgbts',
-                            1000,
-                            'wcghl',
-                            100)
+knots_per_survey <- tribble(
+  ~ survey,
+  ~ knots,
+  # --/--
+  "ebsbts",
+  200,
+  "goabts",
+  200,
+  "aibts",
+  200,
+  "wcgbts",
+  1000,
+  "wcghl",
+  100
+)
 
 # get fishdata ------------------------------------------------------------
 
@@ -135,22 +139,22 @@ if (query_fishdata == T) {
     ~ survey,
     ~ survey_name,
     ~ survey_region,
-    #--/--
-    'ebsbts',
-    'eastern bering sea bottom trawl survey',
-    'eastern_bering_sea',
-    'wcgbts',
-    'west coast groundfish bottom trawl survey',
-    'california_current',
-    'wcghl',
-    'West_coast_groundfish_hook_and_line',
-    'wcghl_domain',
-    'goabts',
-    'gulf of alaska bottom trawl survey',
-    'gulf_of_alaska',
-    'aibts',
-    'aluetian islands bottom trawl survey',
-    'aleutian_islands'
+    # --/--
+    "ebsbts",
+    "eastern bering sea bottom trawl survey",
+    "eastern_bering_sea",
+    "wcgbts",
+    "west coast groundfish bottom trawl survey",
+    "california_current",
+    "wcghl",
+    "West_coast_groundfish_hook_and_line",
+    "wcghl_domain",
+    "goabts",
+    "gulf of alaska bottom trawl survey",
+    "gulf_of_alaska",
+    "aibts",
+    "aluetian islands bottom trawl survey",
+    "aleutian_islands"
   )
 
   sdcr <- safely(download_catch_rates)
@@ -158,14 +162,16 @@ if (query_fishdata == T) {
   fish_data <- fishdata_names %>%
     mutate(survey_data = map(
       survey,
-      ~ download_catch_rates(.x, species_set = 50,
-                             error_tol = 1e-2)
+      ~ download_catch_rates(
+        .x, species_set = 50,
+        error_tol = 1e-2
+      )
     ))
 
   fish_data <- unnest(fish_data) %>%
     mutate(survey = tolower(survey))
 
-  save(file = 'data/fish_data.Rdata', fish_data)
+  save(file = "data/fish_data.Rdata", fish_data)
   #
   #   a = fish_data %>%
   #     mutate(rlat = round(Lat,2),
@@ -180,11 +186,10 @@ if (query_fishdata == T) {
   #
 } else {
   load("data/fish_data.Rdata")
-
 }
 
 fish_data <- fish_data %>%
-  left_join(knots_per_survey, by = 'survey')
+  left_join(knots_per_survey, by = "survey")
 
 survey_bbox <- fish_data %>%
   filter(Long < 0) %>%
@@ -208,24 +213,23 @@ survey_names <- fish_data$survey %>% tolower() %>% unique()
 
 
 if (query_gfw == T) {
-
-
-
-  fishing_connection <- DBI::dbConnect(bigrquery::dbi_driver(),
-                                       project = gfw_project,
-                                       dataset = gfw_dataset,
-                                       allowLargeResults = T)
+  fishing_connection <- DBI::dbConnect(
+    bigrquery::dbi_driver(),
+    project = gfw_project,
+    dataset = gfw_dataset,
+    allowLargeResults = T
+  )
 
 
 
   temp_gfw_data <- list()
 
-  for (i in 1:nrow(survey_bbox)){
-
+  for (i in 1:nrow(survey_bbox)) {
     bbox <- survey_bbox %>%
       slice(i) %>%
-      select(contains('lat'), contains('lon')) %>%
-      gather(var,val) %>% {
+      select(contains("lat"), contains("lon")) %>%
+      gather(var, val) %>%
+      {
         .$val
       }
 
@@ -292,28 +296,27 @@ if (query_gfw == T) {
     ON
     a.mmsi = b.mmsi
     AND a.year = b.year",
-    bbox = bbox,
-    min_dist_from_shore = min_dist_from_shore,
-    min_speed = min_speed,
-    max_speed = max_speed,
-      .con = fishing_connection)
+      bbox = bbox,
+      min_dist_from_shore = min_dist_from_shore,
+      min_speed = min_speed,
+      max_speed = max_speed,
+      .con = fishing_connection
+    )
 
-  temp_gfw_data[[i]] <- bigrquery::query_exec(gfw_query, project = 'ucsb-gfw', max_pages = Inf)
-
+    temp_gfw_data[[i]] <- bigrquery::query_exec(gfw_query, project = "ucsb-gfw", max_pages = Inf)
   }
 
   gfw_data <- data_frame(survey = survey_bbox$survey) %>%
     mutate(gfw_data = temp_gfw_data) %>%
     unnest() %>%
     select(-b_mmsi, -b_year) %>%
-    set_names(str_replace_all(colnames(.), '(a_)|(b_)', '')) %>%
+    set_names(str_replace_all(colnames(.), "(a_)|(b_)", "")) %>%
     nest(-survey)
 
 
-  save(file = 'data/gfw_data.Rdata', gfw_data)
-
+  save(file = "data/gfw_data.Rdata", gfw_data)
 } else {
-  load(file = 'data/gfw_data.Rdata')
+  load(file = "data/gfw_data.Rdata")
 }
 
 gfw_bbox <- gfw_data %>% # calculate bounding box for GFW data
@@ -332,11 +335,10 @@ gfw_bbox <- gfw_data %>% # calculate bounding box for GFW data
 
 merge_known_and_inferred <- function(known, inferred, cap = NA) {
   if (is.na(cap)) {
-    cap <-  1.1 * max(inferred, na.rm = T)
+    cap <- 1.1 * max(inferred, na.rm = T)
   }
 
   out <- ifelse(is.na(known), pmin(inferred, cap), known)
-
 }
 
 gfw_data <-
@@ -349,10 +351,12 @@ gfw_data <-
       merge_known_and_inferred,
       cap = 1.1 * max(inferred_engine_power, na.rm = T)
     ),
-    vessel_length = map2_dbl(known_length,
-                             inferred_length,
-                             merge_known_and_inferred,
-                             cap = 150),
+    vessel_length = map2_dbl(
+      known_length,
+      inferred_length,
+      merge_known_and_inferred,
+      cap = 150
+    ),
     tonnage = map2_dbl(
       known_tonnage,
       inferred_tonnage,
@@ -379,7 +383,7 @@ if (query_environmentals == T) {
           max_lon = max_lon
         ),
         query_erddap,
-        desired_data = 'chl-a',
+        desired_data = "chl-a",
         date_interval = 1,
         space_interval = 1,
         runit = lat_lon_res
@@ -396,19 +400,17 @@ if (query_environmentals == T) {
       scale_color_viridis(guide = F) +
       facet_wrap(~ year) +
       theme_classic() +
-      labs(caption = 'SST(c)')
-
-
+      labs(caption = "SST(c)")
   }
 
-  chl_data <-  chl_data %>%
+  chl_data <- chl_data %>%
     mutate(plots = map_plot(chl_a, chl_plot_foo))
 
   a <- chl_data$chl_a[[4]]
 
   qmplot(rlon, rlat, color = mean_chlorophyll, data = a)
 
-  save(file = 'data/chl_env_data.Rdata', chl_data)
+  save(file = "data/chl_env_data.Rdata", chl_data)
 
 
   sst_data <- gfw_bbox %>%
@@ -423,7 +425,7 @@ if (query_environmentals == T) {
           max_lon = max_lon
         ),
         query_erddap,
-        desired_data = 'sst',
+        desired_data = "sst",
         date_interval = 14,
         space_interval = 25,
         runit = lat_lon_res
@@ -440,15 +442,13 @@ if (query_environmentals == T) {
       scale_color_viridis(guide = F) +
       facet_wrap(~ year) +
       theme_classic() +
-      labs(caption = 'SST(c)')
-
-
+      labs(caption = "SST(c)")
   }
 
-  sst_data <-  sst_data %>%
+  sst_data <- sst_data %>%
     mutate(plots = map_plot(sst, sst_plot_foo))
 
-  save(file = 'data/sst_env_data.Rdata', sst_data)
+  save(file = "data/sst_env_data.Rdata", sst_data)
 
   wave_data <- gfw_bbox %>%
     mutate(
@@ -462,9 +462,9 @@ if (query_environmentals == T) {
           max_lon = max_lon
         ),
         query_erddap,
-        desired_data = 'waves',
+        desired_data = "waves",
         date_interval = 24 * 14,
-        #1 hour interval
+        # 1 hour interval
         space_interval = 0.5,
         runit = lat_lon_res
       )
@@ -483,7 +483,7 @@ if (query_environmentals == T) {
   #     )
   #   ))
 
-  save(file = 'data/wave_env_data.Rdata', wave_data)
+  save(file = "data/wave_env_data.Rdata", wave_data)
 
 
   wind_data <- gfw_bbox %>%
@@ -498,9 +498,9 @@ if (query_environmentals == T) {
           max_lon = max_lon
         ),
         query_erddap,
-        desired_data = 'wind',
+        desired_data = "wind",
         date_interval = 1,
-        #1 hour interval
+        # 1 hour interval
         space_interval = 1,
         runit = lat_lon_res
       )
@@ -517,7 +517,7 @@ if (query_environmentals == T) {
           wind_speed = map_dbl(wind_vector, "wind_speed"),
           wind_angle = map_dbl(wind_vector, "wind_angle")
         ) %>%
-        select(-wind_vector,-x_wind,-y_wind)
+        select(-wind_vector, -x_wind, -y_wind)
     )) %>%
     select(-wind_speed)
 
@@ -535,7 +535,7 @@ if (query_environmentals == T) {
   #     )
   #   ))
 
-  save(file = 'data/wind_env_data.Rdata', wind_data)
+  save(file = "data/wind_env_data.Rdata", wind_data)
 
   topo_data <- gfw_bbox %>%
     mutate(
@@ -549,9 +549,9 @@ if (query_environmentals == T) {
           max_lon = max_lon
         ),
         query_erddap,
-        desired_data = 'topography',
+        desired_data = "topography",
         date_interval = 1,
-        #1 hour interval
+        # 1 hour interval
         space_interval = 1,
         runit = lat_lon_res
       )
@@ -578,19 +578,16 @@ if (query_environmentals == T) {
   #     )
   #   ))
 
-  save(file = 'data/topo_env_data.Rdata', topo_data)
-
+  save(file = "data/topo_env_data.Rdata", topo_data)
 } else {
   data_files <- list.files("data/")
 
   data_files <-
-    paste0('data/', data_files[str_detect(data_files, 'env_data.Rdata')])
+    paste0("data/", data_files[str_detect(data_files, "env_data.Rdata")])
 
   for (i in seq_along(data_files)) {
     load(data_files[i])
-
   }
-
 }
 
 
@@ -598,28 +595,29 @@ if (query_environmentals == T) {
 
 if (query_mpas == T) {
   mpa_ids <-
-    data_frame(mpa_type = c('no_take_mpas_id', 'restricted_use_mpas_id'))
+    data_frame(mpa_type = c("no_take_mpas_id", "restricted_use_mpas_id"))
 
-  fishing_connection <- DBI::dbConnect(bigrquery::dbi_driver(),
-                                       project = gfw_project,
-                                       dataset = 'regions_ids')
+  fishing_connection <- DBI::dbConnect(
+    bigrquery::dbi_driver(),
+    project = gfw_project,
+    dataset = "regions_ids"
+  )
 
   mpa_ids <- mpa_ids %>%
     mutate(data = map(mpa_type, ~ fishing_connection %>%
-                        tbl(.x) %>%
-                        collect(n = Inf))) %>%
+      tbl(.x) %>%
+      collect(n = Inf))) %>%
     unnest()
 
   mpa_ids <- mpa_ids %>%
     mutate(
-      mpa_type = str_split(region_id, ':', simplify = T)[, 1],
-      mpa_id = str_split(region_id, ':', simplify = T)[, 2]
+      mpa_type = str_split(region_id, ":", simplify = T)[, 1],
+      mpa_id = str_split(region_id, ":", simplify = T)[, 2]
     )
 
-  save(file = 'data/mpa_ids.Rdata', mpa_ids)
+  save(file = "data/mpa_ids.Rdata", mpa_ids)
 } else {
-  load(file = 'data/mpa_ids.Rdata')
-
+  load(file = "data/mpa_ids.Rdata")
 }
 
 
@@ -631,15 +629,18 @@ if (query_mpas == T) {
 
 if (query_synonyms == T) {
   fao <-
-    data.table::fread("~/Box Sync/Databases/FAO/FAO_Capture_1950to2012.csv",
-                      header = T) %>%
+    data.table::fread(
+      "~/Box Sync/Databases/FAO/FAO_Capture_1950to2012.csv",
+      header = T
+    ) %>%
     as_data_frame() %>%
     filter(isscaap_group < 60) # get fao data
 
   fao_species <- unique(fao$sciname) # unique fao species
 
-  species_seen <- fish_data$Sci %>% unique() %>%
-    str_replace('_', ' ') # species in fishdata
+  species_seen <- fish_data$Sci %>%
+    unique() %>%
+    str_replace("_", " ") # species in fishdata
 
   safe_syns <- safely(taxize::synonyms)
 
@@ -648,17 +649,16 @@ if (query_synonyms == T) {
     mutate(worms = map(sci_name, taxize::get_wormsid, ask = F)) %>%
     mutate(worms_id = map(worms, `[[`, 1) %>% as.character()) %>% # extract the worms id
     filter(is.na(worms_id) == F) %>%
-    mutate(known_synonyms = map(worms_id %>% as.numeric(), safe_syns, db = 'worms'))
+    mutate(known_synonyms = map(worms_id %>% as.numeric(), safe_syns, db = "worms"))
 
   species_data <- species_data %>%
-    mutate(syn_results = map(known_synonyms, 'result')) %>%
+    mutate(syn_results = map(known_synonyms, "result")) %>%
     mutate(syns = map(syn_results, `[[`, 1)) %>%
     mutate(sci_syns = map(syns, "scientificname")) # extract synonyms
 
 
   check_fao <- function(sci, syns, faos) {
     in_fao <- sci %in% faos | any(syns %in% faos)
-
   }
 
   fished_species <- species_data %>%
@@ -666,11 +666,9 @@ if (query_synonyms == T) {
     select(sci_name, sci_syns, in_fao) %>%
     filter(in_fao == T) # find species whose primary name or synonyms are in fao database
 
-  save(file = 'data/fished_species.Rdata', fished_species)
-
+  save(file = "data/fished_species.Rdata", fished_species)
 } else {
-  load(file = 'data/fished_species.Rdata')
-
+  load(file = "data/fished_species.Rdata")
 }
 
 
@@ -685,10 +683,11 @@ if (query_prices == T) {
 
   fish_prices <- fish_prices %>%
     rename(species = scientific_name) %>%
-    mutate(species = str_replace(species, ' ', '_'))
+    mutate(species = str_replace(species, " ", "_"))
 
-  species_seen <- fish_data$Sci %>% unique() %>%
-    str_replace('_', ' ') # species in fishdata
+  species_seen <- fish_data$Sci %>%
+    unique() %>%
+    str_replace("_", " ") # species in fishdata
 
   safe_syns <- safely(taxize::synonyms)
 
@@ -697,37 +696,34 @@ if (query_prices == T) {
     mutate(worms = map(sci_name, taxize::get_wormsid, ask = F)) %>%
     mutate(worms_id = map(worms, `[[`, 1) %>% as.character()) %>% # extract the worms id
     filter(is.na(worms_id) == F) %>%
-    mutate(known_synonyms = map(worms_id %>% as.numeric(), safe_syns, db = 'worms'))
+    mutate(known_synonyms = map(worms_id %>% as.numeric(), safe_syns, db = "worms"))
 
   species_synonyms <- species_synonyms %>%
-    mutate(syn_results = map(known_synonyms, 'result')) %>%
+    mutate(syn_results = map(known_synonyms, "result")) %>%
     mutate(syns = map(syn_results, `[[`, 1)) %>%
-    mutate(sci_syns = map(syns, "scientificname")) %>%  # extract synonyms
+    mutate(sci_syns = map(syns, "scientificname")) %>% # extract synonyms
     select(sci_name, sci_syns) %>%
-    mutate(species = str_replace(sci_name, ' ', '_')) %>%
+    mutate(species = str_replace(sci_name, " ", "_")) %>%
     select(-sci_name)
 
 
   price_foo <- function(sci_name, sci_syns, fish_prices) {
     joint_names <- data_frame(species = c(sci_name, sci_syns)) %>%
-      mutate(species = stringr::str_replace_all(species, ' ', '_'))
+      mutate(species = stringr::str_replace_all(species, " ", "_"))
 
     syn_prices <- joint_names %>%
-      left_join(fish_prices, by = 'species')
+      left_join(fish_prices, by = "species")
 
     mean_price <- mean(syn_prices$mean_exvessel_price, na.rm = T)
-
   }
 
   species_prices <- species_synonyms %>%
     mutate(mean_exvessel_price = map2_dbl(species, sci_syns, price_foo, fish_prices = fish_prices)) %>%
     select(species, mean_exvessel_price)
 
-  save(file = 'data/fish_prices.Rdata', species_prices)
-
+  save(file = "data/fish_prices.Rdata", species_prices)
 } else {
-  load(file = 'data/fish_prices.Rdata')
-
+  load(file = "data/fish_prices.Rdata")
 }
 # if (fished_only == T){ # include only fished species
 #
@@ -749,8 +745,7 @@ if (hack_zeros == T) {
     if (min_wt > 0) {
       min_quantile <- quantile(x$Wt, 0.025) %>% as.numeric()
 
-      x$Wt[x$Wt <= min_quantile] <-  0
-
+      x$Wt[x$Wt <= min_quantile] <- 0
     }
 
     return(x)
@@ -771,17 +766,17 @@ if (bottom_gears_only == T) {
   gfw_data <- gfw_data %>%
     unnest() %>%
     filter(
-      (inferred_label_allyears == 'trawlers' |
-        inferred_sublabel_allyears == 'pots_and_traps' |
-        str_detect(inferred_sublabel_allyears,'set_') |
-        inferred_sublabel_allyears == 'trawlers') &
-        !inferred_label_allyears %in% c('cargo_or_tanker','passenger')
+      (inferred_label_allyears == "trawlers" |
+        inferred_sublabel_allyears == "pots_and_traps" |
+        str_detect(inferred_sublabel_allyears, "set_") |
+        inferred_sublabel_allyears == "trawlers") &
+        !inferred_label_allyears %in% c("cargo_or_tanker", "passenger")
     ) %>%
     nest(-survey)
 }
 
 gfw_data <- gfw_data %>%
-  filter(survey %in%  survey_list)
+  filter(survey %in% survey_list)
 
 if (include_all_species == T) {
   species_list <- unique(fish_data$Sci)
@@ -789,20 +784,25 @@ if (include_all_species == T) {
 
 
 subset_fish_data <- fish_data %>%
-  filter(survey %in% survey_list , Sci %in% species_list) %>%  dplyr::rename(Lon = Long,
-                                                                             Catch_KG = Wt,
-                                                                             spp  = Sci) %>%
-  mutate(AreaSwept_km2 = 1 , Vessel = 'missing') %>%
-  select(survey,
-         survey_region,
-         knots,
-         Year,
-         Lat,
-         Lon,
-         Vessel,
-         AreaSwept_km2,
-         Catch_KG,
-         spp) %>%
+  filter(survey %in% survey_list, Sci %in% species_list) %>%
+  dplyr::rename(
+    Lon = Long,
+    Catch_KG = Wt,
+    spp = Sci
+  ) %>%
+  mutate(AreaSwept_km2 = 1, Vessel = "missing") %>%
+  select(
+    survey,
+    survey_region,
+    knots,
+    Year,
+    Lat,
+    Lon,
+    Vessel,
+    AreaSwept_km2,
+    Catch_KG,
+    spp
+  ) %>%
   set_names(tolower(colnames(.))) %>%
   filter(year >= min_year) %>%
   group_by(survey, year, spp) %>%
@@ -810,10 +810,10 @@ subset_fish_data <- fish_data %>%
   group_by(survey, spp) %>%
   mutate(seen_every_year = all(times_seen > min_times_seen)) %>%
   filter(seen_every_year == T) %>%
-  select(-times_seen,-seen_every_year) %>%
+  select(-times_seen, -seen_every_year) %>%
   ungroup() %>%
   as.data.frame() %>%
-  nest(-survey,-survey_region,-knots) #note that this breaks if it's a tibble, should make a bit more flexible
+  nest(-survey, -survey_region, -knots) # note that this breaks if it's a tibble, should make a bit more flexible
 
 
 # vasterize ---------------------------------------------------------------
@@ -857,16 +857,17 @@ if (vasterize == T) {
   #     facet_wrap(~species) +
   #     scale_color_viridis()
 
-  vast_fish$vasterized_data <-  map(vast_fish$vasterized_data,'result')
+  vast_fish$vasterized_data <- map(vast_fish$vasterized_data, "result")
 
-  save(file = paste0(run_dir, 'vast_fish.Rdata'),
-       vast_fish)
+  save(
+    file = paste0(run_dir, "vast_fish.Rdata"),
+    vast_fish
+  )
 } else {
-  load(file = paste0(run_dir, 'vast_fish.Rdata'))
-
+  load(file = paste0(run_dir, "vast_fish.Rdata"))
 }
 
-save(file = here::here('results',run_name,'gfw_data.Rdata'),gfw_data)
+save(file = here::here("results", run_name, "gfw_data.Rdata"), gfw_data)
 
 # build database ----------------------------------------------------------
 
@@ -884,11 +885,13 @@ skynet_data <- gfw_data %>%
     dist_from_shore = mean(mean_distance_from_shore),
     mean_vessel_length = mean(inferred_length),
     no_take_mpa = any(is.na(mpant) == F),
-    restricted_use_mpa =  any(is.na(mparu) == F)
+    restricted_use_mpa = any(is.na(mparu) == F)
   ) %>%
   ungroup() %>%
-  mutate(vessel_hours = total_engine_hours * num_vessels,
-         any_fishing = total_engine_hours > 0) %>%
+  mutate(
+    vessel_hours = total_engine_hours * num_vessels,
+    any_fishing = total_engine_hours > 0
+  ) %>%
   group_by(rounded_lat, rounded_lon) %>%
   arrange(year) %>%
   mutate(
@@ -910,7 +913,7 @@ skynet_data <- gfw_data %>%
 
 knots <- vast_fish %>%
   select(survey, vasterized_data) %>%
-  mutate(knots = map(vasterized_data, c('spatial_list', 'loc_x_lat_long'))) %>%
+  mutate(knots = map(vasterized_data, c("spatial_list", "loc_x_lat_long"))) %>%
   select(-vasterized_data)
 
 # mutate(knot_plot =  map(knots, ~ quick_map(
@@ -934,14 +937,13 @@ if (fished_only == T) {
   # include only fished species
 
   total_fish_data <- vast_fish %>%
-    mutate(spatial_densities = map(vasterized_data, 'spatial_densities')) %>%
+    mutate(spatial_densities = map(vasterized_data, "spatial_densities")) %>%
     select(survey, spatial_densities) %>%
     unnest() %>%
-    filter(str_replace(species, '_', ' ') %in% fished_species$sci_name)
-
+    filter(str_replace(species, "_", " ") %in% fished_species$sci_name)
 } else {
   total_fish_data <- vast_fish %>%
-    mutate(spatial_densities = map(vasterized_data, 'spatial_densities')) %>%
+    mutate(spatial_densities = map(vasterized_data, "spatial_densities")) %>%
     select(survey, spatial_densities) %>%
     unnest()
 }
@@ -951,22 +953,22 @@ if (raw_fish == T) {
   # option to sub in raw survey densities instead of VAST outputs
 
   knot_foo <- function(dat) {
-    dat <-  dat %>%
-      mutate(knot = paste(approx_long, approx_lat, sep = '-') %>% as.factor() %>% as.numeric())
-
+    dat <- dat %>%
+      mutate(knot = paste(approx_long, approx_lat, sep = "-") %>% as.factor() %>% as.numeric())
   }
 
 
   total_fish_data <- fish_data %>%
-  {
-    if (fished_only == T) {
-      filter(.,
-             str_replace(.$Sci, '_', ' ') %in% fished_species$sci_name)
-
-    } else{
-      .
-    }
-  } %>%
+    {
+      if (fished_only == T) {
+        filter(
+          .,
+          str_replace(.$Sci, "_", " ") %in% fished_species$sci_name
+        )
+      } else {
+        .
+      }
+    } %>%
     select(survey, Sci, Year, Wt, Long, Lat) %>%
     rename(
       species = Sci,
@@ -991,13 +993,12 @@ if (raw_fish == T) {
   knots <- total_fish_data %>%
     select(survey, approx_long, approx_lat, knot) %>%
     unique() %>%
-    nest(-survey, .key = 'knots')
-
+    nest(-survey, .key = "knots")
 }
 
 
 mean_survey_prices <- total_fish_data %>%
-  left_join(species_prices, by = 'species') %>%
+  left_join(species_prices, by = "species") %>%
   group_by(survey) %>%
   summarise(aggregate_price = sum(unique(mean_exvessel_price), na.rm = T))
 
@@ -1010,17 +1011,14 @@ total_fish_data <- total_fish_data %>%
 if (survey_years_only == T) {
   survey_years <- fish_data %>%
     group_by(survey, Year) %>%
-    summarise(year_surveyed = T)  %>%
+    summarise(year_surveyed = T) %>%
     set_names(tolower)
 
   total_fish_data <- total_fish_data %>%
     unnest() %>%
-    left_join(survey_years, by = c('survey', 'year')) %>%
+    left_join(survey_years, by = c("survey", "year")) %>%
     filter(year_surveyed == T) %>%
     nest(-survey, .key = fish_data)
-
-
-
 }
 
 # aggregate data
@@ -1028,8 +1026,8 @@ if (survey_years_only == T) {
 
 skynet_data <- skynet_data %>%
   nest(-survey, .key = gfw_data) %>%
-  left_join(total_fish_data, by = 'survey') %>%
-  left_join(knots, by = 'survey')
+  left_join(total_fish_data, by = "survey") %>%
+  left_join(knots, by = "survey")
 
 
 if (clip_gfw == T) {
@@ -1058,20 +1056,20 @@ skynet_data <- skynet_data %>%
   unnest()
 
 missing_too_many <- skynet_data %>%
-  map_df( ~ mean(is.na(.x))) %>%
+  map_df(~ mean(is.na(.x))) %>%
   gather(variable, percent_missing) %>%
   arrange(desc(percent_missing)) %>%
   filter(
     percent_missing > max_percent_missing,
-    !str_detect(variable, 'lag'),!str_detect(variable, 'density')
+    !str_detect(variable, "lag"), !str_detect(variable, "density")
   ) %>%
   {
     .$variable
   }
 
 skynet_data <- skynet_data %>%
-  select_(paste0('-', missing_too_many)) %>%
-  left_join(mean_survey_prices, by = 'survey')
+  select_(paste0("-", missing_too_many)) %>%
+  left_join(mean_survey_prices, by = "survey")
 
 # skynet_data %>%
 #   group_by(rounded_lat, rounded_lon) %>%
@@ -1097,7 +1095,7 @@ skynet_data <- skynet_data %>%
 
 if (plot_data == T) {
   plot_vars <- skynet_data %>%
-    select(-survey,-year,-rounded_lat,-rounded_lon) %>%
+    select(-survey, -year, -rounded_lat, -rounded_lon) %>%
     colnames()
 
   plot_covariates <- function(dat, variable, run_dir) {
@@ -1109,25 +1107,26 @@ if (plot_data == T) {
         group = ~ year,
         fill = ~ survey
       )) +
-      facet_wrap( ~ survey, scales = 'free_x') +
+      facet_wrap(~ survey, scales = "free_x") +
       scale_fill_viridis_d(guide = F) +
       labs(title = variable)
 
     ggsave(
-      filename = paste0(run_dir, variable, '_plot.pdf'),
+      filename = paste0(run_dir, variable, "_plot.pdf"),
       p,
       height = 8,
       width = 8
     )
-
   }
 
-  walk(plot_vars,
-       ~ plot_covariates(
-         dat = skynet_data,
-         variable = .x,
-         run_dir = run_dir
-       ))
+  walk(
+    plot_vars,
+    ~ plot_covariates(
+      dat = skynet_data,
+      variable = .x,
+      run_dir = run_dir
+    )
+  )
 
 
 
@@ -1139,23 +1138,25 @@ if (plot_data == T) {
              dat,
              run_dir,
              query_coastal_map = F) {
-      a <-  dat %>%
+      a <- dat %>%
         group_by(rounded_lat, rounded_lon, year) %>%
         summarise(
           density = unique(density),
           gfw_hours = unique(total_hours),
           knot = unique(knot)
         ) %>%
-        gather('variable', 'value', density, gfw_hours) %>%
+        gather("variable", "value", density, gfw_hours) %>%
         group_by(variable, year) %>%
         mutate(value = value / max(value))
 
 
-      a <-  a %>%
-        dplyr::mutate(geometry = purrr::map2(rounded_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+      a <- a %>%
+        dplyr::mutate(geometry = purrr::map2(rounded_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = "XY"))) %>%
         ungroup() %>%
-        mutate(geometry = sf::st_sfc(geometry, crs =
-                                       "+proj=longlat +datum=WGS84 +no_defs")) %>%
+        mutate(geometry = sf::st_sfc(
+          geometry, crs =
+            "+proj=longlat +datum=WGS84 +no_defs"
+        )) %>%
         sf::st_sf() %>%
         select(year, variable, value, geometry)
 
@@ -1168,9 +1169,12 @@ if (plot_data == T) {
 
 
         global_map <-
-          rnaturalearth::ne_download(scale = 'medium',
-                                     category = 'physical',
-                                     type = 'land') %>% sf::st_as_sf()
+          rnaturalearth::ne_download(
+            scale = "medium",
+            category = "physical",
+            type = "land"
+          ) %>%
+          sf::st_as_sf()
 
 
         save(file = "data/global_map.Rdata", global_map)
@@ -1182,20 +1186,21 @@ if (plot_data == T) {
 
       var_map <- a %>%
         ggplot() +
-        geom_sf(data = global_map, fill = 'grey60') +
+        geom_sf(data = global_map, fill = "grey60") +
         geom_sf(aes(color = value), size = 0.01, alpha = 0.5) +
         facet_grid(variable ~ year) +
-        coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
-                 ylim = c(bbox['ymin'], bbox['ymax'])) +
+        coord_sf(
+          xlim = c(bbox["xmin"], bbox["xmax"]),
+          ylim = c(bbox["ymin"], bbox["ymax"])
+        ) +
         scale_color_viridis()
 
       ggsave(
-        filename = paste0(run_dir, survey, '_map.pdf'),
+        filename = paste0(run_dir, survey, "_map.pdf"),
         var_map,
         height = 10,
         width = 10
       )
-
     }
 
   walk2(
@@ -1222,8 +1227,6 @@ if (plot_data == T) {
   #   scale_fill_gradient(low = 'white', high = 'red') +
   #   scale_color_viridis(option = 'D') +
   #   theme_classic()
-
-
 }
 # prepare models ----------------------------------------------------------
 
@@ -1234,19 +1237,18 @@ skynet_names <- colnames(skynet_data)
 
 do_not_scale <-
   c(
-    'year',
-    'rounded_lat',
-    'rounded_lon',
-    'no_take_mpa',
-    'restricted_use_mpa',
-    'knot',
-    'distance',
-    'any_fishing',
+    "year",
+    "rounded_lat",
+    "rounded_lon",
+    "no_take_mpa",
+    "restricted_use_mpa",
+    "knot",
+    "distance",
+    "any_fishing",
     # 'log_density',
     # 'density',
-    'survey',
-    'aggregate_price'
-
+    "survey",
+    "aggregate_price"
   ) # variables that should not be centered and scaled
 
 if (center_and_scale == T) {
@@ -1254,66 +1256,72 @@ if (center_and_scale == T) {
 
   skynet_data <- skynet_data %>%
     group_by(survey) %>%
-    purrrlyr::dmap_at(do_scale, ~ (.x - mean(.x, na.rm = T)) / (2 * sd(.x, na.rm = T))) %>%  #center and scale variables that should be
+    purrrlyr::dmap_at(do_scale, ~ (.x - mean(.x, na.rm = T)) / (sd(.x, na.rm = T))) %>% # center and scale variables that should be
     ungroup()
 }
 
 
-save(file = here::here('results',run_name, 'skynet_data.Rdata'),
-     skynet_data)
+save(
+  file = here::here("results", run_name, "skynet_data.Rdata"),
+  skynet_data
+)
 
 # fit models ----------------------------------------------------------
 
 
 
-dep_var <- c('log_density')
+dep_var <- c("log_density")
 
 never_ind_vars <-
   c(
-    'log_density',
-    'density',
-    'survey',
-    'year',
-    'rounded_lat',
-    'rounded_lon',
-    'knot',
-    'distance',
-    'in_poly',
-    'mean_altitude',
-    'aggregate_price',
-    'vessel_hours',
-    'total_engine_hours'
+    "log_density",
+    "density",
+    "survey",
+    "year",
+    "rounded_lat",
+    "rounded_lon",
+    "knot",
+    "distance",
+    "in_poly",
+    "mean_altitude",
+    "aggregate_price",
+    "vessel_hours",
+    "total_engine_hours"
   )
 
 
 gfw_vars <-
   skynet_names[str_detect(
     skynet_names,
-    '(vessel)|(distance)|(length)|(hours)|(engine)|(port)|(shore)|(mpa)'
+    "(vessel)|(distance)|(length)|(hours)|(engine)|(port)|(shore)|(mpa)"
   )]
 
-tree_candidate_vars <-  skynet_names[!skynet_names %in% c(dep_var,
-                                                          never_ind_vars) &
-                                       str_detect(skynet_names, '_interaction')
-                                     == F]
+tree_candidate_vars <- skynet_names[!skynet_names %in% c(
+  dep_var,
+  never_ind_vars
+) &
+  str_detect(skynet_names, "_interaction")
+  == F]
 
 if (gfw_vars_only == T) {
   tree_candidate_vars <-
-    c(tree_candidate_vars[tree_candidate_vars %in% gfw_vars], 'random_var')
-
+    c(tree_candidate_vars[tree_candidate_vars %in% gfw_vars], "random_var")
 }
 
 
-lm_candidate_vars <-  skynet_names[!skynet_names %in% c(dep_var,
-                                                        never_ind_vars)]
+
+lm_candidate_vars <- skynet_names[!skynet_names %in% c(
+  dep_var,
+  never_ind_vars
+)]
 # models <- c('structural')
-models <- c('rf', 'gbm', 'structural')
+models <- c("rf", "gbm", "structural")
 
 delta_skynet <- skynet_data %>%
-  select(-contains('lag')) %>%
+  select(-contains("lag")) %>%
   gather(
     variable,
-    value,-survey,
+    value, -survey,
     -year,
     -rounded_lat,
     -rounded_lon,
@@ -1327,7 +1335,16 @@ delta_skynet <- skynet_data %>%
     -knot,
     -distance,
     -aggregate_price
-  ) %>%
+  )
+
+delta_vars <- unique(delta_skynet$variable)
+
+delta_candidate_vars <- c(
+  tree_candidate_vars[tree_candidate_vars %in% delta_vars],
+  "random_var"
+)
+
+delta_skynet <- delta_skynet %>%
   group_by(survey, variable, rounded_lat, rounded_lon) %>%
   arrange(year) %>%
   mutate(lag_value = lag(value, 1)) %>%
@@ -1339,8 +1356,8 @@ delta_skynet <- skynet_data %>%
 
 data_sources <- tibble(
   lag_0_skynet_data = list(skynet_data %>%
-                             select(-contains('lag')) %>%
-                             na.omit()),
+    select(-contains("lag")) %>%
+    na.omit()),
 
   lag_1_skynet_data = list(
     skynet_data %>%
@@ -1355,16 +1372,16 @@ data_sources <- tibble(
 
 test_train_data <- purrr::cross_df(list(
   test_sets = c(
-    'random',
-    'alaska',
-    'west_coast',
-    'historic',
-    'goa-ai',
-    'ebs-ai'
+    "random",
+    "alaska",
+    "west_coast",
+    "historic",
+    "goa-ai",
+    "ebs-ai"
   ),
-  data_subset = c('lag_0_skynet_data', 'delta_skynet')
+  data_subset = c("lag_0_skynet_data", "delta_skynet")
 )) %>%
-  left_join(data_sources, by = 'data_subset')
+  left_join(data_sources, by = "data_subset")
 
 test_train_data <- test_train_data %>%
   mutate(resampled = map2(data, test_sets, ~ generate_test_training(dat = .x, test_set = .y))) %>%
@@ -1374,12 +1391,14 @@ test_train_data <- test_train_data %>%
 
 # test_train_data <- modelr::crossv_kfold(lag_0_skynet_data, k = 1)
 
-skynet_models <-  purrr::cross_df(list(
-  dep_var = dep_var,
+skynet_models <- purrr::cross_df(list(
+  dep_var = list('log_density','density'),
   temp = list(test_train_data),
   model = models
 )) %>%
   unnest(temp, .drop = F)
+
+
 # run models --------------------------------------------------------------
 
 
@@ -1387,40 +1406,40 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
-    # filter(model == 'rf') %>%
-    # slice(1) %>%
-    # group_by(model) %>%
-    # mutate(i = 1:length(dep_var)) %>%
-    # filter(i < 4, model == 'structural') %>%
+    mutate(candidate_vars = ifelse(
+      str_detect(.$data_subset, "delta"),
+      list(delta_candidate_vars),
+      list(tree_candidate_vars)
+    )) %>%
     mutate(
       fitted_model = pmap(
         list(
           dep_var = dep_var,
           model_name = model,
           training = train,
-          testing = test
+          testing = test,
+          tree_candidate_vars = candidate_vars
         ),
         sfm,
         fitcontrol_number = 2,
         fitcontrol_repeats = 2,
         never_ind_vars = never_ind_vars,
-        tree_candidate_vars = tree_candidate_vars,
-        lm_candidate_vars = lm_candidate_vars,
         tune_model = T
       )
     )
 
-  save(file = paste0(run_dir, 'skynet_models.Rdata'),
-       skynet_models)
-
+  save(
+    file = paste0(run_dir, "skynet_models.Rdata"),
+    skynet_models
+  )
 } else {
-  load(file = paste0(run_dir, 'skynet_models.Rdata'))
+  load(file = paste0(run_dir, "skynet_models.Rdata"))
 }
 
 # diagnose models ---------------------------------------------------------
 
 skynet_models <- skynet_models %>%
-  mutate(error = map(fitted_model, 'error')) %>%
+  mutate(error = map(fitted_model, "error")) %>%
   mutate(no_error = map_lgl(error, is.null)) %>%
   filter(no_error)
 
@@ -1440,30 +1459,30 @@ diagnostic_plot_foo <- function(data,
                                 data_set) {
   data %>%
     ggplot(aes_(as.name(dep_var), ~ pred)) +
-    geom_abline(aes(intercept = 0, slope = 1),
-                color = 'red',
-                linetype = 2) +
+    geom_abline(
+      aes(intercept = 0, slope = 1),
+      color = "red",
+      linetype = 2
+    ) +
     geom_point(alpha = 0.75) +
     labs(
-      title = paste0('tested on ', test_region,'- trained on ', train_region, '; R2 = ', r2),
-      subtitle = paste0('data subset is: ', data_set)
+      title = paste0("tested on ", test_region, "- trained on ", train_region, "; R2 = ", r2),
+      subtitle = paste0("data subset is: ", data_set)
     )
-
-
 }
 
 
 skynet_models <- skynet_models %>%
   mutate(
-    test_data = map(fitted_model, c('result', 'test_predictions')),
-    training_data = map(fitted_model, c('result', 'training_predictions')),
-    results = map(fitted_model,c('result','model'))
+    test_data = map(fitted_model, c("result", "test_predictions")),
+    training_data = map(fitted_model, c("result", "training_predictions")),
+    results = map(fitted_model, c("result", "model"))
   ) %>%
   mutate(
-    mse = map2_dbl(test_data, dep_var, mse_foo, pred_var = 'pred'),
+    mse = map2_dbl(test_data, dep_var, mse_foo, pred_var = "pred"),
     var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
     psuedo_r2 = round(1 - mse / var_y, 2),
-    mse_training = map2_dbl(training_data, dep_var, mse_foo, pred_var = 'pred'),
+    mse_training = map2_dbl(training_data, dep_var, mse_foo, pred_var = "pred"),
     var_y_training = map2_dbl(training_data, dep_var, ~ var(.x[, .y])),
     psuedo_r2_training = round(1 - mse_training / var_y_training, 2)
   ) %>%
@@ -1484,7 +1503,7 @@ skynet_models <- skynet_models %>%
         data = training_data,
         r2 = psuedo_r2_training,
         test_region = paste0(test_sets),
-        train_region = paste0(train_set, '- training plot'),
+        train_region = paste0(train_set, "- training plot"),
         data_set = data_subset,
         dep_var = dep_var
       ),
@@ -1499,13 +1518,11 @@ save_foo <- function(test_plot,
                      data_set,
                      run_dir) {
   ggsave(
-    filename = paste0(run_dir, model, '-train_', train_region, '-test_',test_region,'-data_',data_set, '.pdf'),
+    filename = paste0(run_dir, model, "-train_", train_region, "-test_", test_region, "-data_", data_set, ".pdf"),
     test_plot,
     height = 8,
     width = 8
   )
-
-
 }
 
 pwalk(
@@ -1525,42 +1542,11 @@ pwalk(
     model = skynet_models$model,
     test_plot = skynet_models$training_plot,
     train_region = skynet_models$train_set,
-    test_region = paste0(skynet_models$test_sets, '-training plot'),
+    test_region = paste0(skynet_models$test_sets, "-training plot"),
     data_set = skynet_models$data_subset
   ),
   save_foo,
   run_dir = run_dir
 )
 
-save(file = here::here('results',run_name,'processed_skynet_models.Rdata'), skynet_models)
-
-# wee <- map(skynet_models$fitted_model, c('result'))
-#
-# a <- wee[[3]]
-#
-# a$model$finalModel
-#
-# varImpPlot(a$model$finalModel)
-#
-# arg <- skynet_models$test[[3]] %>%
-#   as_data_frame() %>%
-#   na.omit() %>%
-#   ungroup() %>%
-#   mutate(ld_hat = predict(a$model$finalModel, newdata = .))
-#
-# arg %>%
-#   ggplot(aes(log_density, ld_hat)) +
-#   geom_point() +
-#   geom_abline(aes(intercept = 0, slope = 1)) +
-#   labs(x = 'Observed Multi-Species Density',
-#        y = 'Predicted Multi-Species Density', title = 'Testing data omitted from model fitting') +
-#   hrbrthemes::theme_ipsum()
-#
-#
-# huh <- a$model$trainingData %>%
-#   mutate(ld_hat = a$model$finalModel$predicted)
-#
-# huh %>%
-#   ggplot(aes(.outcome, ld_hat)) +
-#   geom_point(aes(color = mean_analysed_sst)) +
-#   geom_abline(aes(intercept = 0, slope = 1))
+save(file = here::here("results", run_name, "processed_skynet_models.Rdata"), skynet_models)
