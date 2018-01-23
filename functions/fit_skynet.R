@@ -157,7 +157,8 @@ fit_skynet <- function(dep_var,
         method = "rf",
         do.trace = 10,
         na.action = na.omit,
-        trControl = fit_control
+        trControl = fit_control,
+        importance = T
       )
 
     }
@@ -245,7 +246,7 @@ fit_skynet <- function(dep_var,
       select(matches(paste0(structural_vars, collapse = '|')))
 
 
-    testing <- testing %>%
+    testing_frame <- testing %>%
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|')))
 
@@ -288,11 +289,11 @@ fit_skynet <- function(dep_var,
                   )
 
   testing_prediction <- predict_structural_model(mle_fit = mle_fit,
-                                    data = testing,
+                                    data = testing_frame,
                                     mle_vars = colnames(struct_data$data),
                                     mp = 0)
 
-    out_training <- independent_data %>%
+    out_training <- training %>%
       as_data_frame() %>%
       mutate(pred = mle_fit_report$log_d_hat)
 

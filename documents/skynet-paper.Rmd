@@ -17,6 +17,7 @@ knitr::opts_chunk$set(message = F, warning = F, echo = F ,
 
 ```{r}
 
+library(gbm)
 library(randomForest)
 library(stringr)
 library(modelr)
@@ -42,7 +43,7 @@ theme_set(fig_theme)
 
 load(here::here("results", run_name,'skynet_data.Rdata'))
 
-load(here::here("results", run_name,'skynet_models.Rdata'))
+load(here::here("results", run_name,'processed_skynet_models.Rdata'))
 
 load(here::here("results", run_name,'vast_fish.Rdata'))
 
@@ -367,14 +368,11 @@ skynet_data %>%
 ```{r}
 
 skynet_subset <- skynet_models %>% 
-  select(model, data_subset, fitted_model, train_set) %>% 
-  mutate(results = map(fitted_model,'result')) %>% 
-  mutate(worked = !map_lgl(results, is.null)) %>% 
-  filter(worked == T)
+  select(model, data_subset, train_set,training_data) 
+
 
 skynet_subset_training <- skynet_subset %>% 
-  mutate(train_results = map(results,'training_predictions')) %>% 
-  select(model, data_subset,train_set, train_results) %>% 
+  select(model, data_subset,train_set, training_data) %>% 
   unnest() %>% 
   mutate(residuals = log_density - pred)
 
@@ -396,21 +394,15 @@ skynet_subset_training %>%
 ```{r alaska-westcoast}
 
 skynet_subset <- skynet_models %>% 
-  filter(train_set == 'not_west_coast') %>% 
-  select(model, data_subset, fitted_model) %>% 
-  mutate(results = map(fitted_model,'result')) %>% 
-  mutate(worked = !map_lgl(results, is.null)) %>% 
-  filter(worked == T)
+  filter(train_set == 'not_west_coast')
 
 skynet_subset_training <- skynet_subset %>% 
-  mutate(train_results = map(results,'training_predictions')) %>% 
-  select(model, data_subset, train_results) %>% 
+  select(model, data_subset, training_data) %>% 
   unnest() %>% 
   mutate(residuals = log_density - pred)
 
 skynet_subset_testing <- skynet_subset %>% 
-  mutate(train_results = map(results,'test_predictions')) %>% 
-  select(model, data_subset, train_results) %>% 
+  select(model, data_subset, test_data) %>% 
   unnest() %>% 
   mutate(residuals = log_density - pred)
 ```
@@ -509,21 +501,15 @@ skynet_map <- skynet_subset_testing %>%
 ```{r random-random}
 
 skynet_subset <- skynet_models %>% 
-  filter(train_set == 'random') %>% 
-  select(model, data_subset, fitted_model) %>% 
-  mutate(results = map(fitted_model,'result')) %>% 
-  mutate(worked = !map_lgl(results, is.null)) %>% 
-  filter(worked == T)
+  filter(train_set == 'random') 
 
 skynet_subset_training <- skynet_subset %>% 
-  mutate(train_results = map(results,'training_predictions')) %>% 
-  select(model, data_subset, train_results) %>% 
+  select(model, data_subset, training_data) %>% 
   unnest() %>% 
   mutate(residuals = log_density - pred)
 
 skynet_subset_testing <- skynet_subset %>% 
-  mutate(train_results = map(results,'test_predictions')) %>% 
-  select(model, data_subset, train_results) %>% 
+  select(model, data_subset, test_data) %>% 
   unnest() %>% 
   mutate(residuals = log_density - pred)
 ```
@@ -624,21 +610,15 @@ skynet_map <- skynet_subset_testing %>%
 ```{r past-present}
 
 skynet_subset <- skynet_models %>% 
-  filter(train_set == 'year_leq_than_2014') %>% 
-  select(model, data_subset, fitted_model) %>% 
-  mutate(results = map(fitted_model,'result')) %>% 
-  mutate(worked = !map_lgl(results, is.null)) %>% 
-  filter(worked == T)
+  filter(train_set == 'year_leq_than_2014')
 
 skynet_subset_training <- skynet_subset %>% 
-  mutate(train_results = map(results,'training_predictions')) %>% 
-  select(model, data_subset, train_results) %>% 
+  select(model, data_subset, training_data) %>% 
   unnest() %>% 
   mutate(residuals = log_density - pred)
 
 skynet_subset_testing <- skynet_subset %>% 
-  mutate(train_results = map(results,'test_predictions')) %>% 
-  select(model, data_subset, train_results) %>% 
+  select(model, data_subset, test_data) %>% 
   unnest() %>% 
   mutate(residuals = log_density - pred)
 ```
@@ -740,9 +720,67 @@ The random forest allows us to classify each variable by its "importance", a mea
 
 (Fig. \@ref(fig:var-imp)). 
 
+Plot of variable importance 
+
+```{r}
+
+ml_models <- skynet_models %>% 
+  filter(model %in% c('rf','gbm')) %>%
+  mutate(varimp = map(results, ~varImp(.x$finalModel) %>% as.data.frame() %>% mutate(variable = rownames(.))))
+
+varimp <- ml_models %>% 
+  select(model, data_subset,varimp) %>% 
+  unnest() %>% 
+  group_by(variable) %>% 
+  mutate(mean_importance = mean(Overall)) %>% 
+  arrange(desc(mean_importance)) %>% 
+  ungroup() %>% 
+  mutate(variable = fct_reorder(variable, mean_importance)) %>% 
+  filter(model == 'rf')
+
+
+varimp %>% 
+  ggplot() + 
+  geom_boxplot(aes(variable, Overall, fill = model)) + 
+  coord_flip() +
+  facet_wrap( ~ data_subset)
+
+
+
+
+```
+
+
+Plot of r2/mse by model type
+
+```{r}
+
+skynet_models %>% 
+  ggplot(aes(psuedo_r2_training, fill = model)) + 
+  geom_histogram(show.legend = F) + 
+  facet_wrap(model~data_subset, scales = 'free') + 
+  theme(axis.text.x = element_text(size = 8),
+        axis.text.y = element_text(size = 8))
+
+```
+
+```{r}
+
+skynet_models %>% 
+  ggplot(aes(psuedo_r2, fill = model)) + 
+  geom_histogram(show.legend = F) + 
+  facet_wrap(model~data_subset, scales = 'free') + 
+  theme(axis.text.x = element_text(size = 8),
+        axis.text.y = element_text(size = 8))
+
+```
+
+
+Time series of abunance observed vs predicted
+
 ```{r var-imp, fig.cap='Variable importance plot from model using random forest to predict density of Alaska pollock'}
 
-varImpPlot(skynet_models$fitted_model[[1]]$result$model$finalModel)
+randomForest::varImpPlot(skynet_models$fitted_model[[3]]$result$model$finalModel)
 
 ```
 
@@ -752,14 +790,14 @@ We can also construct partial dependence plots, which visualize the marginal eff
 
 partial_foo <- function(variable) {
   
-  eval(parse(text = paste0('a <- randomForest::partialPlot(rf_model$finalModel
-, skynet_sandbox$train[[1]] %>% as.data.frame() %>% remove_missing() %>% as.data.frame(),', variable,', plot = F)')))
+  eval(parse(text = paste0('a <- randomForest::partialPlot(skynet_models$results[[1]]$finalModel
+, skynet_models$training_data[[1]] %>% as.data.frame() %>% remove_missing() %>% as.data.frame(),', variable,', plot = F)')))
   
 
 }
 
 
-partial_plot <- data_frame(variable = rf_model$finalModel$xNames) %>% 
+partial_plot <- data_frame(variable = skynet_models$results[[1]]$finalModel$xNames) %>% 
   mutate(varname = map(variable, as.name)) %>% 
   mutate(partials = map(.$varname, partial_foo))
 
@@ -777,30 +815,6 @@ partial_plot %>%
 
 ```
 
-We can start with evaluating performance of the K-fold cross validation. Plotting observed densities (log CPUE) from the test data to values predicted for those densities, using the models trained on the training data, we see that the random forest model performs the best in terms of RMSE and R^2^. The linear model has a lower RMSE, though also a much R^2^ than the structural model (Fig. \@ref(fig:perf-plot), Fig. \@ref(fig:rmse-plot)). 
-
-```{r perf-plot, fig.cap='Observed vs predicted log CPUE for test data from models trained on training data', eval=F}
-
-performance_plot
-
-```
-
-```{r rmse-plot, fig.cap= 'RMSE and R2 of each model on test data', eval = F}
-rmse_plot
-```
-
-We can repeat the same exercise, but now comparing the performance of models trained on pre-2015 data and tested on 2015 data (Fig. \@ref(fig:time-perf-plot), Fig. \@ref(fig:time-rmse-plot))8
-
-
-```{r time-perf-plot, fig.cap='Observed vs predicted log CPUE for test data (2015) from models trained on training data (pre 2015)', eval = F}
-time_performance_plot
-```
-
-
-
-```{r time-rmse-plot, fig.cap= 'RMSE and R2 of each model on test (2015) data', eval = F}
-time_rmse_plot
-```
 
 # Summary
 

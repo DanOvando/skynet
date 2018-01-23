@@ -1280,7 +1280,9 @@ never_ind_vars <-
     'distance',
     'in_poly',
     'mean_altitude',
-    'aggregate_price'
+    'aggregate_price',
+    'vessel_hours',
+    'total_engine_hours'
   )
 
 
@@ -1385,6 +1387,8 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
+    # filter(model == 'rf') %>%
+    # slice(1) %>%
     # group_by(model) %>%
     # mutate(i = 1:length(dep_var)) %>%
     # filter(i < 4, model == 'structural') %>%
@@ -1452,7 +1456,8 @@ diagnostic_plot_foo <- function(data,
 skynet_models <- skynet_models %>%
   mutate(
     test_data = map(fitted_model, c('result', 'test_predictions')),
-    training_data = map(fitted_model, c('result', 'training_predictions'))
+    training_data = map(fitted_model, c('result', 'training_predictions')),
+    results = map(fitted_model,c('result','model'))
   ) %>%
   mutate(
     mse = map2_dbl(test_data, dep_var, mse_foo, pred_var = 'pred'),
@@ -1526,6 +1531,8 @@ pwalk(
   save_foo,
   run_dir = run_dir
 )
+
+save(file = here::here('results',run_name,'processed_skynet_models.Rdata'), skynet_models)
 
 # wee <- map(skynet_models$fitted_model, c('result'))
 #
