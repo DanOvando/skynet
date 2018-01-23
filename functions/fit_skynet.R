@@ -13,13 +13,13 @@
 #' @export
 #'
 fit_skynet <- function(dep_var,
-                       model,
+                       model_name,
                        training,
                        testing,
                        never_ind_vars,
                        survey_prices,
                        tree_candidate_vars,
-                       lm_candidate_vars,
+                       lm_candidate_vars = NA,
                        structural_vars = c(
                          'log_density',
                          'dist_from_port',
@@ -39,6 +39,8 @@ fit_skynet <- function(dep_var,
   #   paste(dep_var, '~', ind_vars) %>% as.formula() # construct model forumla
   #
   #
+
+
 
   fit_control <- trainControl(method = fitcontrol_method,
                               number = fitcontrol_number,
@@ -63,7 +65,7 @@ fit_skynet <- function(dep_var,
     as_data_frame() %>%
     mutate(!!dep_var := dependent_data)
 
-  if (model == 'cforest') {
+  if (model_name == 'cforest') {
     model <- train(
       model_formula,
       data = reg_data,
@@ -112,7 +114,7 @@ fit_skynet <- function(dep_var,
 
   } # close cforest
 
-  if (model == 'rf') {
+  if (model_name == 'rf') {
     #fit random forest
 
     # rf_grid <-  expand.grid(mtry = c(3,5))
@@ -155,7 +157,8 @@ fit_skynet <- function(dep_var,
         method = "rf",
         do.trace = 10,
         na.action = na.omit,
-        trControl = fit_control
+        trControl = fit_control,
+        importance = T
       )
 
     }
@@ -170,7 +173,7 @@ fit_skynet <- function(dep_var,
 
   } # close rf
 
-  if (model == 'gbm') {
+  if (model_name == 'gbm') {
 
     # gbm_grid <-  expand.grid(interaction.depth = c(1, 5),
     #                         n.trees = (1:10)*100,
@@ -185,8 +188,7 @@ fit_skynet <- function(dep_var,
       trControl = fit_control#,
       # tuneGrid = gbm_grid
     )
-
-    on.exit(detach('package:plyr'))
+    # on.exit(detach('package:plyr'))
 
 
     if (tune_model == T) {
@@ -219,7 +221,7 @@ fit_skynet <- function(dep_var,
         trControl = fit_control
       )
 
-      on.exit(detach('package:plyr'))
+      # on.exit(detach('package:plyr'))
 
     }
 
@@ -233,129 +235,77 @@ fit_skynet <- function(dep_var,
 
   }
 
-  if (model == 'structural') {
+  if (model_name == 'structural') {
+
+    compile(here::here('scripts','fit_structural_skynet.cpp'))
+
+    dyn.load(dynlib(here::here("scripts","fit_structural_skynet")))
 
     independent_data <- training %>%
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|')))
 
-
-    testing <- testing %>%
+    testing_frame <- testing %>%
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|')))
 
-    mle_model <- stats4::mle(
-      fit_structural_model,
-      start = list(
-        beta_distance = (2),
-        beta_size = 2 ,
-        beta_depth = 2 ,
-        beta_mpant = 2,
-        beta_mparu = 2 ,
-        beta_engine_power = 2,
-        sigma = log(sd(independent_data$log_density) / 10),
-        q = log(1e-4)
-      ),
-      fixed = list(
-        price = independent_data$aggregate_price,
-        dat = independent_data,
-        marginal_profits = 0,
-        use = 1,
-        log_space = 1
-      ),
-      upper = list(
-        sigma = log(100),
-        q = log(1.5e-3),
-        beta_distance = (20),
-        beta_size = 20 ,
-        beta_depth = 20 ,
-        beta_mpant = 20,
-        beta_mparu = 20 ,
-        beta_engine_power = 20
-      )
+    struct_data <- list(
+      data = as.matrix(independent_data %>%
+                         select(dist_from_port,
+                                mean_vessel_length,
+                                total_engine_power,
+                                no_take_mpa,
+                                restricted_use_mpa,
+                                m_below_sea_level)),
+      log_d = as.numeric(independent_data$log_density),
+      effort = as.numeric(independent_data$total_hours),
+      price = as.numeric(independent_data$aggregate_price),
+      mp = 0,
+      n = nrow(independent_data)
     )
 
+    struct_params <- list(
+      betas = rep(0, ncol(struct_data$data)),
+      log_sigma = log(sd(struct_data$log_d)),
+      logit_q = log(.001 / (1 - .001))
+    )
 
-    # print(mle_model)
+    model <- MakeADFun(data=struct_data,parameters=struct_params)
 
-    mle_coefs <- mle_model@coef
-
-    for (i in 1:10) {
-      mle_model <- stats4::mle(
-        fit_structural_model,
-        start = list(
-          beta_distance =  mle_coefs['beta_distance'] %>% as.numeric() %>% jitter(2),
-          beta_size =  mle_coefs['beta_size'] %>% as.numeric() %>% jitter(2),
-          beta_depth = mle_coefs['beta_depth'] %>% as.numeric() %>% jitter(2),
-          beta_mpant = mle_coefs['beta_mpant'] %>% as.numeric() %>% jitter(2),
-          beta_mparu = mle_coefs['beta_mparu'] %>% as.numeric() %>% jitter(2),
-          beta_engine_power = mle_coefs['beta_engine_power'] %>% as.numeric() %>% jitter(2),
-          sigma =  mle_coefs['sigma'] %>% as.numeric() %>% jitter(2),
-          q =  mle_coefs['q'] %>% as.numeric() %>% jitter(2)
-        ),
-        fixed = list(
-          price = independent_data$aggregate_price,
-          dat = independent_data,
-          marginal_profits = 0,
-          use = 1
-        ),
-        upper = list(
-          sigma = log(100),
-          q = log(1.5e-4),
-          beta_distance = (20),
-          beta_size = 20 ,
-          beta_depth = 20 ,
-          beta_mpant = 20,
-          beta_mparu = 20 ,
-          beta_engine_power = 20
-        )
+    mle_fit <-
+      nlminb(
+        model$par,
+        objective = model$fn,
+        gradient = model$gr,
+        control = list("trace" = 100)
       )
 
+    mle_fit_report <- model$report()
 
-      mle_coefs <- mle_model@coef
-    } # close for loop
+    model <-  list(mle_fit = mle_fit,
+                   mle_report = mle_fit_report
+                  )
 
+  testing_prediction <- predict_structural_model(mle_fit = mle_fit,
+                                    data = testing_frame,
+                                    mle_vars = colnames(struct_data$data),
+                                    mp = 0)
 
-    in_sample_prediction <- fit_structural_model(
-      beta_distance = mle_coefs['beta_distance'],
-      beta_size = mle_coefs['beta_size'],
-      beta_depth = mle_coefs['beta_depth'],
-      beta_mpant = mle_coefs['beta_mpant'],
-      beta_mparu = mle_coefs['beta_mparu'],
-      beta_engine_power = mle_coefs['beta_engine_power'],
-      q = mle_coefs['q'],
-      sigma = mle_coefs['sigma'],
-      dat = independent_data,
-      price = independent_data$aggregate_price,
-      marginal_profits = 0,
-      use = 0
-    )
-
-    prediction <- fit_structural_model(
-      beta_distance = mle_coefs['beta_distance'],
-      beta_size = mle_coefs['beta_size'],
-      beta_depth = mle_coefs['beta_depth'],
-      beta_mpant = mle_coefs['beta_mpant'],
-      beta_mparu = mle_coefs['beta_mparu'],
-      beta_engine_power = mle_coefs['beta_engine_power'],
-      q = mle_coefs['q'],
-      sigma = mle_coefs['sigma'],
-      dat = testing,
-      price = testing$aggregate_price,
-      marginal_profits = 0,
-      use = 0
-    )
-
-    model <-  mle_model
-
-    out_training <- independent_data %>%
+    out_training <- training %>%
       as_data_frame() %>%
-      mutate(pred = in_sample_prediction)
+      mutate(pred = mle_fit_report$log_d_hat)
+
+    # out_training %>%
+    #   ggplot(aes(pred, pred2, color = total_hours > 0)) +
+    #   geom_point()
 
     out_testing <- testing %>%
       as_data_frame() %>%
-      mutate(pred = prediction)
+      mutate(pred = testing_prediction)
 
+    # out_testing %>%
+    #   ggplot(aes(log_density, pred, color = total_hours > 0)) +
+    #   geom_point()
 
   } #close structural
 
