@@ -916,22 +916,6 @@ knots <- vast_fish %>%
   mutate(knots = map(vasterized_data, c("spatial_list", "loc_x_lat_long"))) %>%
   select(-vasterized_data)
 
-# mutate(knot_plot =  map(knots, ~ quick_map(
-#   .x,
-#   lat_var = quo(approx_lat),
-#   lon_var = quo(approx_long),
-#   plot_var = quo(knot))))
-
-
-# quick_map(knots$knots[[4]],lat_var = quo(approx_lat),
-#           lon_var = quo(approx_long),
-#           plot_var = quo(knot), min_lon = -160)
-
-# qmplot(approx_long,
-#        approx_lat,
-#        color = knot,
-#        data = knots$knots[[5]]) + theme_classic()
-#
 
 if (fished_only == T) {
   # include only fished species
@@ -1021,7 +1005,8 @@ if (survey_years_only == T) {
     nest(-survey, .key = fish_data)
 }
 
-# aggregate data
+# aggregate data -----------------------------------------------
+
 
 
 skynet_data <- skynet_data %>%
@@ -1053,7 +1038,8 @@ skynet_data <- skynet_data %>%
     )
   ) %>%
   select(survey, combo_data) %>%
-  unnest()
+  unnest() %>%
+  filter(density > 0 & is.na(density) == F)
 
 missing_too_many <- skynet_data %>%
   map_df(~ mean(is.na(.x))) %>%
@@ -1245,11 +1231,20 @@ do_not_scale <-
     "knot",
     "distance",
     "any_fishing",
-    # 'log_density',
-    # 'density',
+    'log_density',
+    'cs_log_density',
+    'cs_density',
+    'density',
     "survey",
     "aggregate_price"
   ) # variables that should not be centered and scaled
+
+skynet_data <- skynet_data %>%
+  ungroup() %>%
+  mutate(cs_log_density = (log_density - mean(log_density)) / sd(log_density),
+         cs_density = (density - mean(density)) / sd(density))
+
+uc_skynet_data <- skynet_data
 
 if (center_and_scale == T) {
   do_scale <- skynet_names[!skynet_names %in% do_not_scale]
@@ -1263,19 +1258,20 @@ if (center_and_scale == T) {
 
 save(
   file = here::here("results", run_name, "skynet_data.Rdata"),
-  skynet_data
+  skynet_data, uc_skynet_data
 )
 
 # fit models ----------------------------------------------------------
 
 
-
-dep_var <- c("log_density")
+dep_var <- c("cs_log_density")
 
 never_ind_vars <-
   c(
     "log_density",
     "density",
+    "cs_log_density",
+    "cs_density",
     "survey",
     "year",
     "rounded_lat",
@@ -1392,7 +1388,7 @@ test_train_data <- test_train_data %>%
 # test_train_data <- modelr::crossv_kfold(lag_0_skynet_data, k = 1)
 
 skynet_models <- purrr::cross_df(list(
-  dep_var = list('log_density','density'),
+  dep_var = dep_var,
   temp = list(test_train_data),
   model = models
 )) %>%
@@ -1406,6 +1402,11 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
+    group_by(model, data_subset) %>%
+    mutate(i = 1:length(dep_var)) %>%
+    filter(i <=2) %>%
+    filter(!(data_subset == 'delta_skynet' & model == 'structural')) %>%
+    ungroup() %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
@@ -1428,6 +1429,7 @@ if (run_models == T) {
       )
     )
 
+  print('ran models')
   save(
     file = paste0(run_dir, "skynet_models.Rdata"),
     skynet_models
@@ -1437,6 +1439,7 @@ if (run_models == T) {
 }
 
 # diagnose models ---------------------------------------------------------
+print('saved models')
 
 skynet_models <- skynet_models %>%
   mutate(error = map(fitted_model, "error")) %>%
@@ -1511,6 +1514,8 @@ skynet_models <- skynet_models %>%
     )
   )
 
+print('processed models')
+
 save_foo <- function(test_plot,
                      model,
                      train_region,
@@ -1549,4 +1554,8 @@ pwalk(
   run_dir = run_dir
 )
 
+print('printed models')
+
 save(file = here::here("results", run_name, "processed_skynet_models.Rdata"), skynet_models)
+
+print('saved processed models')
