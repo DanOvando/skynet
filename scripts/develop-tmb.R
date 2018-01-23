@@ -44,6 +44,6 @@ check <- independent_data %>%
   mutate(log_density_hat = fit_report$log_d_hat)
 
 check %>%
-  ggplot(aes(log_density, log_density_hat, color = total_hours > 0)) +
+  ggplot(aes(pred, log_density_hat, color = total_hours > 0)) +
   geom_point()
 

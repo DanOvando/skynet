@@ -13,7 +13,7 @@
 #' @export
 #'
 fit_skynet <- function(dep_var,
-                       model,
+                       model_name,
                        training,
                        testing,
                        never_ind_vars,
@@ -40,6 +40,8 @@ fit_skynet <- function(dep_var,
   #
   #
 
+
+
   fit_control <- trainControl(method = fitcontrol_method,
                               number = fitcontrol_number,
                               repeats = fitcontrol_repeats)
@@ -63,7 +65,7 @@ fit_skynet <- function(dep_var,
     as_data_frame() %>%
     mutate(!!dep_var := dependent_data)
 
-  if (model == 'cforest') {
+  if (model_name == 'cforest') {
     model <- train(
       model_formula,
       data = reg_data,
@@ -112,7 +114,7 @@ fit_skynet <- function(dep_var,
 
   } # close cforest
 
-  if (model == 'rf') {
+  if (model_name == 'rf') {
     #fit random forest
 
     # rf_grid <-  expand.grid(mtry = c(3,5))
@@ -170,7 +172,7 @@ fit_skynet <- function(dep_var,
 
   } # close rf
 
-  if (model == 'gbm') {
+  if (model_name == 'gbm') {
 
     # gbm_grid <-  expand.grid(interaction.depth = c(1, 5),
     #                         n.trees = (1:10)*100,
@@ -185,8 +187,7 @@ fit_skynet <- function(dep_var,
       trControl = fit_control#,
       # tuneGrid = gbm_grid
     )
-
-    on.exit(detach('package:plyr'))
+    # on.exit(detach('package:plyr'))
 
 
     if (tune_model == T) {
@@ -219,7 +220,7 @@ fit_skynet <- function(dep_var,
         trControl = fit_control
       )
 
-      on.exit(detach('package:plyr'))
+      # on.exit(detach('package:plyr'))
 
     }
 
@@ -233,7 +234,11 @@ fit_skynet <- function(dep_var,
 
   }
 
-  if (model == 'structural') {
+  if (model_name == 'structural') {
+
+    compile(here::here('scripts','fit_structural_skynet.cpp'))
+
+    dyn.load(dynlib(here::here("scripts","fit_structural_skynet")))
 
     independent_data <- training %>%
       as.data.frame() %>%

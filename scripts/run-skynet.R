@@ -9,7 +9,6 @@
 set.seed(42)
 library(bigrquery)
 library(lubridate)
-library(leaflet)
 library(rgdal)
 # library(FishData)
 library(ggmap)
@@ -20,11 +19,11 @@ library(purrrlyr)
 library(modelr)
 library(VAST)
 library(TMB)
-library(trelliscopejs)
-library(ggjoy)
+library(ggridges)
 library(modelr)
 library(caret)
 library(taxize)
+library(gbm)
 library(tidyverse)
 
 demons::load_functions('functions')
@@ -44,13 +43,13 @@ write(run_description, file = paste0(run_dir, 'description.txt'))
 
 # set section options (what to run) ---------------------------------------------------------
 
-run_models <-  F # fit statistical models to data
+run_models <-  T # fit statistical models to data
 
 vasterize <-  F # run vast or load saved object
 
 raw_fish <-  F
 
-plot_data <-  T # plot covariates and maps
+plot_data <-  F # plot covariates and maps
 
 query_fishdata <-  F # get trawl survey data or load saved
 
@@ -1104,7 +1103,7 @@ if (plot_data == T) {
   plot_covariates <- function(dat, variable, run_dir) {
     p <- dat %>%
       ggplot() +
-      geom_joy(aes_(
+      geom_density_ridges(aes_(
         x = as.name(variable),
         y = ~ year,
         group = ~ year,
@@ -1386,13 +1385,14 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
-    filter(model == 'gbm') %>%
-    # slice(1) %>%
+    # group_by(model) %>%
+    # mutate(i = 1:length(dep_var)) %>%
+    # filter(i < 4, model == 'structural') %>%
     mutate(
       fitted_model = pmap(
         list(
           dep_var = dep_var,
-          model = model,
+          model_name = model,
           training = train,
           testing = test
         ),
