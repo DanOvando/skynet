@@ -12,7 +12,7 @@ biblio-style: apalike
 
 ```{r, include=F}
 knitr::opts_chunk$set(message = F, warning = F, echo = F ,
-                      fig.width = 8, fig.height = 10, eval = T)
+                      fig.width = 8, fig.height = 10, eval = T, cache = F)
 ```
 
 ```{r}
@@ -49,6 +49,8 @@ load(here::here("results", run_name,'vast_fish.Rdata'))
 load(file = here::here("data","global_map.Rdata"))
 
 load(file = here::here('data','fish_prices.Rdata'))
+
+load(file = here::here('results',run_name,'gfw_data.Rdata'))
 
 
 ```
@@ -89,8 +91,6 @@ knots <- vast_fish %>%
   select(-vasterized_data) %>%
   unnest() %>%
   mutate(recenter_lon = ifelse(approx_long < 0, 180 + (180 - abs(approx_long)), approx_long))
-  
-  
   
   pacific_map <- global_map %>%
   as("Spatial") %>%
@@ -167,74 +167,87 @@ Surveyed species also varied substantially in their abundance and economic impor
 
 ```{r}
 
-skynet_data %>% 
-  group_by(spec)
+species_prices %>%
+  filter(is.na(mean_exvessel_price) == F) %>% 
+  mutate(species = fct_reorder(species, mean_exvessel_price))  %>% 
+  ggplot(aes(species, mean_exvessel_price)) +
+  geom_col() + 
+  scale_y_continuous(labels = scales::dollar) + 
+  coord_flip() + 
+  theme(axis.text.y = element_text(size = 8))
 
 ```
-
 
 ### GFW Data
 
-EBSTS data for Alaska pollock go back to `r min(ebs_species$Year)`, up through `r max(ebs_species$Year)` (Fig. \@ref(fig:cpue-trend)).
+GFW data were obtained using `bigrquery` from the GFW servers. Data were aggregated to the resolution of year and nearest 0.25 degree lat/long, and for each vessel at this resolution we calculated the total fishing hours spent, average distance from shore, average distance from port, and whether that location is inside an MPA (and if so what kind). We also collected relevant data for that vessel such as its engine power, length, tonnage, and vessel type. 
 
-```{r cpue-trend, fig.cap='Median CPUE of Alaska pollock over time'}
 
-ebs_species %>% 
-  group_by(Year) %>% 
-  dplyr::summarise(median_cpue = median(Catch_KG)) %>% 
-  ggplot(aes(Year, median_cpue)) + 
-  geom_line()
-
+```{r gfw-map, fig.cap="Map of scraped GFW effort data"}
+gfw_effort <- gfw_data %>%
+  unnest() %>% 
+  group_by(year, rounded_lat, rounded_lon) %>% 
+  summarise(total_effort = sum(total_hours)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+  filter(total_effort > 0)
+  
+  
+  
+  pacific_map <- global_map %>%
+  as("Spatial") %>%
+  maptools::nowrapRecenter() %>%
+  sf::st_as_sf()
+  
+  
+  gfw_map <-  gfw_effort %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  
+  bbox <- sf::st_bbox(gfw_map)
+  
+  gfw_map <- gfw_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = log(total_effort)), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  scale_color_viridis()
+  
+  gfw_map
 ```
 
-These data cover a broad spatial range, 
-
-```{r}
-qmplot(
-  x = Lon,
-  y = Lat,
-  data = ebs_species %>% filter(Year > 2012),
-  color = log(Catch_KG),
-  alpha = 0.75
-) +
-  scale_color_viridis() +
-  facet_wrap( ~ Year) +
-  theme_classic() + 
-  labs(caption = 'Log Density of Alaska Pollock')
-```
 
 
 ### Merged Data
 
-We can take these data and link the EBSBTS data and GFW data together. To do that, we pass the EBSTS trawl survey data to Spatial Delta GLM package developed by Jim Thorson, which overlays a standardized grid of densities at a series of "knots" over the sample space. I then snapped each observed location of fishing in the GFW data to the nearest knot
+The GFW data were merged to the survey data by 1) clipping the GFW to only include observations that occured within the perimeter of one of the surveys and 2) snapping each GFW observation to the nearest knot identified by VAST from the survey data. Since the survey data are at a courser resolution than the GFW data, this means that multiple GFW observations are usually associated with any one knot at any one time. 
 
+We can also filter the data to ensure model quality and convergence
 
-```{r knot-plot, fig.cap='Visualizationg of GFW to EBSTS pairing. Colored numbers represent position of EBSTS knots, colored dots show locations of corresponding GFW points'}
-
-knot_pairing_plot
-```
-
-Through this pairing process,we can then calculate the total hours fished, total engine hours fished, total number of vessels, mean vessel length, mean distance from shore, and mean distance from port associated with each knot, and by extension the EBSTS derived density of Alaska pollock at that knot. We can also create interaction terms as needed, such as the interaction of the number of vessels at a knot and the distance from shore for that knot. We can then take a look at the visual correlations between these variables and EBSBTS densities of Alaska pollock (Fig.\@ref(fig:var-cor)). 
-
-```{r var-cor, fig.cap= 'Smoothed visual correlations between covariates and observed densities of Alaska pollock'}
-
-skynet_data %>% 
-  select(-knot, -e_km, -n_km, -year) %>% 
-  gather('variable','value', -density) %>% 
-  ggplot() + 
-  geom_smooth(aes(value, density, color = variable), show.legend = F) + 
-  labs(y = 'Density of Alaska Pollock') +
-  facet_wrap(~variable, scales = 'free') + 
-  theme_minimal() +
-  theme(axis.text.x = element_blank(),
-        axis.text.y = element_blank(),
-        strip.text = element_text(size = 8),
-        panel.spacing = unit(.1, 'lines'))
+  - Only fished species are included from the survey data (under the assumption that fishermen are not responding to abundance of unfished species such as starfish)
   
+  - Since all surveys are geared towards bottom dwelling species, only bottom-associated gears (in this case trawlers, pots and traps, and set gears (longline and gillnet)) are included
+  
+  - We only include species that were observed 10 or more times during each year of the survey to improve model convergence
+  
+  - VAST provides estimates of abundance in years without surveys by predicting based on spatio-temporal patterns. In order to reduce potential bias of models estimating the VAST process instead of underlying abudnance, for now we only include survey data from years in which a survey was actively conducted. 
 
-```
 
+### Environmental Covariates
 
+We augment with the GFW and FishData data with globally accessible environmental covariates, including remote sensing estimates of 
+
+  - Chlorophyl 
+  - Sea surface temperature
+  - Wave height
+  - Wind velocity
+  - Bathymetry
+  
+All data were obtained from NOAA, and aggregated as needed to match the resolution of the GFW data (annual and .25 degrees). 
 
 
 ## Model
@@ -321,23 +334,421 @@ plot(effort,mp)
 ```
 
 
-
-
 # Results 
 
-## Machine Learning
+The factorial combinations of our data and models produces an ungainly number of results, and so for now I will highlight a few particularly interesting findings, specifically results for XX region, results for all regions, results from the temporal hold-out, both for the machine learning and structural modeling approaches. 
 
-The random forest allows us to classify each variable by its "importance", a measure of the degree to which the fit of the model decreases when that variable is omitted from the model. The model estimates that distance from port and shore are the most important variables, along with "shore numbers", the interaction between distance from shore and number of vessels. Interestingly, total hours of fishing estimated by GFW were not particularly important. However, clearly many of these parameters are highly colinear and so the importance of some variables may be confounded, further work will be needed to improve variable selection (Fig. \@ref(fig:var-imp)). 
+## Correlations
+
+We can examine simple correlations between our data and the estiamted total density of fished species at a given knot in a given year (Fig. \@ref(fig:var-cor)). 
+
+```{r var-cor, fig.cap= 'Smoothed visual correlations between covariates and total fished species density'}
+
+skynet_data %>% 
+  ungroup() %>% 
+  dplyr::select(log_density, dist_from_port, total_hours,total_engine_power,mean_chlorophyll) %>% 
+  gather('variable','value', -log_density) %>% 
+  ggplot() + 
+  geom_smooth(aes(value, log_density, color = variable), show.legend = F) + 
+  labs(y = 'Total Density of Fished Species') +
+  facet_wrap(~variable, scales = 'free') + 
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        strip.text = element_text(size = 8),
+        panel.spacing = unit(.1, 'lines'))
+  
+
+```
+
+
+## In-location performance
+
+```{r}
+
+skynet_subset <- skynet_models %>% 
+  select(model, data_subset, fitted_model, train_set) %>% 
+  mutate(results = map(fitted_model,'result')) %>% 
+  mutate(worked = !map_lgl(results, is.null)) %>% 
+  filter(worked == T)
+
+skynet_subset_training <- skynet_subset %>% 
+  mutate(train_results = map(results,'training_predictions')) %>% 
+  select(model, data_subset,train_set, train_results) %>% 
+  unnest() %>% 
+  mutate(residuals = log_density - pred)
+
+skynet_subset_training %>% 
+  ggplot(aes(log_density, pred, color = data_subset)) + 
+  geom_point() + 
+  geom_abline(aes(slope = 1, intercept = 0), color = 'red',linetype = 2) + 
+  facet_grid(model ~ train_set, scales = 'free_y')
+
+
+```
+
+
+
+## Train on Alaska Test on West Coast
+
+
+
+```{r alaska-westcoast}
+
+skynet_subset <- skynet_models %>% 
+  filter(train_set == 'not_west_coast') %>% 
+  select(model, data_subset, fitted_model) %>% 
+  mutate(results = map(fitted_model,'result')) %>% 
+  mutate(worked = !map_lgl(results, is.null)) %>% 
+  filter(worked == T)
+
+skynet_subset_training <- skynet_subset %>% 
+  mutate(train_results = map(results,'training_predictions')) %>% 
+  select(model, data_subset, train_results) %>% 
+  unnest() %>% 
+  mutate(residuals = log_density - pred)
+
+skynet_subset_testing <- skynet_subset %>% 
+  mutate(train_results = map(results,'test_predictions')) %>% 
+  select(model, data_subset, train_results) %>% 
+  unnest() %>% 
+  mutate(residuals = log_density - pred)
+```
+
+
+
+```{r alaska-ovp-plot, fig.cap='In-sample predicted vs observed log density for Alaska trained models'}
+
+skynet_subset_training %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_point() + 
+  geom_abline(aes(slope = 1, intercept = 0), color = 'red',linetype = 2) + 
+  facet_grid(model ~ data_subset, scales = 'free_y')
+
+```
+
+Looking at spatial residuals
+
+
+```{r alaska-residual-map, fig.cap='In-sample spatial residuals for Alaska trained models'}
+
+skynet_map <- skynet_subset_training %>%
+  group_by(model, data_subset, rounded_lon, rounded_lat) %>% 
+  summarise(residuals = sum(residuals)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+  ungroup()
+  
+  skynet_map <-  skynet_map %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  bbox <- sf::st_bbox(skynet_map)
+  
+  skynet_map <- skynet_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = residuals), size = 0.1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
+  facet_grid(model ~ data_subset)
+  
+  skynet_map
+
+```
+
+We can also use the same models to predict completely out of-sample, in this case using the Alaska fit model to predict West Coast surveys. 
+
+```{r alaska-ovp-testing, fig.cap='Observed vs predicted for data trained on Alaska and tested on West Coast'}
+
+skynet_subset_testing %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_point() + 
+  geom_abline(aes(slope = 1, intercept = 0), color = 'red',linetype = 2) + 
+  facet_grid(model ~ data_subset, scales = 'free_y')
+
+```
+
+
+
+```{r alaska-residual-map-testing, fig.cap='Spatial residuals for models trained on Alaska and tested on West Coast'}
+
+skynet_map <- skynet_subset_testing %>%
+  group_by(model, data_subset, rounded_lon, rounded_lat) %>% 
+  summarise(residuals = sum(residuals)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+  ungroup()
+  
+  skynet_map <-  skynet_map %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  bbox <- sf::st_bbox(skynet_map)
+  
+  skynet_map <- skynet_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = residuals), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
+  facet_grid(model ~ data_subset)
+  
+  skynet_map
+
+```
+
+## Train on Random Test on Random
+
+```{r random-random}
+
+skynet_subset <- skynet_models %>% 
+  filter(train_set == 'random') %>% 
+  select(model, data_subset, fitted_model) %>% 
+  mutate(results = map(fitted_model,'result')) %>% 
+  mutate(worked = !map_lgl(results, is.null)) %>% 
+  filter(worked == T)
+
+skynet_subset_training <- skynet_subset %>% 
+  mutate(train_results = map(results,'training_predictions')) %>% 
+  select(model, data_subset, train_results) %>% 
+  unnest() %>% 
+  mutate(residuals = log_density - pred)
+
+skynet_subset_testing <- skynet_subset %>% 
+  mutate(train_results = map(results,'test_predictions')) %>% 
+  select(model, data_subset, train_results) %>% 
+  unnest() %>% 
+  mutate(residuals = log_density - pred)
+```
+
+
+
+
+```{r random-ovp-plot, fig.cap='Observer vs predicted for random subset of data'}
+
+skynet_subset_training %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_point() + 
+  geom_abline(aes(slope = 1, intercept = 0), color = 'red',linetype = 2) + 
+  facet_grid(model ~ data_subset, scales = 'free_y')
+
+```
+
+
+
+```{r random-residual-map, fig.cap='Spatial residuals for data trained on a random subset'}
+
+skynet_map <- skynet_subset_training %>%
+  group_by(model, data_subset, rounded_lon, rounded_lat) %>% 
+  summarise(residuals = sum(residuals)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+  ungroup()
+  
+  skynet_map <-  skynet_map %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  bbox <- sf::st_bbox(skynet_map)
+  
+  skynet_map <- skynet_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = residuals), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
+  facet_grid(model ~ data_subset)
+  
+  skynet_map
+
+```
+
+
+```{r random-ovp-plot-testing, fig.cap='Observed vs predicted for models trained on a random subset and tested on a hold-out subset'}
+
+skynet_subset_testing %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_point() + 
+  geom_abline(aes(slope = 1, intercept = 0), color = 'red',linetype = 2) + 
+  facet_grid(model ~ data_subset, scales = 'free_y')
+
+```
+
+
+
+```{r random-residual-map-testing, fig.cap='Spatial residuals for model trained a random subset and tested on a random subset'}
+
+skynet_map <- skynet_subset_testing %>%
+  group_by(model, data_subset, rounded_lon, rounded_lat) %>% 
+  summarise(residuals = sum(residuals)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+  ungroup()
+  
+  skynet_map <-  skynet_map %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  bbox <- sf::st_bbox(skynet_map)
+  
+  skynet_map <- skynet_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = residuals), size = 0.5, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
+  facet_grid(model ~ data_subset)
+  
+  skynet_map
+
+```
+
+
+## Train on Past Test on Future
+
+
+
+```{r past-present}
+
+skynet_subset <- skynet_models %>% 
+  filter(train_set == 'year_leq_than_2014') %>% 
+  select(model, data_subset, fitted_model) %>% 
+  mutate(results = map(fitted_model,'result')) %>% 
+  mutate(worked = !map_lgl(results, is.null)) %>% 
+  filter(worked == T)
+
+skynet_subset_training <- skynet_subset %>% 
+  mutate(train_results = map(results,'training_predictions')) %>% 
+  select(model, data_subset, train_results) %>% 
+  unnest() %>% 
+  mutate(residuals = log_density - pred)
+
+skynet_subset_testing <- skynet_subset %>% 
+  mutate(train_results = map(results,'test_predictions')) %>% 
+  select(model, data_subset, train_results) %>% 
+  unnest() %>% 
+  mutate(residuals = log_density - pred)
+```
+
+
+
+```{r past-ovp-plot, fig.cap='In-sample predicted vs observed log density for past trained models'}
+
+skynet_subset_training %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_point() + 
+  geom_abline(aes(slope = 1, intercept = 0), color = 'red',linetype = 2) + 
+  facet_grid(model ~ data_subset, scales = 'free_y')
+
+```
+
+Looking at spatial residuals
+
+
+```{r past-residual-map, fig.cap='In-sample spatial residuals for Alaska trained models'}
+
+skynet_map <- skynet_subset_training %>%
+  group_by(model, data_subset, rounded_lon, rounded_lat) %>% 
+  summarise(residuals = sum(residuals)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+  ungroup()
+  
+  skynet_map <-  skynet_map %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  bbox <- sf::st_bbox(skynet_map)
+  
+  skynet_map <- skynet_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = residuals), size = 0.1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
+  facet_grid(model ~ data_subset)
+  
+  skynet_map
+
+```
+
+
+
+```{r past-ovp-testing, fig.cap='Observed vs predicted for data trained on past and tested on future'}
+
+skynet_subset_testing %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_point() + 
+  geom_abline(aes(slope = 1, intercept = 0), color = 'red',linetype = 2) + 
+  facet_grid(model ~ data_subset, scales = 'free_y')
+
+```
+
+
+
+```{r past-residual-map-testing, fig.cap='Spatial residuals for models trained on past and tested on future'}
+
+skynet_map <- skynet_subset_testing %>%
+  group_by(model, data_subset, rounded_lon, rounded_lat) %>% 
+  summarise(residuals = sum(residuals)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+  ungroup()
+  
+  skynet_map <-  skynet_map %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  bbox <- sf::st_bbox(skynet_map)
+  
+  skynet_map <- skynet_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = residuals), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
+  facet_grid(model ~ data_subset)
+  
+  skynet_map
+
+```
+
+
+
+## More things
+
+The random forest allows us to classify each variable by its "importance", a measure of the degree to which the fit of the model decreases when that variable is omitted from the model. 
+
+(Fig. \@ref(fig:var-imp)). 
 
 ```{r var-imp, fig.cap='Variable importance plot from model using random forest to predict density of Alaska pollock'}
 
-varImpPlot(rf_model$finalModel)
+varImpPlot(skynet_models$fitted_model[[1]]$result$model$finalModel)
 
 ```
 
 We can also construct partial dependence plots, which visualize the marginal effect of each independent variable (Fig. \@ref(fig:partial-plot)). 
 
-```{r partial-plot, fig.cap='Partial dependence plots of variables in random forest'}
+```{r partial-plot, fig.cap='Partial dependence plots of variables in random forest', eval = F}
 
 partial_foo <- function(variable) {
   
@@ -366,28 +777,28 @@ partial_plot %>%
 
 ```
 
-
-# Other
 We can start with evaluating performance of the K-fold cross validation. Plotting observed densities (log CPUE) from the test data to values predicted for those densities, using the models trained on the training data, we see that the random forest model performs the best in terms of RMSE and R^2^. The linear model has a lower RMSE, though also a much R^2^ than the structural model (Fig. \@ref(fig:perf-plot), Fig. \@ref(fig:rmse-plot)). 
 
-```{r perf-plot, fig.cap='Observed vs predicted log CPUE for test data from models trained on training data'}
+```{r perf-plot, fig.cap='Observed vs predicted log CPUE for test data from models trained on training data', eval=F}
 
 performance_plot
 
 ```
 
-```{r rmse-plot, fig.cap= 'RMSE and R2 of each model on test data'}
+```{r rmse-plot, fig.cap= 'RMSE and R2 of each model on test data', eval = F}
 rmse_plot
 ```
 
 We can repeat the same exercise, but now comparing the performance of models trained on pre-2015 data and tested on 2015 data (Fig. \@ref(fig:time-perf-plot), Fig. \@ref(fig:time-rmse-plot))8
 
 
-```{r time-perf-plot, fig.cap='Observed vs predicted log CPUE for test data (2015) from models trained on training data (pre 2015)'}
+```{r time-perf-plot, fig.cap='Observed vs predicted log CPUE for test data (2015) from models trained on training data (pre 2015)', eval = F}
 time_performance_plot
 ```
 
-```{r time-rmse-plot, fig.cap= 'RMSE and R2 of each model on test (2015) data'}
+
+
+```{r time-rmse-plot, fig.cap= 'RMSE and R2 of each model on test (2015) data', eval = F}
 time_rmse_plot
 ```
 

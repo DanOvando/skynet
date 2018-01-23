@@ -769,11 +769,14 @@ fish_data <- fish_data %>%
   filter(is.na(Sci) == F)
 
 if (bottom_gears_only == T) {
-  gfw_data2 <- gfw_data %>%
+  gfw_data <- gfw_data %>%
     unnest() %>%
     filter(
-      inferred_label_allyears == 'trawlers' |
-        inferred_sublabel_allyears == 'pots_and_traps'
+      (inferred_label_allyears == 'trawlers' |
+        inferred_sublabel_allyears == 'pots_and_traps' |
+        str_detect(inferred_sublabel_allyears,'set_') |
+        inferred_sublabel_allyears == 'trawlers') &
+        !inferred_label_allyears %in% c('cargo_or_tanker','passenger')
     ) %>%
     nest(-survey)
 }
@@ -864,6 +867,7 @@ if (vasterize == T) {
 
 }
 
+save(file = here::here('results',run_name,'gfw_data.Rdata'),gfw_data)
 
 # build database ----------------------------------------------------------
 
@@ -1271,7 +1275,7 @@ never_ind_vars <-
     'density',
     'survey',
     'year',
-    # 'rounded_lat',
+    'rounded_lat',
     'rounded_lon',
     'knot',
     'distance',

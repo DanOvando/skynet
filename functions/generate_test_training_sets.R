@@ -68,7 +68,7 @@ generate_test_training <-
         filter(survey %in% c('goabts'))
 
       test <- dat %>%
-        filter(!survey %in% c('ebsbts', 'aibts'))
+        filter(survey %in% c('ebsbts', 'aibts'))
 
       out <-
         data_frame(
@@ -85,7 +85,7 @@ generate_test_training <-
         filter(survey %in% c('ebsbts'))
 
       test <- dat %>%
-        filter(!survey %in% c('goabts', 'aibts'))
+        filter(survey %in% c('goabts', 'aibts'))
 
       out <-
         data_frame(
