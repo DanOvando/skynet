@@ -356,6 +356,8 @@ fit_skynet <- function(dep_var,
       as_data_frame() %>%
       mutate(pred = prediction)
 
+    browser()
+
 
   } #close structural
 

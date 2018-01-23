@@ -1386,7 +1386,7 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
-    # filter(data_subset == 'lag_0_skynet_data') %>%
+    filter(model == 'structural') %>%
     # slice(1) %>%
     mutate(
       fitted_model = pmap(
