@@ -34,12 +34,16 @@ fit <-
     control = list("trace" = 1)
   )
 
+fit <-
+  TMBhelper::Optimize(obj = model,
+    control = list("trace" = 1)
+  )
 fit_report <- model$report()
 
 check <- independent_data %>%
   mutate(log_density_hat = fit_report$log_d_hat)
 
 check %>%
-  ggplot(aes(log_density, log_density_hat, color = total_hours)) +
+  ggplot(aes(log_density, log_density_hat, color = total_hours > 0)) +
   geom_point()
 

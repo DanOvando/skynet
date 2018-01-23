@@ -1386,7 +1386,7 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
-    filter(model == 'structural') %>%
+    filter(model == 'gbm') %>%
     # slice(1) %>%
     mutate(
       fitted_model = pmap(
