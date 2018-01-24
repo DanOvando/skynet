@@ -916,22 +916,6 @@ knots <- vast_fish %>%
   mutate(knots = map(vasterized_data, c("spatial_list", "loc_x_lat_long"))) %>%
   select(-vasterized_data)
 
-# mutate(knot_plot =  map(knots, ~ quick_map(
-#   .x,
-#   lat_var = quo(approx_lat),
-#   lon_var = quo(approx_long),
-#   plot_var = quo(knot))))
-
-
-# quick_map(knots$knots[[4]],lat_var = quo(approx_lat),
-#           lon_var = quo(approx_long),
-#           plot_var = quo(knot), min_lon = -160)
-
-# qmplot(approx_long,
-#        approx_lat,
-#        color = knot,
-#        data = knots$knots[[5]]) + theme_classic()
-#
 
 if (fished_only == T) {
   # include only fished species
@@ -1021,7 +1005,8 @@ if (survey_years_only == T) {
     nest(-survey, .key = fish_data)
 }
 
-# aggregate data
+# aggregate data -----------------------------------------------
+
 
 
 skynet_data <- skynet_data %>%
@@ -1053,7 +1038,8 @@ skynet_data <- skynet_data %>%
     )
   ) %>%
   select(survey, combo_data) %>%
-  unnest()
+  unnest() %>%
+  filter(density > 0 & is.na(density) == F)
 
 missing_too_many <- skynet_data %>%
   map_df(~ mean(is.na(.x))) %>%
@@ -1245,11 +1231,20 @@ do_not_scale <-
     "knot",
     "distance",
     "any_fishing",
-    # 'log_density',
-    # 'density',
+    'log_density',
+    'cs_log_density',
+    'cs_density',
+    'density',
     "survey",
     "aggregate_price"
   ) # variables that should not be centered and scaled
+
+skynet_data <- skynet_data %>%
+  ungroup() %>%
+  mutate(cs_log_density = (log_density - mean(log_density)) / sd(log_density),
+         cs_density = (density - mean(density)) / sd(density))
+
+uc_skynet_data <- skynet_data
 
 if (center_and_scale == T) {
   do_scale <- skynet_names[!skynet_names %in% do_not_scale]
@@ -1263,19 +1258,18 @@ if (center_and_scale == T) {
 
 save(
   file = here::here("results", run_name, "skynet_data.Rdata"),
-  skynet_data
+  skynet_data, uc_skynet_data
 )
 
-# fit models ----------------------------------------------------------
 
-
-
-dep_var <- c("log_density")
+dep_var <- c("cs_log_density")
 
 never_ind_vars <-
   c(
     "log_density",
     "density",
+    "cs_log_density",
+    "cs_density",
     "survey",
     "year",
     "rounded_lat",
@@ -1355,7 +1349,7 @@ delta_skynet <- delta_skynet %>%
   ungroup()
 
 data_sources <- tibble(
-  lag_0_skynet_data = list(skynet_data %>%
+  skynet = list(skynet_data %>%
     select(-contains("lag")) %>%
     na.omit()),
 
@@ -1364,7 +1358,10 @@ data_sources <- tibble(
       select(-total_engine_hours_lag2, -total_engine_hours_lag3) %>%
       na.omit()
   ),
-  delta_skynet = list(delta_skynet)
+  delta_skynet = list(delta_skynet),
+  uncentered_skynet = list(uc_skynet_data %>%
+                             select(-contains("lag")) %>%
+na.omit())
 ) %>%
   gather(data_subset, data)
 
@@ -1379,7 +1376,7 @@ test_train_data <- purrr::cross_df(list(
     "goa-ai",
     "ebs-ai"
   ),
-  data_subset = c("lag_0_skynet_data", "delta_skynet")
+  data_subset = c("skynet", "delta_skynet","uncentered_skynet")
 )) %>%
   left_join(data_sources, by = "data_subset")
 
@@ -1391,13 +1388,22 @@ test_train_data <- test_train_data %>%
 
 # test_train_data <- modelr::crossv_kfold(lag_0_skynet_data, k = 1)
 
+dep_vars <- c('log_density','cs_density','density')
+
 skynet_models <- purrr::cross_df(list(
-  dep_var = list('log_density','density'),
+  dep_var = (dep_vars),
   temp = list(test_train_data),
   model = models
 )) %>%
-  unnest(temp, .drop = F)
+  unnest(temp, .drop = F) %>%
+  filter(!(data_subset == 'delta_skynet' & model == 'structural')) %>%
+  filter(!(model == 'structural' & data_subset != 'uncentered_skynet')) %>%
+  filter( !(model %in% c('rf','gbm') & data_subset == 'uncentered_skynet')) %>%
+  filter(!(model == 'structural' & dep_var != dep_vars[1]))
 
+#
+# check <- skynet_models %>%
+#   filter(model == 'structural')
 
 # run models --------------------------------------------------------------
 
@@ -1406,6 +1412,12 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
+    # filter(train_set == 'random') %>%
+    # slice(1:4) %>%
+    # group_by(model, data_subset, dep_var) %>%
+    # mutate(i = 1:length(train)) %>%
+    # filter(i <=1) %>%
+    # ungroup() %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
@@ -1428,6 +1440,7 @@ if (run_models == T) {
       )
     )
 
+  print('ran models')
   save(
     file = paste0(run_dir, "skynet_models.Rdata"),
     skynet_models
@@ -1437,6 +1450,7 @@ if (run_models == T) {
 }
 
 # diagnose models ---------------------------------------------------------
+print('saved models')
 
 skynet_models <- skynet_models %>%
   mutate(error = map(fitted_model, "error")) %>%
@@ -1511,14 +1525,17 @@ skynet_models <- skynet_models %>%
     )
   )
 
+print('processed models')
+
 save_foo <- function(test_plot,
                      model,
                      train_region,
                      test_region,
                      data_set,
+                     dep_var,
                      run_dir) {
   ggsave(
-    filename = paste0(run_dir, model, "-train_", train_region, "-test_", test_region, "-data_", data_set, ".pdf"),
+    filename = paste0(run_dir, model, "-train_", train_region, "-test_", test_region, "-data_", data_set,'-depvar_',dep_var, ".pdf"),
     test_plot,
     height = 8,
     width = 8
@@ -1531,7 +1548,8 @@ pwalk(
     train_region = skynet_models$train_set,
     test_plot = skynet_models$test_plot,
     test_region = skynet_models$test_sets,
-    data_set = skynet_models$data_subset
+    data_set = skynet_models$data_subset,
+    dep_var = skynet_models$dep_var
   ),
   save_foo,
   run_dir = run_dir
@@ -1543,10 +1561,15 @@ pwalk(
     test_plot = skynet_models$training_plot,
     train_region = skynet_models$train_set,
     test_region = paste0(skynet_models$test_sets, "-training plot"),
-    data_set = skynet_models$data_subset
+    data_set = skynet_models$data_subset,
+    dep_var = skynet_models$dep_var
   ),
   save_foo,
   run_dir = run_dir
 )
 
+print('printed models')
+
 save(file = here::here("results", run_name, "processed_skynet_models.Rdata"), skynet_models)
+
+print('saved processed models')

@@ -12,7 +12,7 @@ biblio-style: apalike
 
 ```{r, include=F}
 knitr::opts_chunk$set(message = F, warning = F, echo = F ,
-                      fig.width = 8, fig.height = 10, eval = T, cache = F)
+                      fig.width = 10, fig.height = 8, eval = T, cache = F)
 ```
 
 ```{r}
@@ -368,7 +368,8 @@ skynet_data %>%
 ```{r}
 
 skynet_subset <- skynet_models %>% 
-  select(model, data_subset, train_set,training_data) 
+  select(model, data_subset, train_set,training_data, dep_var) %>%
+  filter(dep_var == 'log_density')
 
 
 skynet_subset_training <- skynet_subset %>% 
@@ -377,10 +378,11 @@ skynet_subset_training <- skynet_subset %>%
   mutate(residuals = log_density - pred)
 
 skynet_subset_training %>% 
+  filter(train_set == 'random') %>% 
   ggplot(aes(log_density, pred, color = data_subset)) + 
   geom_point() + 
   geom_abline(aes(slope = 1, intercept = 0), color = 'red',linetype = 2) + 
-  facet_grid(model ~ train_set, scales = 'free_y')
+  facet_grid(model ~ data_subset, scales = 'free_y')
 
 
 ```
@@ -389,12 +391,19 @@ skynet_subset_training %>%
 
 ## Train on Alaska Test on West Coast
 
+```{r}
+
+skynet_models <- skynet_models %>% 
+  mutate(data_subset = ifelse(.$model == 'structural','skynet',data_subset)) %>% 
+  filter(dep_var == 'log_density', model != 'gbm', data_subset == 'skynet')
+
+```
 
 
 ```{r alaska-westcoast}
 
 skynet_subset <- skynet_models %>% 
-  filter(train_set == 'not_west_coast')
+  filter(train_set == 'ebsbts')
 
 skynet_subset_training <- skynet_subset %>% 
   select(model, data_subset, training_data) %>% 
@@ -469,6 +478,7 @@ skynet_subset_testing %>%
 ```{r alaska-residual-map-testing, fig.cap='Spatial residuals for models trained on Alaska and tested on West Coast'}
 
 skynet_map <- skynet_subset_testing %>%
+  # filter(model == 'rf') %>% 
   group_by(model, data_subset, rounded_lon, rounded_lat) %>% 
   summarise(residuals = sum(residuals)) %>% 
   mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
@@ -610,7 +620,7 @@ skynet_map <- skynet_subset_testing %>%
 ```{r past-present}
 
 skynet_subset <- skynet_models %>% 
-  filter(train_set == 'year_leq_than_2014')
+  filter(train_set == 'year_leq_than_2014', dep_var == 'log_density')
 
 skynet_subset_training <- skynet_subset %>% 
   select(model, data_subset, training_data) %>% 
@@ -640,31 +650,31 @@ Looking at spatial residuals
 
 ```{r past-residual-map, fig.cap='In-sample spatial residuals for Alaska trained models'}
 
-skynet_map <- skynet_subset_training %>%
-  group_by(model, data_subset, rounded_lon, rounded_lat) %>% 
-  summarise(residuals = sum(residuals)) %>% 
-  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
-  ungroup()
-  
-  skynet_map <-  skynet_map %>%
-  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
-  ungroup() %>%
-  mutate(geometry = sf::st_sfc(geometry, crs =
-  "+proj=longlat +datum=WGS84 +no_defs")) %>%
-  sf::st_sf()
-  
-  bbox <- sf::st_bbox(skynet_map)
-  
-  skynet_map <- skynet_map %>%
-  ggplot() +
-  geom_sf(data = pacific_map, fill = 'grey60') +
-  geom_sf(aes(color = residuals), size = 0.1, alpha = 0.5) +
-  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
-  ylim = c(bbox['ymin'], bbox['ymax'])) +
-  scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
-  facet_grid(model ~ data_subset)
-  
-  skynet_map
+  skynet_map <- skynet_subset_training %>%
+    group_by(model, data_subset, rounded_lon, rounded_lat) %>% 
+    summarise(residuals = sum(residuals)) %>% 
+    mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+    ungroup()
+    
+    skynet_map <-  skynet_map %>%
+    dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+    ungroup() %>%
+    mutate(geometry = sf::st_sfc(geometry, crs =
+    "+proj=longlat +datum=WGS84 +no_defs")) %>%
+    sf::st_sf()
+    
+    bbox <- sf::st_bbox(skynet_map)
+    
+    skynet_map <- skynet_map %>%
+    ggplot() +
+    geom_sf(data = pacific_map, fill = 'grey60') +
+    geom_sf(aes(color = residuals), size = 0.1, alpha = 0.5) +
+    coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+    ylim = c(bbox['ymin'], bbox['ymax'])) +
+    scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
+    facet_grid(model ~ data_subset)
+    
+    skynet_map
 
 ```
 
@@ -673,8 +683,8 @@ skynet_map <- skynet_subset_training %>%
 ```{r past-ovp-testing, fig.cap='Observed vs predicted for data trained on past and tested on future'}
 
 skynet_subset_testing %>% 
-  ggplot(aes(log_density, pred)) + 
-  geom_point() + 
+  ggplot(aes(log_density, pred, color = factor(year))) + 
+  geom_point(alpha = 0.5) + 
   geom_abline(aes(slope = 1, intercept = 0), color = 'red',linetype = 2) + 
   facet_grid(model ~ data_subset, scales = 'free_y')
 
@@ -756,9 +766,10 @@ Plot of r2/mse by model type
 ```{r}
 
 skynet_models %>% 
-  ggplot(aes(psuedo_r2_training, fill = model)) + 
+  filter(data_subset == 'skynet') %>% 
+  ggplot(aes(pmax(0,psuedo_r2_training), fill = model)) + 
   geom_histogram(show.legend = F) + 
-  facet_wrap(model~data_subset, scales = 'free') + 
+  facet_wrap(model~dep_var, scales = 'free') + 
   theme(axis.text.x = element_text(size = 8),
         axis.text.y = element_text(size = 8))
 
@@ -767,9 +778,13 @@ skynet_models %>%
 ```{r}
 
 skynet_models %>% 
-  ggplot(aes(psuedo_r2, fill = model)) + 
+  filter(model == 'rf', test_sets == 'historic')
+
+skynet_models %>% 
+    filter(data_subset == 'skynet') %>% 
+  ggplot(aes(pmax(0,psuedo_r2), fill = model)) + 
   geom_histogram(show.legend = F) + 
-  facet_wrap(model~data_subset, scales = 'free') + 
+  facet_wrap(model~dep_var, scales = 'free') + 
   theme(axis.text.x = element_text(size = 8),
         axis.text.y = element_text(size = 8))
 
@@ -778,11 +793,6 @@ skynet_models %>%
 
 Time series of abunance observed vs predicted
 
-```{r var-imp, fig.cap='Variable importance plot from model using random forest to predict density of Alaska pollock'}
-
-randomForest::varImpPlot(skynet_models$fitted_model[[3]]$result$model$finalModel)
-
-```
 
 We can also construct partial dependence plots, which visualize the marginal effect of each independent variable (Fig. \@ref(fig:partial-plot)). 
 
