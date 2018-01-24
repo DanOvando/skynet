@@ -1261,8 +1261,6 @@ save(
   skynet_data, uc_skynet_data
 )
 
-# fit models ----------------------------------------------------------
-
 
 dep_var <- c("cs_log_density")
 
@@ -1351,7 +1349,7 @@ delta_skynet <- delta_skynet %>%
   ungroup()
 
 data_sources <- tibble(
-  lag_0_skynet_data = list(skynet_data %>%
+  skynet = list(skynet_data %>%
     select(-contains("lag")) %>%
     na.omit()),
 
@@ -1360,7 +1358,10 @@ data_sources <- tibble(
       select(-total_engine_hours_lag2, -total_engine_hours_lag3) %>%
       na.omit()
   ),
-  delta_skynet = list(delta_skynet)
+  delta_skynet = list(delta_skynet),
+  uncentered_skynet = list(uc_skynet_data %>%
+                             select(-contains("lag")) %>%
+na.omit())
 ) %>%
   gather(data_subset, data)
 
@@ -1375,7 +1376,7 @@ test_train_data <- purrr::cross_df(list(
     "goa-ai",
     "ebs-ai"
   ),
-  data_subset = c("lag_0_skynet_data", "delta_skynet")
+  data_subset = c("skynet", "delta_skynet","uncentered_skynet")
 )) %>%
   left_join(data_sources, by = "data_subset")
 
@@ -1387,13 +1388,22 @@ test_train_data <- test_train_data %>%
 
 # test_train_data <- modelr::crossv_kfold(lag_0_skynet_data, k = 1)
 
+dep_vars <- c('log_density','cs_density','density')
+
 skynet_models <- purrr::cross_df(list(
-  dep_var = dep_var,
+  dep_var = (dep_vars),
   temp = list(test_train_data),
   model = models
 )) %>%
-  unnest(temp, .drop = F)
+  unnest(temp, .drop = F) %>%
+  filter(!(data_subset == 'delta_skynet' & model == 'structural')) %>%
+  filter(!(model == 'structural' & data_subset != 'uncentered_skynet')) %>%
+  filter( !(model %in% c('rf','gbm') & data_subset == 'uncentered_skynet')) %>%
+  filter(!(model == 'structural' & dep_var != dep_vars[1]))
 
+#
+# check <- skynet_models %>%
+#   filter(model == 'structural')
 
 # run models --------------------------------------------------------------
 
@@ -1402,11 +1412,12 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
-    group_by(model, data_subset) %>%
-    mutate(i = 1:length(dep_var)) %>%
-    filter(i <=2) %>%
-    filter(!(data_subset == 'delta_skynet' & model == 'structural')) %>%
-    ungroup() %>%
+    # filter(train_set == 'random') %>%
+    # slice(1:4) %>%
+    # group_by(model, data_subset, dep_var) %>%
+    # mutate(i = 1:length(train)) %>%
+    # filter(i <=1) %>%
+    # ungroup() %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
@@ -1521,9 +1532,10 @@ save_foo <- function(test_plot,
                      train_region,
                      test_region,
                      data_set,
+                     dep_var,
                      run_dir) {
   ggsave(
-    filename = paste0(run_dir, model, "-train_", train_region, "-test_", test_region, "-data_", data_set, ".pdf"),
+    filename = paste0(run_dir, model, "-train_", train_region, "-test_", test_region, "-data_", data_set,'-depvar_',dep_var, ".pdf"),
     test_plot,
     height = 8,
     width = 8
@@ -1536,7 +1548,8 @@ pwalk(
     train_region = skynet_models$train_set,
     test_plot = skynet_models$test_plot,
     test_region = skynet_models$test_sets,
-    data_set = skynet_models$data_subset
+    data_set = skynet_models$data_subset,
+    dep_var = skynet_models$dep_var
   ),
   save_foo,
   run_dir = run_dir
@@ -1548,7 +1561,8 @@ pwalk(
     test_plot = skynet_models$training_plot,
     train_region = skynet_models$train_set,
     test_region = paste0(skynet_models$test_sets, "-training plot"),
-    data_set = skynet_models$data_subset
+    data_set = skynet_models$data_subset,
+    dep_var = skynet_models$dep_var
   ),
   save_foo,
   run_dir = run_dir
