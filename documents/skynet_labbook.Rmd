@@ -1432,7 +1432,13 @@ A few other regions/models
 
 Spatial residuals 
 
+Example of aggregation 
+
+Think about aggregating up your predictions: instead of predicting that small place sum them up and look at observed vs predicted at different spatial scales
+
+
 ```{r, eval = F}
+
 agg_results <- uc_skynet_data %>% 
   group_by(survey, year) %>% 
   summarise(engine_hours = sum(total_engine_hours, na.rm = T),
