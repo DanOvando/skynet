@@ -37,7 +37,7 @@ run_name <- 'v1.0'
 
 run_dir <- here::here('results',run_name)
 
-fig_theme <- theme_ipsum(base_size = 14)
+fig_theme <- theme_ipsum(base_size = 14, axis_title_size = 18)
 
 theme_set(fig_theme)
 
@@ -53,24 +53,24 @@ load(file = here::here('data','fish_prices.Rdata'))
 
 load(file = here::here('results',run_name,'gfw_data.Rdata'))
 
-
+map_size <- 1
 ```
 
 
 # Introduction
 
-Effective fisheries management requires some ability for managers and stakeholders to estimate and react to the abundance of fish in the ocean. The history of fisheries science is laregely concerned with developing and improving our ability to accomplish this difficult task, starting from early models of growth overfishing and leading up to multi-species bio-geo-economic models. While the field has made dramatic advances in our ability to assess fisheries, by and large we have found two solutions to this problem: Fit highly complex integrated statistical models to diverse data streams, or utilize increasing levels of statistical wizardy to try and squeeze more information out of limited data stream. This later practice has been both promising and concerning. The majority of fisheries in the world lack the resources for fully integrated stock assessments, and so depend on this world of "data limited stock assessment". While there has beentremendous growth in this field, a rough survey of the literature reveals that while the statistical methods have changed, nearly all DLAs rely on the same streams of information that would have been available to a fisheires scientist in the 1800s: lengths, captures, and catch per unit effort.
+Effective fisheries management requires some ability for managers and stakeholders to estimate and react to the abundance of fish in the ocean. The history of fisheries science is largely concerned with developing and improving our ability to accomplish this difficult task, starting from early models of growth overfishing and leading up to multi-species bio-geo-economic models. While the field has made dramatic advances in our ability to assess fisheries, by and large we have found two solutions to this problem: Fit highly complex integrated statistical models to diverse data streams, or utilize increasing levels of statistical wizardry to try and squeeze more information out of limited data stream. This later practice has been both promising and concerning. The majority of fisheries in the world lack the resources for fully integrated stock assessments, and so depend on this world of "data limited stock assessment". While there has been tremendous growth in this field, a rough survey of the literature reveals that while the statistical methods have changed, nearly all DLAs rely on the same streams of information that would have been available to a fisheries scientist in the 1800s: lengths, captures, and catch per unit effort.
 
 It is high time that we expanded not only the statistical methods of fisheries, but also the actual sources of data available for monitoring fish populations. GFW.... etc. 
 
-This paper rests on a simple hypothesis: all else equal, fishermen would rather fish where there are more fish. Following this logic then, the amount and location of fishing effort observed must be in some way reflective of the abundance of fish at those locations at that time. To that end, we could simply use GFW to observe where fishermen are, and by extension estimate the relative change in abundance and distribution of fish in reponse to changes in the amoung and location of fishing effort. Unfortuantely, life is not so kind. A vast array of other factors influence where and how much fishermen choose to fish, e.g. cost, local knowldege, past experience, and safety. The goal of this project then is to develop a model that estimates the abundance of fish as a function of observed fishermne behavior, controlling for other factors that influence the decision of where, when, and how much to fish. 
+This paper rests on a simple hypothesis: all else equal, fishermen would rather fish where there are more fish. Following this logic then, the amount and location of fishing effort observed must be in some way reflective of the abundance of fish at those locations at that time. To that end, we could simply use GFW to observe where fishermen are, and by extension estimate the relative change in abundance and distribution of fish in response to changes in the among and location of fishing effort. Unfortunately, life is not so kind. A vast array of other factors influence where and how much fishermen choose to fish, e.g. cost, local knowledge, past experience, and safety. The goal of this project then is to develop a model that estimates the abundance of fish as a function of observed fishermen behavior, controlling for other factors that influence the decision of where, when, and how much to fish. 
 
 
 # Methods
 
 ## Data
 
-Primary data were collected from two sources: Global Fishing Watch (GFW) provides our data on the amount and location of fishing effort, along with availabl covaraiates such as vessel size, distance from shore/port, etc. Estimates of fish abundance in space and time were obtained from their relevant surveys through the `FishData` package. The following two data sections provide summaries of the data as well as descriptions of relevant data processing steps taken. 
+Primary data were collected from two sources: Global Fishing Watch (GFW) provides our data on the amount and location of fishing effort, along with available excoriates such as vessel size, distance from shore/port, etc. Estimates of fish abundance in space and time were obtained from their relevant surveys through the `FishData` package. The following two data sections provide summaries of the data as well as descriptions of relevant data processing steps taken. 
 
 ### Survey Data
 
@@ -82,7 +82,7 @@ Primary data were collected from two sources: Global Fishing Watch (GFW) provide
   - West Coast Groundfish Bottom Trawl Survey (WCBTS)
   - West Coast Groundfish Hook and Line Survey
   
-See Fig.\@ref(fig:fish-map) for map of availabl survey data
+See Fig.\@ref(fig:fish-map) for map of available survey data
 
 ```{r fish-map, fig.cap='Estimated knot locations for each fishery independent survey'}
 
@@ -161,9 +161,9 @@ fish_summary %>%
 ```
 
 
-Survey data come in their "raw" form, which requires standardization to account for differences in vessel characteristics, spatio-temporal correlation structures, and the presence of zeros. This standardization was performed using the `VAST` package, which implements a spatial delta-generalized linear mixed model accross multiple species. The result of the VAST process provides standardized estimates of species abundance in space and time. 
+Survey data come in their "raw" form, which requires standardization to account for differences in vessel characteristics, spatio-temporal correlation structures, and the presence of zeros. This standardization was performed using the `VAST` package, which implements a spatial delta-generalized linear mixed model across multiple species. The result of the VAST process provides standardized estimates of species abundance in space and time. 
 
-Surveyed species also varied substantially in their abundance and economic importance. We mark species encountered in the surveys as "fished" if their name, or a synomim for their name identified through the `taxize` package in R, was found with the @FAOXX catch records. For each species, we also obtained price estiamtes using @Melnychuck2016 as well (Fig. \@ref(fig:price-plot)). 
+Surveyed species also varied substantially in their abundance and economic importance. We mark species encountered in the surveys as "fished" if their name, or a synonym for their name identified through the `taxize` package in R, was found with the @FAOXX catch records. For each species, we also obtained price estimates using @Melnychuck2016 as well (Fig. \@ref(fig:price-plot)). 
 
 
 ```{r}
@@ -225,7 +225,7 @@ gfw_effort <- gfw_data %>%
 
 ### Merged Data
 
-The GFW data were merged to the survey data by 1) clipping the GFW to only include observations that occured within the perimeter of one of the surveys and 2) snapping each GFW observation to the nearest knot identified by VAST from the survey data. Since the survey data are at a courser resolution than the GFW data, this means that multiple GFW observations are usually associated with any one knot at any one time. 
+The GFW data were merged to the survey data by 1) clipping the GFW to only include observations that occurred within the perimeter of one of the surveys and 2) snapping each GFW observation to the nearest knot identified by VAST from the survey data. Since the survey data are at a courser resolution than the GFW data, this means that multiple GFW observations are usually associated with any one knot at any one time. 
 
 We can also filter the data to ensure model quality and convergence
 
@@ -235,14 +235,14 @@ We can also filter the data to ensure model quality and convergence
   
   - We only include species that were observed 10 or more times during each year of the survey to improve model convergence
   
-  - VAST provides estimates of abundance in years without surveys by predicting based on spatio-temporal patterns. In order to reduce potential bias of models estimating the VAST process instead of underlying abudnance, for now we only include survey data from years in which a survey was actively conducted. 
+  - VAST provides estimates of abundance in years without surveys by predicting based on spatio-temporal patterns. In order to reduce potential bias of models estimating the VAST process instead of underlying abundance, for now we only include survey data from years in which a survey was actively conducted. 
 
 
 ### Environmental Covariates
 
 We augment with the GFW and FishData data with globally accessible environmental covariates, including remote sensing estimates of 
 
-  - Chlorophyl 
+  - Chlorophyll 
   - Sea surface temperature
   - Wave height
   - Wind velocity
@@ -253,15 +253,15 @@ All data were obtained from NOAA, and aggregated as needed to match the resoluti
 
 ## Model
 
-We can of course construct a wide array of candidate models that relate fish abundance and relevant covaraites to fishing decisions, from simple distance-from-shore based cost corrections, to highly specificed models of captial investment and knowledge accrual. The relevant question then is how do we test the performance of these alternative models? We accomplish this by pairing GFW data with fishery independent survey data (e.g. the West Coast Groundfish Bottom Trawl Survey) avaliable from `FishData`XX. These data provide annual indicies of abundance in space and time for a wide range of commercially important species.  
+We can of course construct a wide array of candidate models that relate fish abundance and relevant covariates to fishing decisions, from simple distance-from-shore based cost corrections, to highly specified models of capital investment and knowledge accrual. The relevant question then is how do we test the performance of these alternative models? We accomplish this by pairing GFW data with fishery independent survey data (e.g. the West Coast Groundfish Bottom Trawl Survey) available from `FishData`XX. These data provide annual indices of abundance in space and time for a wide range of commercially important species.  
 
-By pairing these data then, we can compare the ability of candidate models to use GFW data (and other globally available data, such as esitmates of wind, waves, and productivity) to predict relevant abundance data available from FishData. As the ultimate goal of this model is to use GFW to predict abundance indices in places where fishery independent samples are not available,we will use out-of-sample predictive power as our metric of model performance, specifically root-mean squared error (RMSE) of data held out of the training of the model.
+By pairing these data then, we can compare the ability of candidate models to use GFW data (and other globally available data, such as estimates of wind, waves, and productivity) to predict relevant abundance data available from FishData. As the ultimate goal of this model is to use GFW to predict abundance indices in places where fishery independent samples are not available,we will use out-of-sample predictive power as our metric of model performance, specifically root-mean squared error (RMSE) of data held out of the training of the model.
 
 We fit a series of candidate models to the data, defined in terms of 
 
-- Data Splitting: the data used for training and testin. 
+- Data Splitting: the data used for training and testing. 
     - Random splits (train on a random subset, predict the remaining subset)
-    - Regional splits (e.g. train on eastern bering sea, predict US west coast)
+    - Regional splits (e.g. train on eastern Bering sea, predict US west coast)
     - Temporal splits (train on 2010-2012, predict 2013-2014)
 
 - Predictive goal:
@@ -270,17 +270,17 @@ We fit a series of candidate models to the data, defined in terms of
   
 - Model Mechanics: 
     - Machine learning (random forests, gradient boosted models)
-    - Linear regresion (mostly as a simplistic example)
+    - Linear regression (mostly as a simplistic example)
     - Structural modeling (fitting of structural economic models, e.g. ideal free distribution)
     
 
-We fit factorial combinations of each of these components, allowing us to evaluate model preformance from a variety of relevant angles. The comparison between the machine learning and structural modeling approaches are worth discussing forther for a brief moment. While different in their mechanics, all the candidate machine learning models are black box models whose sole objective is to maximize the predictive power of the model. The user specifies some model options, but the model decides which data are important and how those data relate to each other. This allows these algorithms to fit highly non-linear models (if the data demand it), without the need to specify exactly how factors such as costs, safety, and abundance interact to affect fishing behavior. As a result, machine learning models can serve as an effective benchmark for the best possible ability of GFW data to predict fish abundance. The disadvantage is that, while new techniques are emerging for interpreting machine learning model fits, they are inherently black boxes and as such do not permit us to really interpret the meaning of specific coefficients. 
+We fit factorial combinations of each of these components, allowing us to evaluate model performance from a variety of relevant angles. The comparison between the machine learning and structural modeling approaches are worth discussing further for a brief moment. While different in their mechanics, all the candidate machine learning models are black box models whose sole objective is to maximize the predictive power of the model. The user specifies some model options, but the model decides which data are important and how those data relate to each other. This allows these algorithms to fit highly non-linear models (if the data demand it), without the need to specify exactly how factors such as costs, safety, and abundance interact to affect fishing behavior. As a result, machine learning models can serve as an effective benchmark for the best possible ability of GFW data to predict fish abundance. The disadvantage is that, while new techniques are emerging for interpreting machine learning model fits, they are inherently black boxes and as such do not permit us to really interpret the meaning of specific coefficients. 
 
 This stands in contrast to the structural modeling approach, in which we write out a functional form for the relationship between between GFW data, and the fit that specified model to the data. This has the advantage of interpretability, but opens us up to errors in model specification. By running both, we can compare the machine learning and structural approach and see how much the interpretability of the structural model "costs" us in terms of predictive power, relative to the benchmark of the machine learning model. 
 
 Each model was designed using a separate subset of data, so as to isolate  initial model design from the data that will eventually be used to judge model performance. 
 
-Below I provide high-level summaries of each of the models, purely to aid in understanding (more detailed descriptions will be provided in furture drafts)
+Below I provide high-level summaries of each of the models, purely to aid in understanding (more detailed descriptions will be provided in future drafts)
 
 ## Machine Learning
 
@@ -341,7 +341,7 @@ The factorial combinations of our data and models produces an ungainly number of
 
 ## Correlations
 
-We can examine simple correlations between our data and the estiamted total density of fished species at a given knot in a given year (Fig. \@ref(fig:var-cor)). 
+We can examine simple correlations between our data and the estimated total density of fished species at a given knot in a given year (Fig. \@ref(fig:var-cor)). 
 
 ```{r var-cor, fig.cap= 'Smoothed visual correlations between covariates and total fished species density'}
 
@@ -451,7 +451,7 @@ skynet_map <- skynet_subset_training %>%
   skynet_map <- skynet_map %>%
   ggplot() +
   geom_sf(data = pacific_map, fill = 'grey60') +
-  geom_sf(aes(color = residuals), size = 0.1, alpha = 0.5) +
+  geom_sf(aes(color = residuals), size = map_size, alpha = 0.5) +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
   scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
@@ -496,7 +496,7 @@ skynet_map <- skynet_subset_testing %>%
   skynet_map <- skynet_map %>%
   ggplot() +
   geom_sf(data = pacific_map, fill = 'grey60') +
-  geom_sf(aes(color = residuals), size = 1, alpha = 0.5) +
+  geom_sf(aes(color = residuals), size = map_size, alpha = 0.5) +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
   scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
@@ -559,7 +559,7 @@ skynet_map <- skynet_subset_training %>%
   skynet_map <- skynet_map %>%
   ggplot() +
   geom_sf(data = pacific_map, fill = 'grey60') +
-  geom_sf(aes(color = residuals), size = 1, alpha = 0.5) +
+  geom_sf(aes(color = residuals), size = map_size, alpha = 0.5) +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
   scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
@@ -602,7 +602,7 @@ skynet_map <- skynet_subset_testing %>%
   skynet_map <- skynet_map %>%
   ggplot() +
   geom_sf(data = pacific_map, fill = 'grey60') +
-  geom_sf(aes(color = residuals), size = 0.5, alpha = 0.5) +
+  geom_sf(aes(color = residuals), size = map_size, alpha = 0.5) +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
   scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
@@ -668,7 +668,7 @@ Looking at spatial residuals
     skynet_map <- skynet_map %>%
     ggplot() +
     geom_sf(data = pacific_map, fill = 'grey60') +
-    geom_sf(aes(color = residuals), size = 0.1, alpha = 0.5) +
+    geom_sf(aes(color = residuals), size = map_size, alpha = 0.5) +
     coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
     ylim = c(bbox['ymin'], bbox['ymax'])) +
     scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
@@ -712,7 +712,7 @@ skynet_map <- skynet_subset_testing %>%
   skynet_map <- skynet_map %>%
   ggplot() +
   geom_sf(data = pacific_map, fill = 'grey60') +
-  geom_sf(aes(color = residuals), size = 1, alpha = 0.5) +
+  geom_sf(aes(color = residuals), size = map_size, alpha = 0.5) +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
   scale_color_gradient2(low = 'black',high = 'tomato', mid = 'steelblue', midpoint = 0) + 
@@ -791,7 +791,7 @@ skynet_models %>%
 ```
 
 
-Time series of abunance observed vs predicted
+Time series of abundance observed vs predicted
 
 
 We can also construct partial dependence plots, which visualize the marginal effect of each independent variable (Fig. \@ref(fig:partial-plot)). 
