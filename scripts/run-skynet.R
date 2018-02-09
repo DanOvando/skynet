@@ -24,6 +24,8 @@ library(modelr)
 library(caret)
 library(taxize)
 library(gbm)
+library(recipes)
+library(rlang)
 library(tidyverse)
 
 demons::load_functions("functions")
@@ -43,7 +45,7 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 # set section options (what to run) ---------------------------------------------------------
 
-run_models <- T # fit statistical models to data
+run_models <- F # fit statistical models to data
 
 vasterize <- F # run vast or load saved object
 
@@ -75,7 +77,7 @@ query_prices <- F # get exvessel price data for observed species
 
 # set run options (how to run) ---------------------------------------------------------
 
-center_and_scale <- T # center and scale some data?
+center_and_scale <- F # center and scale some data?
 
 gfw_vars_only <- F
 
@@ -1039,7 +1041,15 @@ skynet_data <- skynet_data %>%
   ) %>%
   select(survey, combo_data) %>%
   unnest() %>%
-  filter(density > 0 & is.na(density) == F)
+  filter(is.na(density) == F)
+
+missing_some <- map_lgl(skynet_data, ~any(is.na(.x)))
+
+impute_locations <- which(str_detect(colnames(skynet_data),'lag') == F &  map_lgl(skynet_data, is.numeric)
+ == T & !colnames(skynet_data) %in% c("year", "rounded_lat", "rounded_lon") & missing_some)
+
+skynet_data2 <- skynet_data %>%
+  dmap_at(impute_locations, fill_enviros, data = skynet_data)
 
 missing_too_many <- skynet_data %>%
   map_df(~ mean(is.na(.x))) %>%
@@ -1053,9 +1063,11 @@ missing_too_many <- skynet_data %>%
     .$variable
   }
 
+if (length(missing_too_many) > 0){
 skynet_data <- skynet_data %>%
   select_(paste0("-", missing_too_many)) %>%
   left_join(mean_survey_prices, by = "survey")
+}
 
 # skynet_data %>%
 #   group_by(rounded_lat, rounded_lon) %>%
@@ -1214,6 +1226,7 @@ if (plot_data == T) {
   #   scale_color_viridis(option = 'D') +
   #   theme_classic()
 }
+
 # prepare models ----------------------------------------------------------
 
 skynet_data <- skynet_data %>%
@@ -1309,7 +1322,7 @@ lm_candidate_vars <- skynet_names[!skynet_names %in% c(
   never_ind_vars
 )]
 # models <- c('structural')
-models <- c("rf", "gbm", "structural")
+models <- c("ranger", "gbm", "structural")
 
 delta_skynet <- skynet_data %>%
   select(-contains("lag")) %>%
@@ -1398,7 +1411,7 @@ skynet_models <- purrr::cross_df(list(
   unnest(temp, .drop = F) %>%
   filter(!(data_subset == 'delta_skynet' & model == 'structural')) %>%
   filter(!(model == 'structural' & data_subset != 'uncentered_skynet')) %>%
-  filter( !(model %in% c('rf','gbm') & data_subset == 'uncentered_skynet')) %>%
+  filter( !(model %in% c('ranger','gbm') & data_subset == 'uncentered_skynet')) %>%
   filter(!(model == 'structural' & dep_var != dep_vars[1]))
 
 #
@@ -1412,6 +1425,8 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
+    # filter(model == "ranger") %>%
+    # slice(1) %>%
     # filter(train_set == 'random') %>%
     # slice(1:4) %>%
     # group_by(model, data_subset, dep_var) %>%
@@ -1434,7 +1449,7 @@ if (run_models == T) {
         ),
         sfm,
         fitcontrol_number = 2,
-        fitcontrol_repeats = 2,
+        fitcontrol_repeats = 1,
         never_ind_vars = never_ind_vars,
         tune_model = T
       )
@@ -1445,12 +1460,13 @@ if (run_models == T) {
     file = paste0(run_dir, "skynet_models.Rdata"),
     skynet_models
   )
+  print('saved models')
+
 } else {
   load(file = paste0(run_dir, "skynet_models.Rdata"))
 }
 
 # diagnose models ---------------------------------------------------------
-print('saved models')
 
 skynet_models <- skynet_models %>%
   mutate(error = map(fitted_model, "error")) %>%
@@ -1525,6 +1541,11 @@ skynet_models <- skynet_models %>%
     )
   )
 
+skynet_models <- skynet_models %>%
+  mutate(resolution_test = map2(test_data, dep_var, resolution_effect)) %>%
+  mutate(test_resolution_plot = map(resolution_test, plot_resolution_effect))
+
+
 print('processed models')
 
 save_foo <- function(test_plot,
@@ -1567,6 +1588,20 @@ pwalk(
   save_foo,
   run_dir = run_dir
 )
+
+pwalk(
+  list(
+    model = skynet_models$model,
+    train_region = skynet_models$train_set,
+    test_plot = skynet_models$test_resolution_plot,
+    test_region = paste0(skynet_models$test_sets, "-resolution_plot"),
+    data_set = skynet_models$data_subset,
+    dep_var = skynet_models$dep_var
+  ),
+  save_foo,
+  run_dir = run_dir
+)
+
 
 print('printed models')
 
