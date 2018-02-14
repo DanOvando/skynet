@@ -1458,3 +1458,103 @@ agg_results %>%
   # 
 ```
 
+
+# Doing the aggregation test right
+
+So what's it going to take to get a function that takes the data right at the model building phase and adjusts the resolution?
+
+I think this needs to come in before generate_test_training
+
+data_sources is a container for the highest resolution data you've got, let's just takea  look at skynet. 
+
+So what would it takt to make this happen. The real challenge is in the fact that the survey data and gfw are on different "resolutions", or rather that the abundance data doesn't have a resolution per say, where global fishing watch does. 
+
+So, the result is that there are multiple GFW entries for every abundance index entry. 
+
+So, this gets back to your problem before: you can't just round lat/lon and aggregate up, since you have duplicate entries of biomass. So, if there are 100 GFW entries in an area, you're going to inflate the biomass artifically. 
+
+So, you basically need to separate out the aggregation process for the gfw and survey data. 
+
+The simplest solution would be going back to the actual nearest-knot exercise really. 
+
+For each resolution, you'd aggregate up the GFW, aggregate up the knots, and then do nearest neighbor again. 
+
+On the GFW side this is pretty easy. But, it's a little trickier to think of on the survey side. 
+
+A hackier solution that would fit much better into your exisiting framework. If you assume each knot as a unique biomass that is different than very other knot, then when you aggregate up, instead of sum(biomass), you could just do sum(unique(biomass)). Let's explore this
+
+```{r}
+
+data <- data_sources$data[data_sources$data_subset == "skynet"][[1]]
+
+ data %>% 
+   group_by(year, survey) %>% 
+   summarise(n_maybe_knots = n_distinct(density),
+             n_knots = n_distinct(knot))
+
+```
+
+booya, that checks out, and you could put a warning in there if that assumption is violated.  though also suggests part of the damn fitting problem, in most years you barely have any knots...  Might be worth dropping out wghhl in general, damn. That's because of the nearest knot behavior; if all the fishing is around one knot, then your effective sample size will be 1. d'oh. Can you add the nearest knot back in? Seems like the unique thing is working, given that there should be at max 200 for most of these. 
+
+Though also seems worthwhile to investigate running VAST with mesh size instead of knots? Seems like this is a Jim question. Let's not fuck with this for now. 
+
+So now, what would rounding look like.... 
+
+FUUUUUUCK. That won't work, since it's going to inflate some points. You'd need to do something like round some things up and some things down... 
+
+
+OK, what would it take to just make a few different resolution data, do the clipping, joining, etc.... 
+
+Would be easy to run that part, but the problem would be putting alllll the other processing steps inside of a function. 
+
+THe other problem is that your logic so far has basically been that the GFW data is at a finer resolution than the survey data. So, it makes sense to put the GFW data "inside" of a knot. 
+
+But, once you start aggregating up, this gets tought, since now you'd actually be snapping knots to nearest resolution point...  FOOOOOOOK. 
+
+OK. stop. this is getting crazy. 
+
+What's the key thing you're trying to estiamte here. Ideally, RMSE by "resolution". I think the problem here is that you haven't done a good job of defining "resolution", since it's not at all obvious.  given the knots-to-gfw problem. 
+
+
+The simplest solution would be to keep the model fit as it is, and come up with a clever way to "aggregate up"
+
+So what does "aggregate up" mean in this context... The problem you're having now is that you can't just sum up the observed and predicted at different resolutions 
+
+Let's work at the map level, and just think abotu creating coarser and coarser grids from the map, ideally actually using maps to generate centers from equally sized plots. 
+
+Now, snap the data to that grid. 
+
+For the survey data, sum up all the unique observed biomasses
+
+For the GFW predictions, take the average at each knot, then sum across knots. AHA! That might be the key. THe idea is that at each knot, the fleet shold be sampling from one biomass. Once you have the biomass at that knot, then you can sum up. 
+
+This is making more sense. 
+
+There's still a problem here though that you might have way more knots in some areas than others, and so when you sum up, the performance is going to be better.... 
+
+You need to check whether the knots are estimating density or biomass. If it's density... then to do the density across the new area you'd average. If it's biomass then you sum. And hopefully if it's biomass, then the closer together, the smaller the biomass in general... Could work
+
+
+
+```{r}
+
+degree_resolution <- 0.5
+
+rounded_data <- data %>% 
+  ungroup() %>% 
+  mutate(noise = sample(c(-.1,.1),nrow(.), replace = T)) %>% 
+  mutate(new_lon = round((rounded_lon + noise) * (1 / degree_resolution)) / (1 / degree_resolution)) %>% 
+  select(rounded_lon, new_lon, knot) %>% 
+  group_by(new_lon) %>% 
+  summarise(nk = n_distinct(knot)) %>% 
+  ungroup() %>% 
+  mutate(decimal = new_lon - floor(new_lon)) %>% 
+  group_by(decimal) %>% 
+  summarise(tnk = sum(nk))
+
+```
+
+
+
+
+

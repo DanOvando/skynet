@@ -24,13 +24,15 @@ library(modelr)
 library(caret)
 library(taxize)
 library(gbm)
+library(recipes)
+# library(rlang)
 library(tidyverse)
 
 demons::load_functions("functions")
 
-run_name <- "v1.0"
+run_name <- "v1.1-gfw_and_enviro"
 
-run_description <- "development of full paper"
+run_description <- "testing"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -57,13 +59,15 @@ query_gfw <- F # get gfw data or load saved
 
 min_times_seen <- 9
 
-min_dist_from_shore <- 500
+min_dist_from_shore <- 1000
 
 min_speed <- 0.01
 
 max_speed <- 20
 
 query_environmentals <- F # get environmental data or load saved
+
+round_environmentals <- T
 
 query_mpas <- F # get mpa data or load saved
 
@@ -75,7 +79,7 @@ query_prices <- F # get exvessel price data for observed species
 
 # set run options (how to run) ---------------------------------------------------------
 
-center_and_scale <- T # center and scale some data?
+center_and_scale <- F # center and scale some data?
 
 gfw_vars_only <- F
 
@@ -103,6 +107,9 @@ max_percent_missing <- 0.25
 
 lat_lon_res <-
   0.25 # round data to intervels of 0.25 degrees lat lon, as in 56.25
+
+res <- 1/lat_lon_res
+
 
 min_year <- 2012
 
@@ -240,8 +247,8 @@ if (query_gfw == T) {
     SELECT
     YEAR(timestamp) year,
     mmsi,
-    ROUND(lat*4)/4 rounded_lat,
-    ROUND(lon*4)/4 rounded_lon,
+    ROUND(lat*{res})/{res} rounded_lat,
+    ROUND(lon*{res})/{res} rounded_lon,
     SUM(IF( nnet_score == 1, hours, 0)) AS total_hours,
     AVG(distance_from_shore ) AS mean_distance_from_shore,
     AVG(distance_from_port) AS mean_distance_from_port,
@@ -386,7 +393,7 @@ if (query_environmentals == T) {
         desired_data = "chl-a",
         date_interval = 1,
         space_interval = 1,
-        runit = lat_lon_res
+        runit = 0.25
       )
     )
 
@@ -403,12 +410,12 @@ if (query_environmentals == T) {
       labs(caption = "SST(c)")
   }
 
-  chl_data <- chl_data %>%
-    mutate(plots = map_plot(chl_a, chl_plot_foo))
+  # chl_data <- chl_data %>%
+  #   mutate(plots = trelliscopejs::map_plot(chl_a, chl_plot_foo))
 
-  a <- chl_data$chl_a[[4]]
+  # a <- chl_data$chl_a[[4]]
 
-  qmplot(rlon, rlat, color = mean_chlorophyll, data = a)
+  # qmplot(rlon, rlat, color = mean_chlorophyll, data = a)
 
   save(file = "data/chl_env_data.Rdata", chl_data)
 
@@ -428,7 +435,7 @@ if (query_environmentals == T) {
         desired_data = "sst",
         date_interval = 14,
         space_interval = 25,
-        runit = lat_lon_res
+        runit = 0.25
       )
     )
 
@@ -445,8 +452,8 @@ if (query_environmentals == T) {
       labs(caption = "SST(c)")
   }
 
-  sst_data <- sst_data %>%
-    mutate(plots = map_plot(sst, sst_plot_foo))
+  # sst_data <- sst_data %>%
+  #   mutate(plots = trelliscopejs::map_plot(sst, sst_plot_foo))
 
   save(file = "data/sst_env_data.Rdata", sst_data)
 
@@ -466,7 +473,7 @@ if (query_environmentals == T) {
         date_interval = 24 * 14,
         # 1 hour interval
         space_interval = 0.5,
-        runit = lat_lon_res
+        runit = 0.25
       )
     )
 
@@ -502,7 +509,7 @@ if (query_environmentals == T) {
         date_interval = 1,
         # 1 hour interval
         space_interval = 1,
-        runit = lat_lon_res
+        runit = 0.25
       )
     )
 
@@ -553,7 +560,7 @@ if (query_environmentals == T) {
         date_interval = 1,
         # 1 hour interval
         space_interval = 1,
-        runit = lat_lon_res
+        runit = 0.25
       )
     )
 
@@ -588,6 +595,36 @@ if (query_environmentals == T) {
   for (i in seq_along(data_files)) {
     load(data_files[i])
   }
+}
+
+if (round_environmentals == T){
+
+
+  data_files <- list.files("data/")
+
+  data_files <-
+    paste0("data/", data_files[str_detect(data_files, "env_data.Rdata")])
+
+  enviro_types <- str_extract(data_files, "(?<=/).*(?=_)")
+
+  enviro_types <- str_replace(enviro_types, "env","data")
+
+  for (i in enviro_types){
+
+    desired_data <- str_extract(i, ".*(?=_)")
+
+    temp <- round_enviro(get(i),
+                          desired_data = desired_data, runit = lat_lon_res)
+
+    assign(i, temp)
+  }
+
+  topo_data <- topo_data %>%
+    mutate(altitude = map(
+      altitude,
+      ~ .x %>%
+        mutate(m_below_sea_level = -1 * mean_altitude)
+    ))
 }
 
 
@@ -876,11 +913,12 @@ save(file = here::here("results", run_name, "gfw_data.Rdata"), gfw_data)
 skynet_data <- gfw_data %>%
   unnest() %>%
   group_by(survey, year, rounded_lat, rounded_lon) %>%
+  rename(te = total_hours) %>%
   summarise(
     num_vessels = length(unique(mmsi)),
-    total_hours = sum(total_hours),
+    total_hours = sum(te),
     total_engine_power = sum(inferred_engine_power),
-    total_engine_hours = sum(total_hours * inferred_engine_power),
+    total_engine_hours = sum(te * inferred_engine_power),
     dist_from_port = mean(mean_distance_from_port),
     dist_from_shore = mean(mean_distance_from_shore),
     mean_vessel_length = mean(inferred_length),
@@ -1039,7 +1077,15 @@ skynet_data <- skynet_data %>%
   ) %>%
   select(survey, combo_data) %>%
   unnest() %>%
-  filter(density > 0 & is.na(density) == F)
+  filter(is.na(density) == F)
+
+missing_some <- map_lgl(skynet_data, ~any(is.na(.x)))
+
+impute_locations <- which(str_detect(colnames(skynet_data),'lag') == F &  map_lgl(skynet_data, is.numeric)
+ == T & !colnames(skynet_data) %in% c("year", "rounded_lat", "rounded_lon") & missing_some)
+
+skynet_data <- skynet_data %>%
+  dmap_at(impute_locations, fill_enviros, data = skynet_data)
 
 missing_too_many <- skynet_data %>%
   map_df(~ mean(is.na(.x))) %>%
@@ -1053,9 +1099,15 @@ missing_too_many <- skynet_data %>%
     .$variable
   }
 
+if (length(missing_too_many) > 0){
 skynet_data <- skynet_data %>%
   select_(paste0("-", missing_too_many)) %>%
   left_join(mean_survey_prices, by = "survey")
+}
+
+skynet_data <- skynet_data %>%
+  left_join(mean_survey_prices, by = "survey")
+
 
 # skynet_data %>%
 #   group_by(rounded_lat, rounded_lon) %>%
@@ -1214,6 +1266,7 @@ if (plot_data == T) {
   #   scale_color_viridis(option = 'D') +
   #   theme_classic()
 }
+
 # prepare models ----------------------------------------------------------
 
 skynet_data <- skynet_data %>%
@@ -1295,7 +1348,8 @@ tree_candidate_vars <- skynet_names[!skynet_names %in% c(
   never_ind_vars
 ) &
   str_detect(skynet_names, "_interaction")
-  == F]
+  == F &
+  str_detect(skynet_names,"lag") == F]
 
 if (gfw_vars_only == T) {
   tree_candidate_vars <-
@@ -1309,7 +1363,7 @@ lm_candidate_vars <- skynet_names[!skynet_names %in% c(
   never_ind_vars
 )]
 # models <- c('structural')
-models <- c("rf", "gbm", "structural")
+models <- c("ranger", "gbm", "structural")
 
 delta_skynet <- skynet_data %>%
   select(-contains("lag")) %>%
@@ -1398,7 +1452,7 @@ skynet_models <- purrr::cross_df(list(
   unnest(temp, .drop = F) %>%
   filter(!(data_subset == 'delta_skynet' & model == 'structural')) %>%
   filter(!(model == 'structural' & data_subset != 'uncentered_skynet')) %>%
-  filter( !(model %in% c('rf','gbm') & data_subset == 'uncentered_skynet')) %>%
+  filter( !(model %in% c('ranger','gbm') & data_subset == 'uncentered_skynet')) %>%
   filter(!(model == 'structural' & dep_var != dep_vars[1]))
 
 #
@@ -1412,6 +1466,8 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
+    # filter(model == "ranger") %>%
+    # slice(1) %>%
     # filter(train_set == 'random') %>%
     # slice(1:4) %>%
     # group_by(model, data_subset, dep_var) %>%
@@ -1433,8 +1489,8 @@ if (run_models == T) {
           tree_candidate_vars = candidate_vars
         ),
         sfm,
-        fitcontrol_number = 2,
-        fitcontrol_repeats = 2,
+        fitcontrol_number = 10,
+        fitcontrol_repeats = 1,
         never_ind_vars = never_ind_vars,
         tune_model = T
       )
@@ -1445,12 +1501,13 @@ if (run_models == T) {
     file = paste0(run_dir, "skynet_models.Rdata"),
     skynet_models
   )
+  print('saved models')
+
 } else {
   load(file = paste0(run_dir, "skynet_models.Rdata"))
 }
 
 # diagnose models ---------------------------------------------------------
-print('saved models')
 
 skynet_models <- skynet_models %>%
   mutate(error = map(fitted_model, "error")) %>%
@@ -1525,6 +1582,11 @@ skynet_models <- skynet_models %>%
     )
   )
 
+skynet_models <- skynet_models %>%
+  mutate(resolution_test = map2(test_data, dep_var, resolution_effect)) %>%
+  mutate(test_resolution_plot = map(resolution_test, plot_resolution_effect))
+
+
 print('processed models')
 
 save_foo <- function(test_plot,
@@ -1567,6 +1629,20 @@ pwalk(
   save_foo,
   run_dir = run_dir
 )
+
+pwalk(
+  list(
+    model = skynet_models$model,
+    train_region = skynet_models$train_set,
+    test_plot = skynet_models$test_resolution_plot,
+    test_region = paste0(skynet_models$test_sets, "-resolution_plot"),
+    data_set = skynet_models$data_subset,
+    dep_var = skynet_models$dep_var
+  ),
+  save_foo,
+  run_dir = run_dir
+)
+
 
 print('printed models')
 

@@ -6,8 +6,8 @@
 #' @param training data to be used in training
 #' @param testing data to be used in testing
 #' @param fitcontrol_method caret options
-#' @param fitcontrol_number caret options
-#' @param fitcontrol_repeats caret options
+#' @param fitcontrol_number number of k-fold cross validation folds
+#' @param fitcontrol_repeats number of times k-fold cross validation is run
 #'
 #' @return a list of model fits
 #' @export
@@ -34,17 +34,22 @@ fit_skynet <- function(dep_var,
                        fitcontrol_method = 'repeatedcv',
                        fitcontrol_number = 1,
                        fitcontrol_repeats = 1,
-                       tune_model = T) {
+                       tune_model = T,
+                       cores = 4) {
   # model_formula <-
   #   paste(dep_var, '~', ind_vars) %>% as.formula() # construct model forumla
   #
   #
 
 
+  doMC::registerDoMC(cores = cores)
+  # cluster <- makeCluster(cores) # convention to leave 1 core for OS
+  # doParallel::registerDoParallel(cluster)
 
   fit_control <- trainControl(method = fitcontrol_method,
                               number = fitcontrol_number,
-                              repeats = fitcontrol_repeats)
+                              repeats = fitcontrol_repeats,
+                              allowParallel = TRUE)
 
   independent_data <- training %>%
     as.data.frame() %>%
@@ -70,7 +75,8 @@ fit_skynet <- function(dep_var,
       model_formula,
       data = reg_data,
       method = "cforest",
-      trControl = fit_control
+      trControl = fit_control,
+      preProcess = c("center","scale")
     )
     if (tune_model == T) {
       cforest_importance <- varImp(model$finalModel)
@@ -99,7 +105,9 @@ fit_skynet <- function(dep_var,
         model_formula,
         data = reg_data,
         method = "cforest",
-        trControl = fit_control
+        trControl = fit_control,
+        preProcess = c("center","scale")
+
       )
 
     }
@@ -114,6 +122,66 @@ fit_skynet <- function(dep_var,
 
   } # close cforest
 
+  if (model_name == 'ranger') {
+    #fit random forest
+
+    # rf_grid <-  expand.grid(mtry = c(3,5))
+    model <- train(
+      independent_data %>% dmap_if(is.logical, as.numeric),
+      dependent_data,
+      method = "ranger",
+      # na.action = na.omit,
+      trControl = fit_control,
+      preProcess = c("center","scale"),
+      importance = "impurity_corrected"
+      # tuneGrid = rf_grid
+    )
+
+    if (tune_model == T) {
+      impnames <-
+        model$finalModel$variable.importance %>% as.data.frame() %>% purrr::pluck(attr_getter("row.names"))
+      varimp <-  model$finalModel$variable.importance %>%
+        as_data_frame() %>%
+        mutate(varname = impnames) %>%
+        arrange(desc(value)) %>%
+        mutate(varname = str_replace(varname, '(TRUE)|(FALSE)', ''))
+
+      random_imp <-
+        varimp$value[varimp$varname == 'random_var']
+
+
+      vars_to_include <- varimp %>%
+        filter(value > random_imp) %>% {
+          .$varname
+        } %>% unique()
+
+      independent_data <- independent_data[, vars_to_include]
+
+
+      model <- train(
+        independent_data %>% dmap_if(is.logical, as.numeric),
+        dependent_data,
+        method = "ranger",
+        # na.action = na.omit,
+        trControl = fit_control,
+        preProcess = c("center","scale"),
+        importance = "none",
+        verbose = TRUE
+        # tuneGrid = rf_grid
+      )
+
+
+    }
+    out_testing <- testing %>%
+      as_data_frame() %>%
+      add_predictions(model)
+
+    out_training <- training %>%
+      as_data_frame() %>%
+      add_predictions(model)
+  } # close ranger rf
+
+
   if (model_name == 'rf') {
     #fit random forest
 
@@ -125,7 +193,9 @@ fit_skynet <- function(dep_var,
       method = "rf",
       do.trace = 10,
       # na.action = na.omit,
-      trControl = fit_control
+      trControl = fit_control,
+      preProcess = c("center","scale")
+
       # tuneGrid = rf_grid
     )
 
@@ -158,7 +228,8 @@ fit_skynet <- function(dep_var,
         do.trace = 10,
         na.action = na.omit,
         trControl = fit_control,
-        importance = T
+        importance = T,
+        preProcess = c("center","scale")
       )
 
     }
@@ -185,7 +256,8 @@ fit_skynet <- function(dep_var,
       data = reg_data,
       method = "gbm",
       verbose = T,
-      trControl = fit_control#,
+      trControl = fit_control,
+      preProcess = c("center","scale")
       # tuneGrid = gbm_grid
     )
     # on.exit(detach('package:plyr'))
@@ -218,13 +290,13 @@ fit_skynet <- function(dep_var,
         data = reg_data,
         method = "gbm",
         verbose = T,
-        trControl = fit_control
+        trControl = fit_control,
+        preProcess = c("center","scale")
       )
 
       # on.exit(detach('package:plyr'))
 
     }
-
     out_testing <- testing %>%
       as_data_frame() %>%
       add_predictions(model)

@@ -25,6 +25,9 @@ query_erddap <- function(desired_data = 'sst',
                          min_lon,
                          max_lon,
                          space_interval = .25) {
+
+  min_lon <- pmax(-179, min_lon)
+
   if (desired_data == 'sst') {
     year_query <-
       paste0('[(',
