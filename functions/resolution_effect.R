@@ -9,8 +9,9 @@ roundfoo <- function(resolution, dep_var, data){
            long = round(rounded_lon * (1 / resolution)) / (1 / resolution)) %>%
     group_by(lat, long, year) %>%
     summarise(nobs = length(pred),
-      total_observed = sum(!!rlang::sym(dep_var), na.rm = T),
-              total_predicted = sum(pred))
+      total_observed = mean(!!rlang::sym(dep_var), na.rm = T),
+              total_predicted = mean(pred),
+      survey = unique(survey)[1])
 
 }
 

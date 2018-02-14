@@ -339,6 +339,35 @@ plot(effort,mp)
 
 The factorial combinations of our data and models produces an ungainly number of results, and so for now I will highlight a few particularly interesting findings, specifically results for XX region, results for all regions, results from the temporal hold-out, both for the machine learning and structural modeling approaches. 
 
+What's the structure of the paper
+
+## Does more effort equal more fish?
+
+This is Chris's point: at the simplest level, what can you get out of a linear regression of effort on biomass, and how does performance change with resolution?
+
+Simplest figure: OOB RMSE at different spatial resolutions of this model
+
+Find inflection point/point where the resolution gets so coarse that it's not useful but you've got an improvement in fit. That tells your benchmark "coarse" resolution model. 
+
+Could also repeat similar breakout processes of different regions/spatial controls
+
+## What about when we control for other things?
+
+The simplest solution would be the results that you have now, if the above exercise turns out to be garbage. If there is a worthy strawman in the effort ~ fish relationship, then you could look at the performance of the finest resolution to the performance of at the inflection resolution above, and see how much of an improvement you get. 
+
+## Select "best models" and show performance
+
+Temporal prediction
+
+Fill in the gap
+
+Predict where we don't survey
+
+
+
+
+# Misc Results
+
 ## Correlations
 
 We can examine simple correlations between our data and the estimated total density of fished species at a given knot in a given year (Fig. \@ref(fig:var-cor)). 

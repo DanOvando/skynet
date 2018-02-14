@@ -1,31 +1,596 @@
 ---
-title: "Counting Fish from Space"
-subtitle: "Predicting Fish Abundance using Fishing Behavior"
+title: "phd symposium figures"
 author: "Dan Ovando"
-date: "2018/02/18"
-output:
-  xaringan::moon_reader:
-    lib_dir: libs
-    nature:
-      highlightStyle: github
-      highlightLines: true
-      countIncrementalSlides: false
+date: "2/9/2018"
+output: html_document
 ---
 
-```{r setup, include=FALSE}
-options(htmltools.dir.version = FALSE)
+```{r}
+
+library(gbm)
+library(randomForest)
+library(stringr)
+library(modelr)
+library(broom)
+library(hrbrthemes)
+library(viridis)
+library(sf)
+library(ggmap)
+library(caret)
+library(extrafont)
+library(gganimate)
+library(patchwork)
+library(tidyverse)
+
+run_name <- 'v1.0'
+
+run_dir <- here::here('results',run_name)
+
+fig_theme <- theme_ipsum(base_size = 18, axis_title_size = 20)
+
+theme_set(fig_theme)
+
+load(here::here("results", run_name,'skynet_data.Rdata'))
+
+load(here::here("results", run_name,'processed_skynet_models.Rdata'))
+
+load(here::here("results", run_name,'vast_fish.Rdata'))
+
+load(file = here::here("data","global_map.Rdata"))
+
+load(file = here::here('data','fish_prices.Rdata'))
+
+load(file = here::here('results',run_name,'gfw_data.Rdata'))
+
+width <- 10
+
+height <- 6
+
+map_size <- 1
 ```
 
-# Hello World
+# We Need some Models
 
-Install the **xaringan** package from [Github](https://github.com/yihui/xaringan):
 
-```{r eval=FALSE, tidy=FALSE}
-devtools::install_github("yihui/xaringan")
+```{r}
+
+naive_trends <- skynet_data %>%
+  group_by(rounded_lat, rounded_lon, year) %>%
+  summarise(total_abundance = sum(density),
+            total_engine_hours = sum(total_engine_hours),
+            survey = unique(survey)[1]) %>% 
+  filter(total_engine_hours > 0) %>% 
+  ungroup()
+
+naive_plot <- naive_trends %>% 
+  ggplot(aes(log(total_engine_hours), log(total_abundance))) + 
+  geom_point(shape = 21, size = 3, alpha = 0.5, fill = "steelblue") + 
+geom_smooth(method = "lm") + 
+  labs(x = "Log Fishing Effort", y = "Log Fish Abundance")
+
+
+  ggsave(file = "naive_plot.png", naive_plot, height = height, width = width)
+
 ```
 
----
 
-# Introduction
+# Survey Data Provides "True" Estimates
 
----
+```{r}
+
+
+
+knots <- vast_fish %>%
+  select(survey, vasterized_data) %>%
+  mutate(knots = map(vasterized_data, c('spatial_list', 'loc_x_lat_long'))) %>%
+  select(-vasterized_data) %>%
+  unnest() %>%
+  mutate(recenter_lon = ifelse(approx_long < 0, 180 + (180 - abs(approx_long)), approx_long))
+  
+  pacific_map <- global_map %>%
+  as("Spatial") %>%
+  maptools::nowrapRecenter() %>%
+  sf::st_as_sf()
+  
+  
+  map_knots <-  knots %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, approx_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  
+  bbox <- sf::st_bbox(map_knots)
+  
+ survey_names <- tribble(
+  ~ survey,
+  ~ name,
+  'ebsbts',
+  'Eastern Bering Sea',
+  'aibts',
+  'Aleutian Islands',
+  'goabts',
+  'Gulf of Alaska',
+  'wcgbts',
+  'West Coast',
+  'wcghl',
+  "SB Channel"
+)
+  
+  knot_map <- map_knots %>%
+    left_join(survey_names, by = "survey") %>% 
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = name), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  theme_light(base_size = 18) +
+  scale_color_viridis_d(name = element_blank())
+  
+
+  ggsave(file = "knot_map.png", knot_map, height = height, width = width)
+
+```
+
+# We can link to GFW Surveys
+
+
+```{r}
+
+naive_trends <- skynet_data %>%
+  group_by(rounded_lat, rounded_lon, year) %>%
+  summarise(total_abundance = sum(density),
+            total_engine_hours = sum(total_engine_hours),
+            survey = unique(survey)[1]) %>%
+  ungroup() %>%
+    mutate(total_abundance = pmin(2,(total_abundance - mean(total_abundance)) / (sd(total_abundance))),
+         total_engine_hours =pmin(2,(total_engine_hours - mean(total_engine_hours)) / (sd(total_engine_hours)))) %>% 
+  # mutate(total_abundance = total_abundance / max(total_abundance),
+  #        total_engine_hours = total_engine_hours / max(total_engine_hours)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) 
+
+
+
+ebs_fishing <-  naive_trends %>%
+  filter(survey == "ebsbts") %>% 
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+
+years <- expand.grid(id = 1:nrow(pacific_map), year = unique(ebs_fishing$year))
+
+yearly_map <- pacific_map %>% 
+  mutate(id = 1:nrow(.)) %>% 
+  right_join(years, by = "id")
+  
+bbox <- sf::st_bbox(ebs_fishing)
+
+naive_fishing_map <- ebs_fishing %>%
+  ggplot(aes(frame = year)) +
+  geom_sf(data = yearly_map, fill = 'grey60') +
+  geom_raster(aes(x = recenter_lon, y = rounded_lat, fill = (total_engine_hours)), show.legend = F) +
+  # geom_sf(aes(color = survey), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+           ylim = c(bbox['ymin'], bbox['ymax'])) +
+  # scale_fill_gradientn(colours = RColorBrewer::brewer.pal(9,"Reds"), name = "Fishing") +
+    # scale_fill_brewer(palette = , name = "Fishing") +
+  # scale_fill_gradient(low = "steelblue", high = "tomato", name = "Fishing") +
+  scale_fill_viridis_c(name = "Fishing") +
+  labs(x = "Longitude", y = "Latitude", 
+       subtitle = "Fishing Pressure")
+
+gganimate(naive_fishing_map, "ebsbts-fishing-map.gif", width = width, height = height)
+
+
+naive_fish_map <- ebs_fishing %>%
+  ggplot(aes(frame = year)) +
+  geom_sf(data = yearly_map, fill = 'grey60') +
+  geom_raster(aes(x = recenter_lon, y = rounded_lat, fill = (total_abundance)), show.legend = F) +
+  # geom_sf(aes(color = survey), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+           ylim = c(bbox['ymin'], bbox['ymax'])) +
+    # scale_fill_gradientn(colours = RColorBrewer::brewer.pal(9,"Reds"), name = "Fishing") +
+  # scale_fill_gradient(low = "steelblue", high = "tomato", name = "Fish") +
+    scale_fill_viridis_c(name = "Fish") +
+  labs(x = "Longitude", y = "Latitude", 
+       subtitle = "Fish Abundance")
+
+gganimate(naive_fish_map, "ebsbts-fish-map.gif", width = width, height = height)
+
+
+```
+
+# Coast-Wide Predictions
+
+
+```{r}
+
+skynet_models$data_subset[str_detect(skynet_models$data_subset,"uncentered")] <- "skynet"
+
+coast_wide <- skynet_models %>% 
+  filter(model %in% c('ranger','structural'), test_set == 'random', train_set == 'random',
+                      data_subset == "skynet") %>% 
+  select(dep_var, model,test_data, psuedo_r2 ) %>% 
+  unnest()
+
+
+r2 <- coast_wide %>% 
+  filter(dep_var == "log_density") %>% 
+  select(model, psuedo_r2) %>% 
+  group_by(model) %>% 
+  summarise(r2 = pmax(0,unique(psuedo_r2)))
+
+translate_model <- c(
+  ranger = glue::glue("Machine Learning: R2 = {r2$r2[1]}"),
+  structural = glue::glue("Bioeconomic: R2 = {r2$r2[2]}")
+)
+
+coast_wide_performance <- coast_wide %>% 
+  filter(dep_var == "log_density") %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_abline(aes(slope = 1, intercept = 0), linetype = 2, color = "red") +
+  geom_point(fill = "steelblue",shape = 21, alpha = 0.5, size = 3) + 
+  geom_smooth(method = "lm", se = F) +
+  facet_wrap( ~ model, scales = "free_y", labeller = labeller(model = translate_model)) + 
+  labs(x = "Observed", y = "Predicted") + 
+  theme(strip.text = element_text(size = 18))
+
+psuedo_r2 <- coast_wide %>% 
+  filter(dep_var == "log_density") %>% 
+  group_by(model) %>% 
+  summarise(r2 = pmax(0,unique(psuedo_r2))) %>% 
+  ggplot(aes(model, r2)) + 
+  geom_col() + 
+  geom_hline(aes(yintercept = 0)) + 
+  theme_classic() +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 16),
+        axis.text.y = element_text(size = 16)) + 
+  labs(y = expression(R^2))
+
+combo <- coast_wide_performance + psuedo_r2 + plot_layout(ncol = 1, nrow = 2, heights = c(2,1))
+
+
+  ggsave(file = "coast_wide_performance.png", coast_wide_performance, height = height, width = width)
+
+
+```
+
+# Use the Past ro Predict Future
+
+```{r}
+
+predict_future <- skynet_models %>% 
+  filter(model %in% c('ranger'), test_set == 'year_gr_than_2014', train_set == 'year_leq_than_2014',
+                      data_subset == "skynet", 
+         dep_var == "log_density") %>% 
+  select(dep_var, model,test_data, psuedo_r2 ) %>% 
+  unnest()
+
+future_performance <- predict_future %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_abline(aes(slope = 1, intercept = 0), linetype = 2, color = "red") +
+  geom_point(aes(fill = factor(year)),shape = 21, alpha = 0.75, size = 3) + 
+  geom_smooth(method = "lm", se = F, alpha = 0.5) +
+  labs(x = "Observed", y = "Predicted", 
+       title = glue::glue("R2 is {unique(predict_future$psuedo_r2)}")) + 
+  theme(strip.text = element_text(size = 18)) + 
+  scale_fill_viridis_d(name = "Year", option = "D")
+
+  ggsave(file = "future_performance.png", future_performance, height = height * .75, width = width)
+
+```
+
+# Use Alaska to Predict West Coast
+
+```{r}
+
+predict_west_coast <- skynet_models %>% 
+  filter(model %in% c('ranger'), test_set == 'west_coast', train_set == 'not_west_coast',
+                      data_subset == "skynet", 
+         dep_var == "log_density") %>% 
+  select(dep_var, model,test_data, psuedo_r2 ) %>% 
+  unnest()
+
+westcoast_performance <- predict_west_coast %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_abline(aes(slope = 1, intercept = 0), linetype = 2, color = "red") +
+  geom_point(aes(fill = survey),shape = 21, alpha = 0.75, size = 3) + 
+  geom_smooth(method = "lm", se = F, alpha = 0.5) +
+  labs(x = "Observed", y = "Predicted", 
+       title = glue::glue("R2 is {pmax(0,unique(predict_west_coast$psuedo_r2))}")) + 
+  theme(strip.text = element_text(size = 18)) + 
+  scale_fill_viridis_d(name = "Survey", option = "D")
+
+  ggsave(file = "westcoast_performance.png", westcoast_performance, height = height, width = width)
+
+```
+
+
+# spatial Residuals Map
+
+
+```{r}
+
+
+coast_wide <- skynet_models %>%
+  filter(
+  model %in% c('ranger'),
+  test_set == 'random',
+  train_set == 'random',
+  data_subset == "skynet",
+  dep_var == "log_density"
+  ) %>%
+  select(dep_var, model, test_data, psuedo_r2) %>%
+  unnest()  %>%
+  mutate(residuals = log_density - pred) %>%
+  group_by(year, rounded_lat, rounded_lon) %>%
+  summarise(
+  total_error = sum(residuals) ^ 2,
+  total_observed = sum(log_density),
+  total_pred = sum(pred)
+  ) %>%
+  ungroup() %>%
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon))
+  
+  
+  coast_map <-  coast_wide %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  
+  bbox <- sf::st_bbox(coast_map)
+  
+  coastal_abundance <- coast_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_raster(aes(recenter_lon, y = rounded_lat, fill = total_pred)) +
+  # geom_sf(aes(color = total_pred), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  theme_light(base_size = 18) +
+  scale_fill_viridis(name = "Predicted Abundance") +
+  theme(legend.position = "top", axis.title = element_blank(),
+        legend.key.width = unit(1.75,'cm'))
+  
+  
+  ggsave(file = "abundance_map.png",
+  coastal_abundance,
+  height = height,
+  width = width)
+  
+  
+  coastal_error <- coast_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_raster(aes(recenter_lon, y = rounded_lat, fill = total_error)) +
+  # geom_sf(aes(color = total_pred), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  theme_light(base_size = 18) +
+  scale_fill_viridis(name = "Predicted Abundance",
+                     guide = guide_colorbar(n = 100)) +
+  theme(legend.position = "top", axis.title = element_blank())
+  
+  
+  ggsave(file = "error_map.png",
+  coastal_error,
+  height = height,
+  width = width)
+  
+  coastal_truth<- coast_map %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_raster(aes(recenter_lon, y = rounded_lat, fill = total_observed)) +
+  # geom_sf(aes(color = total_pred), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  theme_light(base_size = 18) +
+  scale_fill_viridis(name = "Observed Abundance") +
+  theme(legend.position = "top", axis.title = element_blank(),
+        legend.key.width = unit(1.75,'cm'))
+  
+  
+  ggsave(file = "observed_abundance_map.png",
+  coastal_truth,
+  height = height,
+  width = width)
+  
+
+```
+
+
+
+# variable importance
+
+
+```{r}
+
+coast_wide <- skynet_models %>%
+  filter(
+  model %in% c('ranger'),
+  test_set == 'random',
+  train_set == 'random',
+  data_subset == "skynet",
+  dep_var == "log_density"
+  ) %>%
+  select(dep_var, model, test_data, psuedo_r2, results) 
+
+a = coast_wide$results[[1]]$finalModel 
+
+```
+
+
+
+
+# what resolution works
+
+
+```{r}
+
+
+resolution_data <- skynet_models %>% 
+  filter(model %in% c('ranger'), test_set == 'west_coast', train_set == 'not_west_coast',
+                      data_subset == "skynet", 
+         dep_var == "log_density") %>% 
+  select(dep_var, model,test_data, psuedo_r2 ) %>% 
+  unnest()
+
+roundfoo <- function(resolution, skynet_data){
+
+  rounded <- skynet_data %>%
+    mutate(lat = round(rounded_lat * (1 / resolution)) / (1 / resolution),
+           long = round(rounded_lon * (1 / resolution)) / (1 / resolution)) %>%
+    group_by(lat, long,year) %>%
+    summarise(total_observed = mean(log_density, na.rm = T),
+              total_predicted = mean(pred),
+              survey = unique(survey)[1])
+
+}
+
+mod_res <- data_frame(resolution =  seq(0.25,2, by = 0.25)) %>%
+  mutate(rounded_data = map(resolution, roundfoo, skynet_data = resolution_data))
+
+
+mod_res <- mod_res %>%
+  mutate(r2 = map_dbl(rounded_data, ~{lm(total_observed ~ total_predicted - 1, data = .x) %>% modelr::rsquare(.x)}),
+         model = map(rounded_data, ~{lm(total_observed ~ total_predicted - 1, data = .x)}))
+
+res_plot <- mod_res %>%
+  select(-model) %>% 
+  unnest() %>%
+  group_by(resolution) %>% 
+  mutate(total_observed = (total_observed - mean(total_observed)) / sd(total_observed),
+         total_predicted = (total_predicted - mean(total_predicted)) / sd(total_predicted)) %>% 
+  ggplot(aes(total_observed, total_predicted, fill = factor(resolution), frame = resolution)) +
+  geom_point(shape = 21, show.legend = F, size = 4, alpha = 0.75) +
+  geom_smooth(method = "lm", show.legend = F, se = F) +
+  labs(x = 'Observed', y = "Predicted") 
+
+gganimate(res_plot, filename = "resolution.gif",
+          width = width, height = height)
+```
+
+```{r}
+res_effect <- mod_res %>%
+  mutate(obs = map_dbl(rounded_data, nrow)) %>%
+  ggplot(aes(resolution, r2)) +
+  geom_point(aes(size = obs, fill = obs), shape = 21) +
+  geom_smooth(se = F) +
+  scale_y_continuous(limits = c(0, NA),
+                     name = expression(R^2)) +
+  scale_size_continuous(name = "Observations",range = c(4,10), breaks = seq(0,3000, by = 500), guide = F) +
+  theme(axis.title.y = element_text(angle = 0)) +
+  labs(x = "Lat/Long Resolution", title = "Model: Observed ~ Predicted") + 
+  scale_fill_viridis(option = "B",
+                     guide = guide_colorbar(barheight = 10, n = 100), 
+                     name = "Samples")
+
+ggsave(res_effect, filename = "res_effect.png", height = height,
+       width = width)
+
+
+```
+
+# Cody Idea
+
+```{r}
+
+
+coast_wide <- skynet_models %>% 
+  filter(model %in% c('ranger'), test_set == 'random', train_set == 'random',
+                      data_subset == "skynet", dep_var == "log_density") %>% 
+  select(dep_var, model,test_data, fitted_model,psuedo_r2 ) 
+
+
+true <- shuffle_data$log_density
+
+add_pred <- function(x,y){
+  x %>% 
+  as_data_frame() %>% 
+  add_predictions(model = y)
+
+}
+
+shuffled <- shuffle_data %>% 
+  mutate(original_order = 1:nrow(.)) %>% 
+  permute(.id = "id", n = 1, -log_density) %>% 
+  mutate(model = list(coast_wide$fitted_model[[1]]$result$model)) %>% 
+  mutate(predictions = map2(perm,model, add_pred)) %>% 
+  select(id, predictions) %>% 
+  unnest()
+
+
+shuffled <- shuffled %>% 
+  select(log_density, year, survey,rounded_lat, rounded_lon) %>% 
+  ungroup() %>% 
+  mutate(pred = rnorm(nrow(.), mean(.$log_density, sd(.$log_density))))
+
+shuffled %>% 
+  ggplot(aes(pred, log_density)) + 
+  geom_point()
+
+
+shuffle_data %>% 
+  ggplot(aes(pred, log_density)) + 
+  geom_point()
+
+roundfoo <- function(resolution, dat){
+  rounded <- dat %>%
+    mutate(lat = round(rounded_lat * (1 / resolution)) / (1 / resolution),
+           long = round(rounded_lon * (1 / resolution)) / (1 / resolution)) %>%
+    group_by(lat, long,year) %>%
+    summarise(total_observed = mean(log_density, na.rm = T),
+              total_predicted = mean(pred),
+              survey = unique(survey)[1])
+
+}
+
+shuffle_res <- data_frame(resolution =  seq(0.25,2, by = 0.25)) %>%
+  mutate(rounded_data = map(resolution, roundfoo, dat = shuffled))
+
+shuffle_res$rounded_data[[6]] %>% 
+  ungroup() %>% 
+  ggplot(aes(total_predicted, total_observed)) + 
+  geom_point() + 
+  geom_smooth(method = "lm")
+  
+
+
+shuffle_res <- shuffle_res %>%
+  mutate(r2 = map_dbl(rounded_data, ~{lm(total_observed ~ total_predicted - 1, data = .x) %>% modelr::rsquare(.x)}),
+         model = map(rounded_data, ~{lm(total_observed ~ total_predicted - 1, data = .x)}))
+
+
+
+shuffle_res_effect <- shuffle_res %>%
+  mutate(obs = map_dbl(rounded_data, nrow)) %>%
+  ggplot(aes(resolution, r2)) +
+  geom_point(aes(size = obs, fill = obs), shape = 21) +
+  geom_smooth(se = F) +
+  scale_y_continuous(limits = c(0, NA),
+                     name = expression(R^2)) +
+  scale_size_continuous(name = "Observations",range = c(4,10), breaks = seq(0,3000, by = 500), guide = F) +
+  theme(axis.title.y = element_text(angle = 0)) +
+  labs(x = "Lat/Long Resolution", title = "Model: Observed ~ Predicted") + 
+  scale_fill_viridis(option = "B",
+                     guide = guide_colorbar(barheight = 10, n = 100), 
+                     name = "Samples")
+
+
+
+```
+
+AHA, that's why, becuase the scale of the thigns is small relative to the number of observations. So, what that's saying is that, assuming most things are positive, which they are, with say a mean of 4, then the most numerous places will get summed up the most times. So, if there are 10,000 things
+
+
+
+
+

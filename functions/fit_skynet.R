@@ -34,17 +34,22 @@ fit_skynet <- function(dep_var,
                        fitcontrol_method = 'repeatedcv',
                        fitcontrol_number = 1,
                        fitcontrol_repeats = 1,
-                       tune_model = T) {
+                       tune_model = T,
+                       cores = 4) {
   # model_formula <-
   #   paste(dep_var, '~', ind_vars) %>% as.formula() # construct model forumla
   #
   #
 
 
+  doMC::registerDoMC(cores = cores)
+  # cluster <- makeCluster(cores) # convention to leave 1 core for OS
+  # doParallel::registerDoParallel(cluster)
 
   fit_control <- trainControl(method = fitcontrol_method,
                               number = fitcontrol_number,
-                              repeats = fitcontrol_repeats)
+                              repeats = fitcontrol_repeats,
+                              allowParallel = TRUE)
 
   independent_data <- training %>%
     as.data.frame() %>%
@@ -167,7 +172,6 @@ fit_skynet <- function(dep_var,
 
 
     }
-
     out_testing <- testing %>%
       as_data_frame() %>%
       add_predictions(model)
@@ -293,7 +297,6 @@ fit_skynet <- function(dep_var,
       # on.exit(detach('package:plyr'))
 
     }
-
     out_testing <- testing %>%
       as_data_frame() %>%
       add_predictions(model)
