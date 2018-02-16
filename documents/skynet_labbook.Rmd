@@ -1685,7 +1685,7 @@ tester <- skynet_models %>%
                         .$training_data[[1]]
                       }
 
-test_resolution <- data_frame(data = list(tester), resolution = seq(25,200, by = 25)) %>% 
+test_resolution <- data_frame(data = list(skynet_data), resolution = seq(25,200, by = 25)) %>% 
   mutate(new_grid  = map2(data,  resolution, create_grid, lon_name = rounded_lon, lat_name = rounded_lat))
 
 
@@ -1718,7 +1718,7 @@ check_plot <- check %>%
 
 check_plot2 <- check %>% 
   group_by(resolution) %>% 
-  ggplot(aes(log(agg_total_hours), log(agg_mean_density), color = year, frame = resolution )) + 
+  ggplot(aes(log(agg_total_hours), log(agg_total_biomass), color = year, frame = resolution )) + 
   geom_point() + 
   geom_smooth(method = "lm") +
   scale_color_viridis() + 

@@ -165,7 +165,7 @@ fit_skynet <- function(dep_var,
         # na.action = na.omit,
         trControl = fit_control,
         preProcess = c("center","scale"),
-        importance = "none",
+        importance = "impurity_corrected",
         verbose = TRUE
         # tuneGrid = rf_grid
       )

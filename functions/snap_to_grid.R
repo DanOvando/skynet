@@ -39,11 +39,19 @@ snap_to_grid <-
     old_grid <- old_grid %>%
       left_join(new_grid, by = c("new_knot" = "id"))
 
-    if (!"knot_area" %in% colnames(old_grid)){
+    if (!"mean_knot_area" %in% colnames(old_grid)){
 
-      old_grid$knot_area <- 1
+      old_grid$mean_knot_area <- 1
 
     }
+
+    if (!"pred" %in% colnames(old_grid)){
+
+      old_grid$pred <- NA
+
+    }
+
+
 
     new_grid <- old_grid %>%
       group_by(year, new_knot) %>%
@@ -51,12 +59,13 @@ snap_to_grid <-
         lat = unique(!!new_lat_name),
         lon = unique(!!new_lon_name),
         approx_survey = unique(survey)[1],
-        agg_mean_density = weighted.mean(density, w = knot_area),
-        agg_mean_log_density = weighted.mean(log_density, w = knot_area),
+        agg_mean_density = weighted.mean(density, w = mean_knot_area),
+        agg_total_biomass = sum(biomass),
+        agg_mean_log_density = weighted.mean(log_density, w = mean_knot_area),
         agg_total_engine_hours = sum(total_engine_hours),
         agg_total_hours = sum(total_hours),
         agg_total_num_vessels = sum(num_vessels),
-        agg_pred = ifelse(is.null(.$pred) == F, ifelse(str_detect(dep_var, "density"), weighted.mean(pred, w = knot_area), sum(pred)), NA)
+        agg_pred = ifelse(str_detect(dep_var, "density"), weighted.mean(pred, w = mean_knot_area, na.rm = T), sum(pred, na.rm = T))
       )
 
   }

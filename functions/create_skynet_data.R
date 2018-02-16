@@ -49,8 +49,9 @@ create_skynet_data <-
     # merge fishdata ----------------------------------------------------------
 
     skynet_data <- gfw_data %>%
-      left_join(fish_data %>% select(density, year, knot), by = c('year', 'knot')) %>%
-      mutate(log_density = log(density))# merge in fishdata
+      left_join(fish_data %>% select(density, biomass, year, knot, mean_knot_area), by = c('year', 'knot')) %>%
+      mutate(log_density = log(density),
+             log_biomass = log(biomass))# merge in fishdata
 
     # merge additional sata
 
