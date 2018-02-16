@@ -30,7 +30,7 @@ library(tidyverse)
 
 demons::load_functions("functions")
 
-run_name <- "v1.1-gfw_and_enviro"
+run_name <- "testing"
 
 run_description <- "testing"
 
@@ -44,6 +44,8 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 
 # set section options (what to run) ---------------------------------------------------------
+
+num_cores <-  4
 
 run_models <- T # fit statistical models to data
 
@@ -867,6 +869,7 @@ if (vasterize == T) {
   #   coord_flip()
 
   vast_fish <- subset_fish_data %>%
+    # filter(survey == "aibts") %>%
     mutate(
       vasterized_data = purrr::pmap(
         list(
@@ -875,6 +878,7 @@ if (vasterize == T) {
           n_x = knots
         ),
         safely(vasterize_index),
+        version = "VAST_v4_0_0",
         run_dir = run_dir,
         nstart = 100,
         obs_model = c(2, 0)
@@ -893,6 +897,8 @@ if (vasterize == T) {
   #   ) +
   #     facet_wrap(~species) +
   #     scale_color_viridis()
+
+  error <- map(vast_fish$vasterized_data, "error")
 
   vast_fish$vasterized_data <- map(vast_fish$vasterized_data, "result")
 
@@ -1026,7 +1032,9 @@ mean_survey_prices <- total_fish_data %>%
 
 total_fish_data <- total_fish_data %>%
   group_by(survey, knot, year) %>%
-  summarise(density = sum(density)) %>%
+  summarise(density = sum(density),
+            mean_knot_area = mean(area),
+            biomass = sum(biomass)) %>%
   ungroup() %>%
   nest(-survey, .key = fish_data)
 
@@ -1318,7 +1326,9 @@ save(
 dep_var <- c("cs_log_density")
 
 never_ind_vars <-
-  c(
+  c("biomass",
+    "log_biomass",
+    "mean_knot_area",
     "log_density",
     "density",
     "cs_log_density",
@@ -1442,7 +1452,7 @@ test_train_data <- test_train_data %>%
 
 # test_train_data <- modelr::crossv_kfold(lag_0_skynet_data, k = 1)
 
-dep_vars <- c('log_density','cs_density','density')
+dep_vars <- c('log_density','log_biomass','density')
 
 skynet_models <- purrr::cross_df(list(
   dep_var = (dep_vars),
@@ -1466,7 +1476,7 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
-    # filter(model == "ranger") %>%
+    # filter(model == "ranger", dep_var == "log_biomass") %>%
     # slice(1) %>%
     # filter(train_set == 'random') %>%
     # slice(1:4) %>%
@@ -1492,7 +1502,8 @@ if (run_models == T) {
         fitcontrol_number = 10,
         fitcontrol_repeats = 1,
         never_ind_vars = never_ind_vars,
-        tune_model = T
+        tune_model = T,
+        cores = num_cores
       )
     )
 
@@ -1582,9 +1593,9 @@ skynet_models <- skynet_models %>%
     )
   )
 
-skynet_models <- skynet_models %>%
-  mutate(resolution_test = map2(test_data, dep_var, resolution_effect)) %>%
-  mutate(test_resolution_plot = map(resolution_test, plot_resolution_effect))
+# skynet_models <- skynet_models %>%
+#   mutate(resolution_test = map2(test_data, dep_var, resolution_effect)) %>%
+#   mutate(test_resolution_plot = map(resolution_test, plot_resolution_effect))
 
 
 print('processed models')
@@ -1630,18 +1641,18 @@ pwalk(
   run_dir = run_dir
 )
 
-pwalk(
-  list(
-    model = skynet_models$model,
-    train_region = skynet_models$train_set,
-    test_plot = skynet_models$test_resolution_plot,
-    test_region = paste0(skynet_models$test_sets, "-resolution_plot"),
-    data_set = skynet_models$data_subset,
-    dep_var = skynet_models$dep_var
-  ),
-  save_foo,
-  run_dir = run_dir
-)
+# pwalk(
+#   list(
+#     model = skynet_models$model,
+#     train_region = skynet_models$train_set,
+#     test_plot = skynet_models$test_resolution_plot,
+#     test_region = paste0(skynet_models$test_sets, "-resolution_plot"),
+#     data_set = skynet_models$data_subset,
+#     dep_var = skynet_models$dep_var
+#   ),
+#   save_foo,
+#   run_dir = run_dir
+# )
 
 
 print('printed models')

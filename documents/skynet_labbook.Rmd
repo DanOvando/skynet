@@ -1458,7 +1458,7 @@ agg_results %>%
   # 
 ```
 
-
+# Estimated abundance vs
 # Doing the aggregation test right
 
 So what's it going to take to get a function that takes the data right at the model building phase and adjusts the resolution?
@@ -1554,7 +1554,201 @@ rounded_data <- data %>%
 
 ```
 
+OK I think I solved it. The key thing is that from the perspective of "truth", the knots are as high resolution as it gets. So, stop trying to go finer than that, or different than that. 
+
+So, to aggregate up, take your current model predictions, and calcualte the expected density/biomass per knot as the average of all the predictions at each knot. And not you're in business. You can then aggregate the knots up either by a spatial grid, or by neareset neighbors, or whatever. So instead of all the knots, you group each knot with it's nearest neighbor and try that way, and so on and so forth. The only problem with this is how do you scale up when you don't know the knots, somewhere else for example. In that sense, you'd want to scale up by area..... CRAPPPPPP. 
+
+From the model fitting perspective, the easiest thing to do would be to replicate the same process. You're going to lose a ton of data, but maybe that's not the worst thing in the world. 
+
+Though that is the appeal of density as the dependent variable, it's easier to scale up. Part of the problem right now is that what you are predicting is the average density across an area. So, as a core observed vs. predicted, great: that's saying that the "density", in whatever the fugde units this stuff is in kg/km2?, at that specific spot. So now, suppose that you only had two spots: what's the observed vs predicted then? The true density over those two spots would be the average of them. So, the hypothesis then is as you scale up, the places with more effort should have higher average density of fish. On the totals side, you just sum up, but that becomes a bit more of a problem from the going from GFW to abundance side, since now each GFW estimate is a sample from the abundance of an unknown area, so it's hard to know what you'd average (samples from the mean) vs what you'd sum (biomass across different area). Since, in reality, you're not going to know what "knot" a given observation should correspond to. 
+
+So, from the GFW side then, it is just a question of averaging up, which is basically what you have right now. As you aggregate up, this predicts the average density per unit area in that aggregated area. 
+
+The slightly harder part then is the fish survey side of things. The hackiest approach would be to overlay the grid from the above example on top of the knots, and assign each knot to a grid. The problem here would be split knots. 
+
+Really, would be better if you could just run the damn this as a grid. See if you can do that. Right now seems to be crashing errrrrything, and same crash as happened with the other example. 
+
+So, the hacky solution would be to rasterize the knot data to the resolution that you want. 
+
+So, I think this is a job for sf. Create a raster with ideally constant area but if not that constant degrees. Then snap both the GFW data and fish data to that, and move on up. 
+
+So what about the simplest thing you could do, which is aggregate up by survey. For observed abundance, you could just sum the biomasses, or average the densities over say the survey area. But if you're averaging the densities they'd need to be weighted by the knot area, which you should have after this run. 
+
+For the effort, it's just the sum of effort. So, we'll play with that once you get this run done. 
+
+So, what did you learn from all this? You reminded yourself that you are working with densities. The advantage there is that it makes aggregating and interpreting the predictions much clearer. If you have 10 GFW predictions in one knot, and the "true" is 100 *biomass*, then the expected biomass would be the mean of the 10 predictions, not the sum. The biomass would be the expected density * the area. So, when you're aggregating up, you're taking means, not sums. 
+
+If you predicted in units of biomass, it's confusing, since that would be predicting the biomass within that knot, but for prediction, you won't know what knot you're referring to, so you wouldn't know what things you should average (things within a knot) and which things you should add (things across knots). So, I think you have to work in density units. That's a win for understanding. 
+
+So, as you aggregate up in area from the GFW perspective, it's just a mean. 
+
+Similar from the survey data, but the problem here is that it's not trivial to think of how to aggregate up the knots. What you'd want would be a weighted average density, where the weighting is the relative area of each knot within the aggregated grid. 
 
 
 
 
+# density vs abundance?
+
+At the moment you are fitting everything to density. Wouls abundance make more sense? On one hand, might explain some odd behavior where a large are with the same density could come up as a "bad" place to be, even if there are actually lots of fish in there, whereas the model wants to put lots of people in an area with high density but low abundance. 
+
+From the structural side, the density thing might play a role in the poor fit. Though nope, density is right for the structural model, since the model is based on expected CPUE. So broadly just seems like this is a good opportunity to spit out both pieces of information along with the area and make your call from there as to what the best "depvar" is
+
+
+## Snapping to different resolution grids
+
+Example code below.
+
+```{r}
+library(tidyverse)
+library(sf)
+knots <- vast_fish %>%
+  select(survey, vasterized_data) %>%
+  mutate(knots = map(vasterized_data, c('spatial_list', 'loc_x_lat_long'))) %>%
+  select(-vasterized_data) %>%
+  unnest() %>%
+  mutate(recenter_lon = ifelse(approx_long < 0, 180 + (180 - abs(approx_long)), approx_long))
+  
+  pacific_map <- global_map %>%
+  as("Spatial") %>%
+  maptools::nowrapRecenter() %>%
+  sf::st_as_sf()
+  
+  
+  map_knots <-  knots %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, approx_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+  
+  test <- st_make_grid(map_knots, cellsize = 2, what = "centers") %>% 
+    sf::st_sf()
+  
+  
+  bbox <- sf::st_bbox(map_knots)
+  
+ survey_names <- tribble(
+  ~ survey,
+  ~ name,
+  'ebsbts',
+  'Eastern Bering Sea',
+  'aibts',
+  'Aleutian Islands',
+  'goabts',
+  'Gulf of Alaska',
+  'wcgbts',
+  'West Coast',
+  'wcghl',
+  "SB Channel"
+)
+  
+  knot_map <- map_knots %>%
+    left_join(survey_names, by = "survey") %>% 
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(data = test) +
+  geom_sf(aes(color = name), size = 1, alpha = 0.5) +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  theme_light(base_size = 18) +
+  scale_color_viridis_d(name = element_blank())
+```
+
+
+SO what's the psuedocode for the process you're envisioning. 
+
+1. Write a function called create_grid that spits back the lat/lon of the centroids of a raster of a given resolution
+
+2. Find the nearest neighbor of each point in gfw/survey and assign that point to that new centroid
+
+Since the new points are spaced X resolution apart, but aren't always in units of the spacing, I don't think you have a rounding problem, but you should check that the picture just evolves into a coarser resolution picture over the coarse of this thing 
+
+3. Group by year, point, and summarize mean (with option for area weighting) density or sum biomass at each new point
+
+4. Return the new new frame 
+
+5. Do that for the observed and predicted data, and calcualte RMSE as a function of resolution 
+
+
+So that's the idea for that. 
+
+You can then use the same function to calculate total effort / total abundance at different spatial scales and compare the naive estimate. 
+
+Let's play with this idea. 
+
+
+```{r}
+
+tester <- skynet_models %>% 
+  filter(model %in% c('ranger'), test_set == 'random', train_set == 'random',
+                      data_subset == "skynet", dep_var == "log_density") %>% {
+                        .$training_data[[1]]
+                      }
+
+test_resolution <- data_frame(data = list(skynet_data), resolution = seq(25,200, by = 25)) %>% 
+  mutate(new_grid  = map2(data,  resolution, create_grid, lon_name = rounded_lon, lat_name = rounded_lat))
+
+
+```
+
+Sweeeeeeeeet. Now, you need a function called `snap_to_grid` that takes your data and calculates the new values at the grid
+
+```{r}
+
+test_resolution <-  test_resolution %>% 
+  mutate(new_data = map2(data, new_grid, snap_to_grid,
+                         old_lon_name = rounded_lon,
+                         old_lat_name = rounded_lat, 
+                         new_lon_name = lon, 
+                         new_lat_name = lat))
+
+
+check <- test_resolution %>% 
+  select(resolution, new_data) %>% 
+  unnest()
+
+library(gganimate)
+
+check_plot <- check %>% 
+  filter(year == 2012) %>% 
+  ggplot(aes(lon, lat, color = log(agg_total_hours), frame = resolution )) + 
+  geom_point() + 
+  scale_color_viridis() + 
+  labs(subtitle = "km^2 resolution")
+
+check_plot2 <- check %>% 
+  group_by(resolution) %>% 
+  ggplot(aes(log(agg_total_hours), log(agg_total_biomass), color = year, frame = resolution )) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  scale_color_viridis() + 
+  labs(subtitle = "km^2 resolution")
+
+gganimate(check_plot2)
+
+gganimate(check_plot, "booya.gif")
+
+r2foo <- function(data){
+
+  mod <-  lm(log(agg_mean_density) ~ log(agg_total_effort), data = data %>% filter(agg_total_effort > 0))
+ 
+ r2 <- modelr::rsquare(mod, data = data %>% filter(agg_total_effort > 0))
+ 
+ # rmse <- modelr::rmse(mod,  data = data %>% filter(agg_total_effort > 0))
+}
+
+check2 <- test_resolution %>% 
+  select(resolution, new_data) %>% 
+  mutate(r2 = map_dbl(new_data, r2foo))
+
+check2 %>% 
+  mutate(nobs = map_dbl(new_data, nrow)) %>% 
+  ggplot(aes(resolution, r2, color = nobs)) + 
+  geom_point() + 
+  ggrepel::geom_label_repel(aes(label = nobs))
+
+```
+
+
+  
+  
