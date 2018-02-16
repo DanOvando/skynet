@@ -100,6 +100,9 @@ knots <- vast_fish %>%
   "+proj=longlat +datum=WGS84 +no_defs")) %>%
   sf::st_sf()
   
+  test <- st_make_grid(map_knots, cellsize = 2, what = "centers") %>% 
+    sf::st_sf()
+  
   
   bbox <- sf::st_bbox(map_knots)
   
@@ -122,6 +125,7 @@ knots <- vast_fish %>%
     left_join(survey_names, by = "survey") %>% 
   ggplot() +
   geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(data = test) +
   geom_sf(aes(color = name), size = 1, alpha = 0.5) +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +

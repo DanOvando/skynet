@@ -30,7 +30,7 @@ library(tidyverse)
 
 demons::load_functions("functions")
 
-run_name <- "v1.1-gfw_and_enviro"
+run_name <- "testing"
 
 run_description <- "testing"
 
@@ -47,7 +47,7 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 run_models <- T # fit statistical models to data
 
-vasterize <- F # run vast or load saved object
+vasterize <- T # run vast or load saved object
 
 raw_fish <- F
 
@@ -867,6 +867,7 @@ if (vasterize == T) {
   #   coord_flip()
 
   vast_fish <- subset_fish_data %>%
+    # filter(survey == "aibts") %>%
     mutate(
       vasterized_data = purrr::pmap(
         list(
@@ -875,6 +876,7 @@ if (vasterize == T) {
           n_x = knots
         ),
         safely(vasterize_index),
+        version = "VAST_v4_0_0",
         run_dir = run_dir,
         nstart = 100,
         obs_model = c(2, 0)
@@ -893,6 +895,8 @@ if (vasterize == T) {
   #   ) +
   #     facet_wrap(~species) +
   #     scale_color_viridis()
+
+  error <- map(vast_fish$vasterized_data, "error")
 
   vast_fish$vasterized_data <- map(vast_fish$vasterized_data, "result")
 

@@ -41,6 +41,7 @@ vasterize_index <- function(raw_data,
                             method = 'Mesh',
                             strata = "All_areas",
                             n_x = 1000,
+                            grid_size_km = 25,
                             randomseed = 1,
                             nstart = 100,
                             iter.max = 1e3,
@@ -111,9 +112,9 @@ vasterize_index <- function(raw_data,
   extrapolation_list <-
     SpatialDeltaGLMM::Prepare_Extrapolation_Data_Fn(Region = region, strata.limits = strata_limits)
 
-
   spatial_list <-  SpatialDeltaGLMM::Spatial_Information_Fn(
     n_x = n_x,
+    grid_size_km = grid_size_km,
     Method = method,
     Lon = raw_data[, 'lon'],
     Lat = raw_data[, 'lat'],
@@ -165,7 +166,6 @@ vasterize_index <- function(raw_data,
     savedir = vast_file,
     bias.correct = FALSE
   )
-
   report <-  obj$report()
 
   map_details_list <-  SpatialDeltaGLMM::MapDetails_Fn(
@@ -200,6 +200,7 @@ vasterize_index <- function(raw_data,
   #     cex = 1.8,
   #     plot_legend_fig = FALSE
   #   )
+
   spatial_densities <- report$D_xcy %>%
     reshape2::melt() %>%
     as_data_frame() %>%
@@ -209,6 +210,24 @@ vasterize_index <- function(raw_data,
       year = factor(year, labels = years) %>% as.character() %>% as.numeric()
     ) %>%
     left_join(spatial_list$loc_x_lat_long, by = 'knot')
+
+
+  spatial_biomass <-  report$Index_xcyl %>%
+    drop() %>%
+    reshape2::melt() %>%
+    as_data_frame() %>%
+    set_names(c('knot', 'species', 'year', 'biomass')) %>%
+    mutate(
+      species = factor(species, labels = unique(raw_data$spp) %>% as.character()) %>% as.character(),
+      year = factor(year, labels = years) %>% as.character() %>% as.numeric()
+    ) %>%
+    left_join(spatial_list$loc_x_lat_long, by = 'knot')
+
+
+  spatial_densities <- spatial_densities %>%
+    left_join(spatial_biomass %>% select(knot, species, year, biomass),
+              by = c("knot","species","year")) %>%
+    mutate(area = biomass / density)
 
   year_set <- years
 
