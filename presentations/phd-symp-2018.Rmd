@@ -23,7 +23,7 @@ library(patchwork)
 library(tidyverse)
 demons::load_functions("../functions")
 
-run_name <- 'testing'
+run_name <- 'testing-gfw_only'
 
 run_dir <- here::here('results',run_name)
 
@@ -540,192 +540,23 @@ final_model <- skynet_models %>%
                         .$results[[1]]$finalModel
                       }
 
+var_imp <- final_model$variable.importance %>% 
+  broom::tidy() %>% 
+  rename(variable = names, importance = x) %>% 
+  mutate(variable = fct_reorder(variable,importance))
 
-```
+var_imp_plot <- var_imp %>% 
+  ggplot(aes(variable, importance)) + 
+  geom_col() + 
+  coord_flip()
 
-
-
-# variable importance
-
-
-```{r}
-
-coast_wide <- skynet_models %>%
-  filter(
-  model %in% c('ranger'),
-  test_set == 'random',
-  train_set == 'random',
-  data_subset == "skynet",
-  dep_var == "log_density"
-  ) %>%
-  select(dep_var, model, test_data, psuedo_r2, results) 
-
-a = coast_wide$results[[1]]$finalModel 
-
-```
-
-
-
-
-# what resolution works
-
-
-```{r, eval = F}
-
-
-resolution_data <- skynet_models %>% 
-  filter(model %in% c('ranger'), test_set == 'west_coast', train_set == 'not_west_coast',
-                      data_subset == "skynet", 
-         dep_var == "log_density") %>% 
-  select(dep_var, model,test_data, psuedo_r2 ) %>% 
-  unnest()
-
-roundfoo <- function(resolution, skynet_data){
-
-  rounded <- skynet_data %>%
-    mutate(lat = round(rounded_lat * (1 / resolution)) / (1 / resolution),
-           long = round(rounded_lon * (1 / resolution)) / (1 / resolution)) %>%
-    group_by(lat, long,year) %>%
-    summarise(total_observed = mean(log_density, na.rm = T),
-              total_predicted = mean(pred),
-              survey = unique(survey)[1])
-
-}
-
-mod_res <- data_frame(resolution =  seq(0.25,2, by = 0.25)) %>%
-  mutate(rounded_data = map(resolution, roundfoo, skynet_data = resolution_data))
-
-
-mod_res <- mod_res %>%
-  mutate(r2 = map_dbl(rounded_data, ~{lm(total_observed ~ total_predicted - 1, data = .x) %>% modelr::rsquare(.x)}),
-         model = map(rounded_data, ~{lm(total_observed ~ total_predicted - 1, data = .x)}))
-
-res_plot <- mod_res %>%
-  select(-model) %>% 
-  unnest() %>%
-  group_by(resolution) %>% 
-  mutate(total_observed = (total_observed - mean(total_observed)) / sd(total_observed),
-         total_predicted = (total_predicted - mean(total_predicted)) / sd(total_predicted)) %>% 
-  ggplot(aes(total_observed, total_predicted, fill = factor(resolution), frame = resolution)) +
-  geom_point(shape = 21, show.legend = F, size = 4, alpha = 0.75) +
-  geom_smooth(method = "lm", show.legend = F, se = F) +
-  labs(x = 'Observed', y = "Predicted") 
-
-gganimate(res_plot, filename = "resolution.gif",
-          width = width, height = height)
-```
-
-```{r}
-res_effect <- mod_res %>%
-  mutate(obs = map_dbl(rounded_data, nrow)) %>%
-  ggplot(aes(resolution, r2)) +
-  geom_point(aes(size = obs, fill = obs), shape = 21) +
-  geom_smooth(se = F) +
-  scale_y_continuous(limits = c(0, NA),
-                     name = expression(R^2)) +
-  scale_size_continuous(name = "Observations",range = c(4,10), breaks = seq(0,3000, by = 500), guide = F) +
-  theme(axis.title.y = element_text(angle = 0)) +
-  labs(x = "Lat/Long Resolution", title = "Model: Observed ~ Predicted") + 
-  scale_fill_viridis(option = "B",
-                     guide = guide_colorbar(barheight = 10, n = 100), 
-                     name = "Samples")
-
-ggsave(res_effect, filename = "res_effect.png", height = height,
-       width = width)
+  ggsave(file = "varimp.png",
+  var_imp_plot,
+  height = height,
+  width = width)
 
 
 ```
-
-# Cody Idea
-
-```{r}
-
-
-coast_wide <- skynet_models %>% 
-  filter(model %in% c('ranger'), test_set == 'random', train_set == 'random',
-                      data_subset == "skynet", dep_var == "log_density") %>% 
-  select(dep_var, model,test_data, fitted_model,psuedo_r2 ) 
-
-
-# true <- shuffle_data$log_density
-
-add_pred <- function(x,y){
-  x %>% 
-  as_data_frame() %>% 
-  add_predictions(model = y)
-
-}
-
-shuffled <- shuffle_data %>% 
-  mutate(original_order = 1:nrow(.)) %>% 
-  permute(.id = "id", n = 1, -log_density) %>% 
-  mutate(model = list(coast_wide$fitted_model[[1]]$result$model)) %>% 
-  mutate(predictions = map2(perm,model, add_pred)) %>% 
-  select(id, predictions) %>% 
-  unnest()
-
-
-shuffled <- shuffled %>% 
-  select(log_density, year, survey,rounded_lat, rounded_lon) %>% 
-  ungroup() %>% 
-  mutate(pred = rnorm(nrow(.), mean(.$log_density, sd(.$log_density))))
-
-shuffled %>% 
-  ggplot(aes(pred, log_density)) + 
-  geom_point()
-
-
-shuffle_data %>% 
-  ggplot(aes(pred, log_density)) + 
-  geom_point()
-
-roundfoo <- function(resolution, dat){
-  rounded <- dat %>%
-    mutate(lat = round(rounded_lat * (1 / resolution)) / (1 / resolution),
-           long = round(rounded_lon * (1 / resolution)) / (1 / resolution)) %>%
-    group_by(lat, long,year) %>%
-    summarise(total_observed = mean(log_density, na.rm = T),
-              total_predicted = mean(pred),
-              survey = unique(survey)[1])
-
-}
-
-shuffle_res <- data_frame(resolution =  seq(0.25,2, by = 0.25)) %>%
-  mutate(rounded_data = map(resolution, roundfoo, dat = shuffled))
-
-shuffle_res$rounded_data[[6]] %>% 
-  ungroup() %>% 
-  ggplot(aes(total_predicted, total_observed)) + 
-  geom_point() + 
-  geom_smooth(method = "lm")
-  
-
-
-shuffle_res <- shuffle_res %>%
-  mutate(r2 = map_dbl(rounded_data, ~{lm(total_observed ~ total_predicted - 1, data = .x) %>% modelr::rsquare(.x)}),
-         model = map(rounded_data, ~{lm(total_observed ~ total_predicted - 1, data = .x)}))
-
-
-
-shuffle_res_effect <- shuffle_res %>%
-  mutate(obs = map_dbl(rounded_data, nrow)) %>%
-  ggplot(aes(resolution, r2)) +
-  geom_point(aes(size = obs, fill = obs), shape = 21) +
-  geom_smooth(se = F) +
-  scale_y_continuous(limits = c(0, NA),
-                     name = expression(R^2)) +
-  scale_size_continuous(name = "Observations",range = c(4,10), breaks = seq(0,3000, by = 500), guide = F) +
-  theme(axis.title.y = element_text(angle = 0)) +
-  labs(x = "Lat/Long Resolution", title = "Model: Observed ~ Predicted") + 
-  scale_fill_viridis(option = "B",
-                     guide = guide_colorbar(barheight = 10, n = 100), 
-                     name = "Samples")
-
-
-
-```
-
-AHA, that's why, becuase the scale of the thigns is small relative to the number of observations. So, what that's saying is that, assuming most things are positive, which they are, with say a mean of 4, then the most numerous places will get summed up the most times. So, if there are 10,000 things
 
 
 

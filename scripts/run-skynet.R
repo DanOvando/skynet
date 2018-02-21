@@ -51,6 +51,8 @@ run_models <- T # fit statistical models to data
 
 vasterize <- F # run vast or load saved object
 
+impute_missing <- F
+
 raw_fish <- F
 
 plot_data <- F # plot covariates and maps
@@ -105,7 +107,7 @@ gfw_project <- "ucsb-gfw"
 
 gfw_dataset <- "skynet"
 
-max_percent_missing <- 0.25
+max_percent_missing <- 0.2
 
 lat_lon_res <-
   0.25 # round data to intervels of 0.25 degrees lat lon, as in 56.25
@@ -168,6 +170,8 @@ if (query_fishdata == T) {
 
   sdcr <- safely(download_catch_rates)
 
+  fishdata_names$survey <- fishdata_names$survey %>% toupper()
+
   fish_data <- fishdata_names %>%
     mutate(survey_data = map(
       survey,
@@ -176,6 +180,8 @@ if (query_fishdata == T) {
         error_tol = 1e-2
       )
     ))
+
+  fish_data$survey_data <- fish_data$survey_data %>% map(`[`,c("Sci","Year","TowID","Lat","Long","Wt","Num"))
 
   fish_data <- unnest(fish_data) %>%
     mutate(survey = tolower(survey))
@@ -903,11 +909,11 @@ if (vasterize == T) {
   vast_fish$vasterized_data <- map(vast_fish$vasterized_data, "result")
 
   save(
-    file = paste0(run_dir, "vast_fish.Rdata"),
+    file = here::here("data", "vast_fish.Rdata"),
     vast_fish
   )
 } else {
-  load(file = paste0(run_dir, "vast_fish.Rdata"))
+  load(file = here::here("data", "vast_fish.Rdata"))
 }
 
 save(file = here::here("results", run_name, "gfw_data.Rdata"), gfw_data)
@@ -1089,12 +1095,13 @@ skynet_data <- skynet_data %>%
 
 missing_some <- map_lgl(skynet_data, ~any(is.na(.x)))
 
+if (impute_missing == T){
 impute_locations <- which(str_detect(colnames(skynet_data),'lag') == F &  map_lgl(skynet_data, is.numeric)
  == T & !colnames(skynet_data) %in% c("year", "rounded_lat", "rounded_lon") & missing_some)
 
 skynet_data <- skynet_data %>%
   dmap_at(impute_locations, fill_enviros, data = skynet_data)
-
+}
 missing_too_many <- skynet_data %>%
   map_df(~ mean(is.na(.x))) %>%
   gather(variable, percent_missing) %>%
@@ -1111,10 +1118,11 @@ if (length(missing_too_many) > 0){
 skynet_data <- skynet_data %>%
   select_(paste0("-", missing_too_many)) %>%
   left_join(mean_survey_prices, by = "survey")
-}
+} else{
 
 skynet_data <- skynet_data %>%
   left_join(mean_survey_prices, by = "survey")
+}
 
 
 # skynet_data %>%
@@ -1343,7 +1351,9 @@ never_ind_vars <-
     "mean_altitude",
     "aggregate_price",
     "vessel_hours",
-    "total_engine_hours"
+    "total_engine_hours",
+    "aggregate_price.x",
+    "aggregate_price.y"
   )
 
 

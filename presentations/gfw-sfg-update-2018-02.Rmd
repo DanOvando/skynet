@@ -1,0 +1,370 @@
+---
+title: "Does Fishing Effort equal Fish Abundance?"
+subtitle: "SFG-GFW Symposium"
+author: "Dan Ovando"
+date: "2018/02/22"
+css: my.css
+output: 
+  ioslides_presentation:
+    dev: "svg"
+    fig_width: 8
+    fig_height: 4.5
+    logo: sfg-logo-black.png
+    transition: faster
+    widescreen: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r, include=F}
+set.seed(42)
+library(gbm)
+library(randomForest)
+library(stringr)
+library(modelr)
+library(broom)
+library(hrbrthemes)
+library(viridis)
+library(sf)
+library(ggmap)
+library(caret)
+library(extrafont)
+library(gganimate)
+library(patchwork)
+library(tidyverse)
+demons::load_functions("../functions")
+
+run_name <- 'testing-gfw_only'
+
+run_dir <- here::here('results',run_name)
+
+fig_theme <- theme_ipsum(base_size = 14, axis_title_size = 16,subtitle_size = 12, axis_text_size = 14, plot_title_size = 12) + 
+ theme(plot.margin = unit(c(.25,.25,.25,.25), "in"))
+
+theme_set(fig_theme)
+
+load(here::here("results", run_name,'skynet_data.Rdata'))
+
+load(here::here("results", run_name,'processed_skynet_models.Rdata'))
+
+load(here::here("data","vast_fish.Rdata"))
+
+load(file = here::here("data","global_map.Rdata"))
+
+load(file = here::here('data','fish_prices.Rdata'))
+
+load(file = here::here('results',run_name,'gfw_data.Rdata'))
+
+width <- 5.25
+
+height <- width / 1.8
+
+map_size <- 1
+
+  pacific_map <- global_map %>%
+  as("Spatial") %>%
+  maptools::nowrapRecenter() %>%
+  sf::st_as_sf()
+  
+```
+
+
+# How Well does Fishing Predict Fish?
+
+## 
+
+
+```{r}
+
+naive_trends <- skynet_data %>%
+  group_by(rounded_lat, rounded_lon, year) %>%
+  summarise(total_abundance = log(sum(biomass)),
+            total_engine_hours = sum(total_engine_hours),
+            survey = unique(survey)[1]) %>%
+  ungroup() %>%
+    mutate(total_abundance = pmin(1,(total_abundance - mean(total_abundance)) / (sd(total_abundance))),
+         total_engine_hours =pmin(1,(total_engine_hours - mean(total_engine_hours)) / (sd(total_engine_hours)))) %>% 
+  # mutate(total_abundance = total_abundance / max(total_abundance),
+  #        total_engine_hours = total_engine_hours / max(total_engine_hours)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) 
+
+
+
+ebs_fishing <-  naive_trends %>%
+  filter(survey == "ebsbts") %>% 
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+
+years <- expand.grid(id = 1:nrow(pacific_map), year = unique(ebs_fishing$year))
+
+yearly_map <- pacific_map %>% 
+  mutate(id = 1:nrow(.)) %>% 
+  right_join(years, by = "id")
+  
+bbox <- sf::st_bbox(ebs_fishing)
+
+translate_variable <- c(
+  total_abundance = "Fish",
+  total_engine_hours = "Fishing"
+)
+
+naive_map <- ebs_fishing %>%
+  gather(variable, value, total_abundance, total_engine_hours) %>% 
+  ggplot(aes(frame = year)) +
+  geom_raster(aes(x = recenter_lon, y = rounded_lat, fill = value), show.legend = F) +
+    geom_sf(data = yearly_map, fill = 'grey60') +
+  scale_fill_viridis() +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+           ylim = c(bbox['ymin'], bbox['ymax'])) +
+  labs(x = "Longitude", y = "Latitude") + 
+  facet_wrap(~variable,labeller = labeller(variable = translate_variable)) + 
+  theme_ipsum(base_size = 18, axis_title_size = 20,subtitle_size = 18, axis_text_size = 18, plot_title_size = 20) + 
+  theme(plot.margin = unit(c(.25,.25,.25,.25), "in"))
+
+
+# gganimate(naive_map, filename = "naive_map.gif", ani.width = 800, ani.height = 600)
+
+
+```
+
+<p align="center-top">
+![](naive_map.gif)
+</p>
+
+
+## More Fishing only Somewhat Predicts More Fish
+
+```{r}
+
+test_resolution <- data_frame(data = list(skynet_data), resolution = seq(25,200, by = 25)) %>% 
+  mutate(new_grid  = map2(data,  resolution, create_grid, lon_name = rounded_lon, lat_name = rounded_lat))
+
+test_resolution <-  test_resolution %>% 
+  mutate(new_data = map2(data, new_grid, snap_to_grid,
+                         old_lon_name = rounded_lon,
+                         old_lat_name = rounded_lat, 
+                         new_lon_name = lon, 
+                         new_lat_name = lat))
+
+r2foo <- function(x){
+  x <- x %>% 
+    filter(agg_total_engine_hours > 0)
+  
+  model <- lm(log(agg_total_biomass) ~ log(agg_total_engine_hours), data = x)
+  
+  out <- broom::augment(model)
+  
+  r2 <- yardstick::rsq(out,truth = log.agg_total_biomass., estimate = .fitted)
+  
+}
+
+cv_r2foo <- function(x){
+  x <- x %>% 
+    filter(agg_total_engine_hours > 0)
+  
+  xcv <- modelr::crossv_kfold(x,10)
+  
+  xcv <- xcv %>% 
+    mutate(naive_model = map(train, ~lm(log(agg_total_biomass) ~ log(agg_total_num_vessels), data = .x))) %>% 
+    mutate(r2 = map2_dbl(naive_model, test, ~modelr::rsquare(.x,.y)))
+  
+  out <- mean(xcv$r2)
+  
+}
+
+test_resolution <- test_resolution %>% 
+  mutate(insample_r2 = map_dbl(new_data, r2foo),
+         oob_r2 = map_dbl(new_data,cv_r2foo ))
+
+
+naive_test_resolution <- test_resolution
+
+resolution_r2_plot <- test_resolution %>% 
+  ggplot(aes(resolution, oob_r2)) + 
+  geom_point(size = 4, shape = 21, fill = "tomato") + 
+  labs(x = expression(paste("Cell Resolution (", km^2,")")),
+       y = expression(paste("Out-of-sample ",R^{2})))
+
+check <- test_resolution %>% 
+  select(resolution, new_data) %>% 
+  unnest()
+
+
+check_plot <- check %>% 
+  filter(agg_total_engine_hours > 0, approx_survey != 'wchgl') %>% 
+  group_by(resolution) %>% 
+  ggplot(aes(log(agg_total_engine_hours), log(agg_total_biomass),frame = resolution),size = 2)+
+  geom_point(shape = 21, fill = "steelblue") + 
+  geom_smooth(method = "lm", se = F) +
+  scale_color_viridis() + 
+  labs(subtitle = expression(paste(km^{2}, "resolution")),
+       x = "Log(Fishing)",
+       y = "Log(Fish)")
+
+# gganimate(check_plot, "resolution-effect.gif",ani.width = 800, ani.height = 400)
+# 
+```
+
+```{r}
+resolution_r2_plot
+```
+
+## Enter the (random) Forest
+
+```{r}
+
+example_data <- skynet_models %>% 
+  filter(model %in% c('ranger','structural'), test_set == 'random', train_set == 'random',
+                      data_subset == "skynet", 
+         dep_var == "log_density") 
+
+example_model <- example_data$results[[1]]$finalModel
+
+tree <- ranger::treeInfo(example_model, 2) 
+var_imp <- example_model$variable.importance %>% 
+  broom::tidy() %>% 
+  rename(variable = names, importance = x) %>% 
+  mutate(variable = fct_reorder(variable,importance))
+
+var_imp_plot <- var_imp %>% 
+  ggplot(aes(variable, importance)) + 
+  geom_col(color = 'black') + 
+  labs(x = "Variable", y = "Importance") +
+  geom_hline(aes(yintercept = 0)) +
+  coord_flip()
+
+var_imp_plot
+```
+
+## Random Forest Finds Signal in the Noise
+
+```{r}
+
+test_resolution <- data_frame(data = list(example_data$test_data[[1]]), resolution = seq(25,200, by = 25)) %>% 
+  mutate(new_grid  = map2(data,  resolution, create_grid, lon_name = rounded_lon, lat_name = rounded_lat))
+
+test_resolution <-  test_resolution %>% 
+  mutate(new_data = map2(data, new_grid, snap_to_grid,
+                         old_lon_name = rounded_lon,
+                         old_lat_name = rounded_lat, 
+                         new_lon_name = lon, 
+                         new_lat_name = lat))
+
+r2foo <- function(x){
+
+  
+  r2 <- yardstick::rsq(x, truth = agg_mean_log_density, estimate = agg_pred)
+  
+}
+
+
+test_resolution <- test_resolution %>% 
+  mutate(oob_r2 = map_dbl(new_data, r2foo))
+
+
+compare_resolutions <- test_resolution %>% 
+  select(resolution, oob_r2) %>% 
+  mutate(model = "Random Forest") %>% 
+  bind_rows(naive_test_resolution %>% select(resolution, oob_r2) %>% mutate(model = "Effort = Fish"))
+
+resolution_r2_plot <- compare_resolutions %>% 
+  ggplot(aes(resolution, oob_r2, fill = model)) + 
+  geom_line() +
+  geom_point(size = 4, shape = 21) + 
+  labs(x = expression(paste("Cell Resolution (", km^2,")")),
+       y = expression(paste("Out-of-sample ",R^{2})))
+
+check <- test_resolution %>% 
+  select(resolution, new_data) %>% 
+  unnest()
+
+resolution_r2_plot
+
+
+```
+
+
+# GFW Can Predict Future Fish
+
+##
+
+```{r}
+
+predict_future <- skynet_models %>% 
+  filter(model %in% c('ranger','structural'), test_set == "year_gr_than_2014", train_set == 'year_leq_than_2014',
+                      data_subset == "skynet", 
+         dep_var == "log_density") 
+
+predict_future <- data_frame(data = list(predict_future$test_data[[1]]), resolution = seq(50,50, by = 25)) %>% 
+  mutate(new_grid  = map2(data,  resolution, create_grid, lon_name = rounded_lon, lat_name = rounded_lat))
+
+test_future <-  predict_future %>% 
+  mutate(new_data = map2(data, new_grid, snap_to_grid,
+                         old_lon_name = rounded_lon,
+                         old_lat_name = rounded_lat, 
+                         new_lon_name = lon, 
+                         new_lat_name = lat))
+
+future_performance <- test_future %>% 
+  select(new_data) %>% 
+  unnest() %>% 
+  select(year, lat, lon, agg_mean_log_density, agg_pred, approx_survey) %>% 
+  gather(source, value, agg_mean_log_density, agg_pred ) %>% 
+  mutate(recenter_lon = ifelse(lon < 0, 180 + (180 - abs(lon)), lon)) %>% 
+  filter(str_detect(approx_survey, "ebsbts"))
+
+
+future_performance <-  future_performance %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+
+years <- expand.grid(id = 1:nrow(pacific_map), year = unique(future_performance$year))
+
+yearly_map <- pacific_map %>% 
+  mutate(id = 1:nrow(.)) %>% 
+  right_join(years, by = "id")
+  
+bbox <- sf::st_bbox(future_performance)
+
+translate_variable <- c(
+  agg_mean_log_density = "Observed Fish",
+  agg_pred = "Predicted Fish"
+)
+
+future_map <- future_performance %>%
+  ggplot(aes(frame = year)) +
+  geom_point(aes(x = recenter_lon, y = lat, fill = pmin(3,value)), show.legend = F, shape = 22, size = 5) +
+  geom_sf(data = yearly_map, fill = 'grey60') +
+  scale_fill_viridis() +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+           ylim = c(bbox['ymin'], bbox['ymax'])) +
+  labs(x = "Longitude", y = "Latitude") + 
+  facet_wrap(~source,labeller = labeller(source = translate_variable)) + 
+  theme_ipsum(base_size = 18, axis_title_size = 20,subtitle_size = 18, axis_text_size = 18, plot_title_size = 20) + 
+  theme(plot.margin = unit(c(.25,.25,.25,.25), "in"))
+
+# gganimate(future_map, filename = "future_map.gif", ani.width = 800, ani.height = 600)
+
+```
+
+<p align="center-top">
+![](future_map.gif)
+</p>
+
+
+## What's Next?
+
+  - GFW can predict fish near training region
+      - How far away can we go?
+  
+  - Do costs inform lower estimate of fish?
+  
+  - Can we integrate GFW derived indicies into stock assessments?

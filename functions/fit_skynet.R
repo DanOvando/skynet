@@ -320,7 +320,6 @@ fit_skynet <- function(dep_var,
     testing_frame <- testing %>%
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|')))
-
     struct_data <- list(
       data = as.matrix(independent_data %>%
                          select(dist_from_port,
