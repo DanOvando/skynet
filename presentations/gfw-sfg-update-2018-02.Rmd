@@ -1,5 +1,5 @@
 ---
-title: "Does Fishing Effort equal Fish Abundance?"
+title: "Does Fishing Effort Equal Fish Abundance?"
 subtitle: "SFG-GFW Symposium"
 author: "Dan Ovando"
 date: "2018/02/22"
@@ -34,13 +34,15 @@ library(extrafont)
 library(gganimate)
 library(patchwork)
 library(tidyverse)
+extrafont::loadfonts()
 demons::load_functions("../functions")
 
+animate <- F
 run_name <- 'testing-gfw_only'
 
 run_dir <- here::here('results',run_name)
 
-fig_theme <- theme_ipsum(base_size = 14, axis_title_size = 16,subtitle_size = 12, axis_text_size = 14, plot_title_size = 12) + 
+fig_theme <- theme_ipsum(base_size = 16, axis_title_size = 16,subtitle_size = 18, axis_text_size = 14, plot_title_size = 20, strip_text_size = 12) + 
  theme(plot.margin = unit(c(.25,.25,.25,.25), "in"))
 
 theme_set(fig_theme)
@@ -123,11 +125,12 @@ naive_map <- ebs_fishing %>%
            ylim = c(bbox['ymin'], bbox['ymax'])) +
   labs(x = "Longitude", y = "Latitude") + 
   facet_wrap(~variable,labeller = labeller(variable = translate_variable)) + 
-  theme_ipsum(base_size = 18, axis_title_size = 20,subtitle_size = 18, axis_text_size = 18, plot_title_size = 20) + 
+  theme_ipsum(base_size = 18, axis_title_size = 20,subtitle_size = 18, axis_text_size = 18, plot_title_size = 20, strip_text_size = 20) +
   theme(plot.margin = unit(c(.25,.25,.25,.25), "in"))
 
-
-# gganimate(naive_map, filename = "naive_map.gif", ani.width = 800, ani.height = 600)
+if (animate == T){
+gganimate(naive_map, filename = "naive_map.gif", ani.width = 800, ani.height = 600)
+}
 
 
 ```
@@ -206,8 +209,11 @@ check_plot <- check %>%
        x = "Log(Fishing)",
        y = "Log(Fish)")
 
-# gganimate(check_plot, "resolution-effect.gif",ani.width = 800, ani.height = 400)
-# 
+if (animate == T){
+
+gganimate(check_plot, "resolution-effect.gif",ani.width = 800, ani.height = 400)
+}
+
 ```
 
 ```{r}
@@ -341,17 +347,21 @@ translate_variable <- c(
 
 future_map <- future_performance %>%
   ggplot(aes(frame = year)) +
-  geom_point(aes(x = recenter_lon, y = lat, fill = pmin(3,value)), show.legend = F, shape = 22, size = 5) +
+  geom_point(aes(x = recenter_lon, y = lat, fill = pmin(2.5,value)), show.legend = F, shape = 22, size = 5) +
   geom_sf(data = yearly_map, fill = 'grey60') +
   scale_fill_viridis() +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
            ylim = c(bbox['ymin'], bbox['ymax'])) +
   labs(x = "Longitude", y = "Latitude") + 
   facet_wrap(~source,labeller = labeller(source = translate_variable)) + 
-  theme_ipsum(base_size = 18, axis_title_size = 20,subtitle_size = 18, axis_text_size = 18, plot_title_size = 20) + 
+  theme_ipsum(base_size = 18, axis_title_size = 20,subtitle_size = 18, axis_text_size = 18, plot_title_size = 20,
+               strip_text_size = 20) + 
   theme(plot.margin = unit(c(.25,.25,.25,.25), "in"))
 
-# gganimate(future_map, filename = "future_map.gif", ani.width = 800, ani.height = 600)
+if (animate == T){
+
+gganimate(future_map, filename = "future_map.gif", ani.width = 800, ani.height = 600)
+}
 
 ```
 
