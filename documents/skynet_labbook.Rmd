@@ -1750,5 +1750,35 @@ check2 %>%
 ```
 
 
+# 2018-02-22 GFW Update with Tony
+
+
+Bayesian updating of global temperature profiles and global fleet distribution. 
+
+If you had competing climate models that would predict different outcomes, could you use the signal from GFW to update your prior over which state of the world you're in for model fitting
+
+Why would in activity = overcapacity? Easily just seasons, either biological or market based
+
+Ren's work: Why the hell is skipjack going down under BAU, fishery is fine? Also, how do you deal with the fact that the estiamte of status ignores that IUU, so you're gettting a free lunch by subtracting catch that wasn't incorporated into the stock assessment in the first place?  
+
+You need to get this team working and talking with someone about why tuna are where they are. THere's a risk in modeling tunas and MPAs and thinking of them as sources from a recruitment perspective. 
+
+Think about centering and scaling by year to get around changes in effort as a function in improvements in GFW data
+
+# 2018-02-22 last idea push 
+
+OK, it's time to stop tinkering and provide some results in draft form at least. 
+
+Here are the last things I want to add. 
+
+  - I want to add an option for a dependent variable that is last years biomass
   
+  - ... that's about it that I can think of on that end. 
+  
+
+The more complicated thing is the resolution question. You have a choice between upscaling a model fit at a fine resolution, or downscaling the resolution the model is fit to. Upscaling the model fits is easy. downscaling the model resolution is a bit harder. 
+
+
+
+
   

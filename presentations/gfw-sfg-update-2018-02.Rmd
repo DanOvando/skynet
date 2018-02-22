@@ -1,7 +1,7 @@
 ---
 title: "Does Fishing Effort Equal Fish Abundance?"
 subtitle: "SFG-GFW Symposium"
-author: "Dan Ovando"
+author: "Dan Ovando - PhD Candidate"
 date: "2018/02/22"
 css: my.css
 output: 
@@ -42,7 +42,7 @@ run_name <- 'testing-gfw_only'
 
 run_dir <- here::here('results',run_name)
 
-fig_theme <- theme_ipsum(base_size = 16, axis_title_size = 16,subtitle_size = 18, axis_text_size = 14, plot_title_size = 20, strip_text_size = 12) + 
+fig_theme <- theme_ipsum(base_size = 18, axis_title_size = 18,subtitle_size = 18, axis_text_size = 16, plot_title_size = 20, strip_text_size = 14) + 
  theme(plot.margin = unit(c(.25,.25,.25,.25), "in"))
 
 theme_set(fig_theme)
@@ -373,8 +373,14 @@ gganimate(future_map, filename = "future_map.gif", ani.width = 800, ani.height =
 ## What's Next?
 
   - GFW can predict fish near training region
+      
       - How far away can we go?
   
+ 
   - Do costs inform lower estimate of fish?
   
+ 
+  - Can we use GFW to test economic theory?
+  
+ 
   - Can we integrate GFW derived indicies into stock assessments?

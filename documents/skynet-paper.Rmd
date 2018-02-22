@@ -337,6 +337,25 @@ plot(effort,mp)
 
 # Results 
 
+## Figures
+
+### Fig.1 Model performance at different resolutions
+
+Paneled by test. 
+
+To show at what resolutions the models work best for OOB prediction
+
+### Fig. 2 Cody knock-off map
+
+Map of the west coast with total CPUE trends to the left of it for each region, and cpue trend predictions by the model, with different colors for trained and predicted regions
+
+### Fig.3 Map or something showing out-of-region performance, best model in all cases
+
+
+## needs
+
+## Notes
+
 The factorial combinations of our data and models produces an ungainly number of results, and so for now I will highlight a few particularly interesting findings, specifically results for XX region, results for all regions, results from the temporal hold-out, both for the machine learning and structural modeling approaches. 
 
 What's the structure of the paper
@@ -356,6 +375,8 @@ Could also repeat similar breakout processes of different regions/spatial contro
 The simplest solution would be the results that you have now, if the above exercise turns out to be garbage. If there is a worthy strawman in the effort ~ fish relationship, then you could look at the performance of the finest resolution to the performance of at the inflection resolution above, and see how much of an improvement you get. 
 
 ## Select "best models" and show performance
+
+Net CPUE trends by region, and GFW predicted model based on this, similar to Cody's CPUE map
 
 Temporal prediction
 
