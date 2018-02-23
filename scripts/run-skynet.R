@@ -9,7 +9,6 @@
 set.seed(42)
 library(bigrquery)
 library(lubridate)
-library(rgdal)
 library(FishData)
 library(ggmap)
 library(stringr)
@@ -20,12 +19,11 @@ library(modelr)
 library(VAST)
 library(TMB)
 library(ggridges)
-library(modelr)
 library(caret)
 library(taxize)
 library(gbm)
 library(recipes)
-# library(rlang)
+library(sf)
 library(tidyverse)
 
 demons::load_functions("functions")
@@ -1057,9 +1055,6 @@ if (survey_years_only == T) {
     nest(-survey, .key = fish_data)
 }
 
-# aggregate data -----------------------------------------------
-
-
 
 skynet_data <- skynet_data %>%
   nest(-survey, .key = gfw_data) %>%
@@ -1142,7 +1137,7 @@ skynet_data <- skynet_data %>%
 
 
 
-# plot plot plot plot -----------------------------------------------------
+# plot data -----------------------------------------------------
 
 # plot distributions of data by year and survey
 
@@ -1422,6 +1417,8 @@ delta_skynet <- delta_skynet %>%
   na.omit() %>%
   ungroup()
 
+
+# merge candidate data sources
 data_sources <- tibble(
   skynet = list(skynet_data %>%
     select(-contains("lag")) %>%
@@ -1435,8 +1432,13 @@ data_sources <- tibble(
   delta_skynet = list(delta_skynet),
   uncentered_skynet = list(uc_skynet_data %>%
                              select(-contains("lag")) %>%
-na.omit())
-) %>%
+na.omit()),
+skynet_25km = list(rescale_data(skynet_data, resolution = 25) %>%
+                     select(-contains("lag")) %>%
+na.omit()),
+skynet_100km = list(rescale_data(skynet_data, resolution = 100) %>%
+                     select(-contains("lag")) %>%
+                     na.omit())) %>%
   gather(data_subset, data)
 
 
@@ -1450,7 +1452,7 @@ test_train_data <- purrr::cross_df(list(
     "goa-ai",
     "ebs-ai"
   ),
-  data_subset = c("skynet", "delta_skynet","uncentered_skynet")
+  data_subset = c("skynet", "skynet_25km", "skynet_100km")
 )) %>%
   left_join(data_sources, by = "data_subset")
 
@@ -1471,13 +1473,9 @@ skynet_models <- purrr::cross_df(list(
 )) %>%
   unnest(temp, .drop = F) %>%
   filter(!(data_subset == 'delta_skynet' & model == 'structural')) %>%
-  filter(!(model == 'structural' & data_subset != 'uncentered_skynet')) %>%
+  # filter(!(model == 'structural' & data_subset != 'uncentered_skynet')) %>%
   filter( !(model %in% c('ranger','gbm') & data_subset == 'uncentered_skynet')) %>%
   filter(!(model == 'structural' & dep_var != dep_vars[1]))
-
-#
-# check <- skynet_models %>%
-#   filter(model == 'structural')
 
 # run models --------------------------------------------------------------
 
@@ -1509,7 +1507,7 @@ if (run_models == T) {
           tree_candidate_vars = candidate_vars
         ),
         sfm,
-        fitcontrol_number = 10,
+        fitcontrol_number = 2,
         fitcontrol_repeats = 1,
         never_ind_vars = never_ind_vars,
         tune_model = T,
@@ -1602,6 +1600,16 @@ skynet_models <- skynet_models %>%
       diagnostic_plot_foo
     )
   )
+
+
+# check <- skynet_models %>%
+#   filter(data_subset == "skynet_100km", model == "gbm", test_set == "goa-ai", train_set == "ebsbts")
+#
+# skynet_models %>%
+#   group_by(train_set, test_set) %>%
+#   summarise(best_model = model[psuedo_r2_training == max(psuedo_r2_training)],
+#             best_data = data_subset[psuedo_r2_training == max(psuedo_r2_training)],
+#             best_depvar = dep_var[psuedo_r2_training == max(psuedo_r2_training)])
 
 # skynet_models <- skynet_models %>%
 #   mutate(resolution_test = map2(test_data, dep_var, resolution_effect)) %>%

@@ -1778,6 +1778,10 @@ Here are the last things I want to add.
 
 The more complicated thing is the resolution question. You have a choice between upscaling a model fit at a fine resolution, or downscaling the resolution the model is fit to. Upscaling the model fits is easy. downscaling the model resolution is a bit harder. 
 
+Actually not that bad, easiest solution will be to slot in at generate test_train and nest that in another function that produces data at different resolutions, say raw, 50, and 100 for now?
+
+Whoops no nevermind, that goes in "data_sources", should actually slot in really easily that way.... Just need to automate generation of the lower/higher res data
+
 
 
 
