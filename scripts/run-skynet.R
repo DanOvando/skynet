@@ -43,9 +43,9 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 # set section options (what to run) ---------------------------------------------------------
 
-num_cores <-  4
+num_cores <-  6
 
-run_models <- T # fit statistical models to data
+run_models <- F # fit statistical models to data
 
 vasterize <- F # run vast or load saved object
 
@@ -253,8 +253,8 @@ if (query_gfw == T) {
     SELECT
     YEAR(timestamp) year,
     mmsi,
-    ROUND(lat*{res})/{res} rounded_lat,
-    ROUND(lon*{res})/{res} rounded_lon,
+    FLOOR(lat*{res})/{res} rounded_lat,
+    FLOOR(lon*{res})/{res} rounded_lon,
     SUM(IF( nnet_score == 1, hours, 0)) AS total_hours,
     AVG(distance_from_shore ) AS mean_distance_from_shore,
     AVG(distance_from_port) AS mean_distance_from_port,
@@ -1216,7 +1216,6 @@ if (plot_data == T) {
         #                              category = 'physical',
         #                              type = 'coastline') %>% sf::st_as_sf()
 
-
         global_map <-
           rnaturalearth::ne_download(
             scale = "medium",
@@ -1377,8 +1376,8 @@ lm_candidate_vars <- skynet_names[!skynet_names %in% c(
   dep_var,
   never_ind_vars
 )]
-# models <- c('structural')
-models <- c("ranger", "gbm", "structural")
+# models <- c('effort')
+models <- c("ranger", "gbm", "structural", "hours", "engine_power")
 
 delta_skynet <- skynet_data %>%
   select(-contains("lag")) %>%
@@ -1507,7 +1506,7 @@ if (run_models == T) {
           tree_candidate_vars = candidate_vars
         ),
         sfm,
-        fitcontrol_number = 2,
+        fitcontrol_number = 10,
         fitcontrol_repeats = 1,
         never_ind_vars = never_ind_vars,
         tune_model = T,
@@ -1571,16 +1570,18 @@ skynet_models <- skynet_models %>%
   mutate(
     mse = map2_dbl(test_data, dep_var, mse_foo, pred_var = "pred"),
     var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
-    psuedo_r2 = round(1 - mse / var_y, 2),
-    mse_training = map2_dbl(training_data, dep_var, mse_foo, pred_var = "pred"),
-    var_y_training = map2_dbl(training_data, dep_var, ~ var(.x[, .y])),
-    psuedo_r2_training = round(1 - mse_training / var_y_training, 2)
+    r2 = map2_dbl(test_data, dep_var, ~yardstick::rsq(.x,.y,"pred")),
+    rmse = map2_dbl(test_data, dep_var, ~yardstick::rmse(.x,.y,"pred")),
+    ccc = map2_dbl(test_data, dep_var, ~yardstick::ccc(.x,.y,"pred")),
+    r2_training = map2_dbl(training_data, dep_var, ~yardstick::rsq(.x,.y,"pred")),
+    rmse_training = map2_dbl(training_data, dep_var, ~yardstick::rmse(.x,.y,"pred")),
+    ccc_training = map2_dbl(training_data, dep_var, ~yardstick::ccc(.x,.y,"pred"))
   ) %>%
   mutate(
     test_plot = pmap(
       list(
         data = test_data,
-        r2 = psuedo_r2,
+        r2 = r2,
         test_region = test_sets,
         train_region = train_set,
         data_set = data_subset,
@@ -1591,7 +1592,7 @@ skynet_models <- skynet_models %>%
     training_plot = pmap(
       list(
         data = training_data,
-        r2 = psuedo_r2_training,
+        r2 = r2_training,
         test_region = paste0(test_sets),
         train_region = paste0(train_set, "- training plot"),
         data_set = data_subset,

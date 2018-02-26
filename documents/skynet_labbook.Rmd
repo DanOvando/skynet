@@ -1783,6 +1783,332 @@ Actually not that bad, easiest solution will be to slot in at generate test_trai
 Whoops no nevermind, that goes in "data_sources", should actually slot in really easily that way.... Just need to automate generation of the lower/higher res data
 
 
+# 2018-02-23
 
+Partitiontime
+
+you need to be careful about your partitiontime statements 
+
+# 2019-02-24 - Fiture Sketches
+
+```{r}
+library(gbm)
+library(randomForest)
+library(stringr)
+library(modelr)
+library(broom)
+library(hrbrthemes)
+library(viridis)
+library(sf)
+library(ggmap)
+library(caret)
+library(extrafont)
+library(tidyverse)
+
+
+# run options -------------------------------------------------------------
+
+run_name <- 'testing'
+
+run_dir <- here::here('results',run_name)
+
+fig_theme <- theme_ipsum(base_size = 14, axis_title_size = 18)
+
+theme_set(fig_theme)
+
+load(here::here("results", run_name,'skynet_data.Rdata'))
+
+load(here::here("results", run_name,'processed_skynet_models.Rdata'))
+
+load(here::here("data","vast_fish.Rdata"))
+
+load(file = here::here("data","global_map.Rdata"))
+
+load(file = here::here('data','fish_prices.Rdata'))
+
+load(file = here::here('results',run_name,'gfw_data.Rdata'))
+
+map_size <- 1
+```
+
+## Resolution Figures
+
+Explore model performance under different metrics for different resolutions
+
+```{r}
+
+r2_comparison_plot <- skynet_models %>% 
+  filter(dep_var == "log_density") %>% 
+  mutate(test_name = glue::glue("trained: {train_set} | tested: {test_set}"),
+         model = forcats::fct_reorder(model, desc(r2))) %>%  
+  ggplot(aes(model, r2, fill = test_name)) + 
+    geom_point(shape = 21, size = 2) + 
+  theme(axis.text.x = element_text(angle = 45, vjust = .1),
+        text = element_text(size = 8),
+        strip.text = element_text(size = 6)) + 
+  facet_grid(dep_var ~ data_subset)
+
+
+r2_comparison_plot
+
+```
+
+OK, looks like gbm is a solid place to start exploting, though also apparent that for the out-of-region sampling, there's actualyl a small boost in the structural department, which is pretty interesting. 
+
+Let's take a look at upscaling the results form the finest resolution model 
+
+
+```{r}
+
+upscale_foo <- function(data){
+
+test_resolution <- data_frame(data = list(data), resolution = seq(25,200, by = 25)) %>% 
+  mutate(new_grid  = map2(data,  resolution, create_grid, lon_name = rounded_lon, lat_name = rounded_lat))
+
+test_resolution <-  test_resolution %>% 
+  mutate(new_data = map2(data, new_grid, snap_to_grid,
+                         old_lon_name = rounded_lon,
+                         old_lat_name = rounded_lat, 
+                         new_lon_name = lon, 
+                         new_lat_name = lat))
+
+}
+
+
+
+resolution_test <- skynet_models %>% 
+  filter(data_subset == "skynet", dep_var == "log_density") %>% 
+  mutate(upscaled_data = map(test_data, upscale_foo))
+
+resolution_test <- resolution_test %>% 
+  select(model, test_set, train_set, upscaled_data) %>% 
+  unnest()
+
+resolution_test <- resolution_test %>% 
+  select(model, test_set, train_set, resolution, new_data) %>% 
+  unnest()
+
+resolution_summary <- resolution_test %>% 
+  nest(-model, -test_set, -train_set,-resolution) %>% 
+  mutate(r2 = map_dbl(data,~yardstick::rsq(.x, agg_mean_log_density, agg_pred)),
+         rmse = map_dbl(data,~yardstick::rmse(.x, agg_mean_log_density, agg_pred)))
+
+resolution_summary %>% 
+  ggplot(aes(resolution, r2, color = model)) + 
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~test_set, scales = "free_y")
+
+```
+
+Huh, well that is shockingly uninformative. trends in some areas, not in others, some models better sometimes, sigh. 
+
+## Aggregate trends
+
+Compare true vs predicted CPUE trends
+
+```{r}
+
+true_index <- vast_fish %>% 
+  mutate(time_index = map(vasterized_data,"time_index")) %>% 
+  select(-data,-vasterized_data) %>% 
+  unnest() %>% 
+  group_by(survey,survey_region,Year) %>% 
+  summarise(total_biomass = sum(abundance))
+
+true_index %>% 
+  ungroup() %>% 
+  filter(Year < 2017) %>% 
+  ggplot(aes(Year,total_biomass, color = survey)) + 
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~survey, scales = "free")
+
+```
+
+Would be good to get a longer time series and to keep the interpolated years
+
+So now, what's the right way to aggregate up your predictions. 
+
+What you have is mean predicted density, in units of something per something, out of vast. 
+
+So step one, what the fudge are these in units of? kg per unit area... what the hell is area in original units of? supposedly km^2^. So, at the models rawest level you're estimating kg/km^2^ of fish. 
+
+So, now at the regional scale, you want not the mean density across the region, but the total index of abundance for the region. 
+
+So, the simplest thing then would be to upscale to a resolution, like 25km^2, take the mean density across that region, multiply by 25 (or whatever the resolution is), and then sum across the area. 
+
+```{r}
+
+predicted_abundance <- resolution_test %>% 
+  filter(resolution == 25) %>% 
+  group_by(model, test_set, train_set, approx_survey, year) %>% 
+  summarise(abundance = sum(exp(agg_pred) * resolution),
+            true_abundance = sum(exp(agg_mean_log_density) * resolution))
+  
+
+check <- predicted_abundance %>% 
+  filter(train_set == "year_leq_than_2014")
+  
+predicted_abundance %>% 
+  ggplot(aes(year, abundance, color = approx_survey)) + 
+  geom_line() + 
+  geom_point() + 
+  facet_grid(test_set ~model) + 
+  theme_minimal()
+
+
+```
+
+That's just annoying. Let's focus on the EBSBTS for now to make sure that you're somewhere in the ballpark. 
+
+Let's take a look at the OOB training estiamte performance within region. 
+
+```{r}
+
+abundance <- predicted_abundance %>%
+  ungroup() %>%
+  # filter(train_set == "random", model != "hours") %>%
+  select(model,
+  train_set,
+  test_set,
+  year,
+  abundance,
+  true_abundance,
+  approx_survey) %>%
+  group_by(model, train_set, approx_survey) %>%
+  mutate(
+  scaled_abundance = (abundance - mean(abundance)) / (sd(abundance)),
+  scaled_true_abundance = (true_abundance - mean(true_abundance)) / (sd(true_abundance))
+  ) %>%
+  ungroup()
+
+
+ebsbts_true_abundance <- true_index %>% 
+  ungroup() %>% 
+  filter(survey == "ebsbts", Year < 2017) %>% 
+  mutate(model = "observed") %>% 
+  rename(year = Year, abundance = total_biomass) %>% 
+  select(model, year, abundance)
+
+```
+
+Machine learning only
+
+
+```{r}
+
+abundance %>% 
+  filter(model %in% c("ranger","gbm"), train_set == "random") %>% 
+  ggplot(aes(year, abundance, color = model)) + 
+  geom_line(aes(year, true_abundance), color = "black", linetype = 2, size = 1.25) +
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~approx_survey, scales = "free_y") + 
+  theme_minimal()
+
+
+```
+
+What aboure relative trends?
+
+```{r}
+
+
+abundance %>% 
+  filter(test_set == "random") %>%
+  ggplot(aes(year, scaled_abundance, color = model)) + 
+  geom_line(aes(year, scaled_true_abundance), color = "black", linetype = 2, size = 1.25) +
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~approx_survey, scales = "free_y") + 
+  theme_minimal()
+
+
+
+```
+
+Well that is fascinating, it has a really hard time with the absolute abundance but not a bad time at all with the general trend, this might be a thing worth exploring more. 
+
+Let's look at the performance now out-of-time
+
+
+```{r}
+
+abundance %>% 
+  filter(model %in% c("ranger","gbm"), train_set == "year_leq_than_2014") %>%
+  ggplot(aes(year, abundance, color = model)) + 
+  geom_line(aes(year, true_abundance), color = "black", linetype = 2, size = 1.25) +
+  geom_point(aes(year, true_abundance), color = "black", shape = 17, size = 1.25) +
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~approx_survey, scales = "free_y") + 
+  theme_minimal()
+
+
+
+```
+
+
+And out of space?
+
+
+```{r}
+
+abundance %>% 
+  filter(model %in% c("ranger","gbm"), train_set == "not_west_coast") %>%
+  ggplot(aes(year, abundance, color = model)) + 
+  geom_line(aes(year, true_abundance), color = "black", linetype = 2, size = 1.25) +
+  geom_point(aes(year, true_abundance), color = "black", shape = 17, size = 1.25) +
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~approx_survey, scales = "free_y") + 
+  theme_minimal()
+
+
+```
+
+```{r}
+
+abundance %>% 
+  filter( train_set == "not_west_coast") %>%
+  ggplot(aes(year, scaled_abundance, color = model)) + 
+  geom_line(aes(year, scaled_true_abundance), color = "black", linetype = 2, size = 1.25) +
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~approx_survey, scales = "free_y") + 
+  theme_minimal()
+
+
+
+```
+
+UMMMMMM HOLY SHIT THAT WORKS FOR THE TRENDS. 
+
+
+```{r}
+
+abundance %>% 
+  filter(train_set == "west_coast") %>%
+  ggplot(aes(year, scaled_abundance, color = model)) + 
+  geom_line(aes(year, scaled_true_abundance), color = "black", linetype = 2, size = 1.25) +
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~approx_survey, scales = "free_y") + 
+  theme_minimal()
+
+```
 
   
+```{r}
+
+abundance %>% 
+  filter(train_set == "ebsbts") %>%
+  ggplot(aes(year, scaled_abundance, color = model)) + 
+  geom_line(aes(year, scaled_true_abundance), color = "black", linetype = 2, size = 1.25) +
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~approx_survey, scales = "free_y") + 
+  theme_minimal()
+
+```  

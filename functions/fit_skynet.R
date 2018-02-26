@@ -380,6 +380,56 @@ fit_skynet <- function(dep_var,
 
   } #close structural
 
+  if (model_name == 'hours') {
+
+
+    independent_data <- training %>%
+      as.data.frame() %>%
+      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      filter(total_hours > 0)
+
+    testing_frame <- testing %>%
+      as.data.frame() %>%
+      select(matches(paste0(structural_vars, collapse = '|')))
+
+    model <- lm(as.formula(glue::glue("{dep_var} ~ log(total_hours)")), data = independent_data)
+
+    out_training <- training %>%
+      as_data_frame() %>%
+      mutate(pred = predict(model, newdata = training))
+
+
+    out_testing <- testing %>%
+      as_data_frame() %>%
+      mutate(pred = predict(model, newdata = testing))
+
+  } # close hours model
+
+  if (model_name == 'engine_power') {
+
+
+    independent_data <- training %>%
+      as.data.frame() %>%
+      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      filter(total_engine_power > 0)
+
+    testing_frame <- testing %>%
+      as.data.frame() %>%
+      select(matches(paste0(structural_vars, collapse = '|')))
+
+    model <- lm(as.formula(glue::glue("{dep_var} ~ log(total_engine_power)")), data = independent_data)
+
+    out_training <- training %>%
+      as_data_frame() %>%
+      mutate(pred = predict(model, newdata = training))
+
+
+    out_testing <- testing %>%
+      as_data_frame() %>%
+      mutate(pred = predict(model, newdata = testing))
+
+  } # close hours model
+
   return(list(model = model, test_predictions = out_testing,
          training_predictions = out_training))
 
