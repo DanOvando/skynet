@@ -33,7 +33,7 @@ library(tidyverse)
 
 # run options -------------------------------------------------------------
 
-run_name <- 'v1.0'
+run_name <- 'testing'
 
 run_dir <- here::here('results',run_name)
 
@@ -45,7 +45,7 @@ load(here::here("results", run_name,'skynet_data.Rdata'))
 
 load(here::here("results", run_name,'processed_skynet_models.Rdata'))
 
-load(here::here("results", run_name,'vast_fish.Rdata'))
+load(here::here("data","vast_fish.Rdata"))
 
 load(file = here::here("data","global_map.Rdata"))
 
@@ -336,6 +336,14 @@ plot(effort,mp)
 
 
 # Results 
+
+An organizing principle: 
+
+Predict Space
+
+Predict Abundance
+
+
 
 ## Figures
 

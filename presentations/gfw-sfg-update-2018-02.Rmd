@@ -37,8 +37,8 @@ library(tidyverse)
 extrafont::loadfonts()
 demons::load_functions("../functions")
 
-animate <- F
-run_name <- 'testing-gfw_only'
+animate <- T
+run_name <- "v2.0"
 
 run_dir <- here::here('results',run_name)
 
@@ -347,7 +347,7 @@ translate_variable <- c(
 
 future_map <- future_performance %>%
   ggplot(aes(frame = year)) +
-  geom_point(aes(x = recenter_lon, y = lat, fill = pmin(2.5,value)), show.legend = F, shape = 22, size = 5) +
+  geom_point(aes(x = recenter_lon, y = lat, fill = pmin(4,value)), show.legend = F, shape = 22, size = 5) +
   geom_sf(data = yearly_map, fill = 'grey60') +
   scale_fill_viridis() +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
