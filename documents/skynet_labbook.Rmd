@@ -1804,11 +1804,11 @@ library(ggmap)
 library(caret)
 library(extrafont)
 library(tidyverse)
-
+demons::load_functions(func_dir = here::here("functions"))
 
 # run options -------------------------------------------------------------
 
-run_name <- 'testing'
+run_name <- 'v2.0'
 
 run_dir <- here::here('results',run_name)
 
@@ -2111,4 +2111,105 @@ abundance %>%
   facet_wrap(~approx_survey, scales = "free_y") + 
   theme_minimal()
 
-```  
+``` 
+
+
+
+# 2018-02-27 - FOOOOOOK
+
+Of course the new VAST data broke everything. 
+
+fuck. 
+
+```{r}
+
+library(gbm)
+library(randomForest)
+library(stringr)
+library(modelr)
+library(broom)
+library(hrbrthemes)
+library(viridis)
+library(sf)
+library(ggmap)
+library(caret)
+library(extrafont)
+library(tidyverse)
+demons::load_functions(func_dir = here::here("functions"))
+
+# run options -------------------------------------------------------------
+
+run_name <- 'v2.0'
+
+run_dir <- here::here('results',run_name)
+
+fig_theme <- theme_ipsum(base_size = 14, axis_title_size = 18)
+
+theme_set(fig_theme)
+
+load(here::here("results", run_name,'skynet_data.Rdata'))
+
+load(here::here("results", run_name,'processed_skynet_models.Rdata'))
+
+load(here::here("data","vast_fish.Rdata"))
+
+load(file = here::here("data","global_map.Rdata"))
+
+load(file = here::here('data','fish_prices.Rdata'))
+
+load(file = here::here('results',run_name,'gfw_data.Rdata'))
+
+  pacific_map <- global_map %>%
+  as("Spatial") %>%
+  maptools::nowrapRecenter() %>%
+  sf::st_as_sf()
+  
+
+map_size <- 1
+
+
+spatial_check <- vast_fish %>% 
+  mutate(thing = map(vasterized_data, "spatial_densities")) %>% 
+  select(survey, survey_region, knots, thing)
+
+mapfoo <- function(data){
+  
+  data <- data %>% 
+    group_by(knot, year, approx_long, approx_lat) %>% 
+    summarise(total_density = sum(density)) %>% 
+    ungroup()
+  
+  data_map <-  data %>%
+  dplyr::mutate(geometry = purrr::map2(approx_long, approx_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+
+years <- expand.grid(id = 1:nrow(pacific_map), year = unique(data_map$year))
+
+yearly_map <- pacific_map %>% 
+  mutate(id = 1:nrow(.)) %>% 
+  right_join(years, by = "id")
+  
+bbox <- sf::st_bbox(data_map)
+
+
+data_map <- data_map %>%
+  ggplot() +
+  geom_raster(aes(x = approx_long, y = approx_lat, fill = log(total_density)), show.legend = F, interpolate = F) +
+    geom_sf(data = yearly_map, fill = 'grey60') +
+  scale_fill_viridis() +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+           ylim = c(bbox['ymin'], bbox['ymax'])) +
+  labs(x = "Longitude", y = "Latitude") + 
+  facet_wrap(~year) +
+  theme_ipsum(base_size = 18, axis_title_size = 20,subtitle_size = 18, axis_text_size = 18, plot_title_size = 20, strip_text_size = 20) +
+  theme(plot.margin = unit(c(.25,.25,.25,.25), "in"))
+
+  
+  
+}
+
+```
+

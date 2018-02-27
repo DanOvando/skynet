@@ -337,6 +337,14 @@ plot(effort,mp)
 
 # Results 
 
+An organizing principle: 
+
+Predict Space
+
+Predict Abundance
+
+
+
 ## Figures
 
 ### Fig.1 Model performance at different resolutions

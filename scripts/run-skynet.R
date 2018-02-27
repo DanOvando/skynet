@@ -28,9 +28,9 @@ library(tidyverse)
 
 demons::load_functions("functions")
 
-run_name <- "testing"
+run_name <- "v2.0"
 
-run_description <- "testing"
+run_description <- "Fix FishData query and run updated models"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -45,7 +45,7 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 num_cores <-  6
 
-run_models <- F # fit statistical models to data
+run_models <- T # fit gfw models to fishdata
 
 vasterize <- F # run vast or load saved object
 
@@ -90,8 +90,7 @@ fished_only <-
 
 hack_zeros <- T # hack zeros into perfectly observed species
 
-survey_years_only <-
-  T # only include years that were actually surveyed
+survey_years_only <- T # only include years that were actually surveyed
 
 include_all_species <- T # include all species in VAST
 
@@ -873,7 +872,6 @@ if (vasterize == T) {
   #   coord_flip()
 
   vast_fish <- subset_fish_data %>%
-    # filter(survey == "aibts") %>%
     mutate(
       vasterized_data = purrr::pmap(
         list(
@@ -915,7 +913,6 @@ if (vasterize == T) {
 }
 
 save(file = here::here("results", run_name, "gfw_data.Rdata"), gfw_data)
-
 # build database ----------------------------------------------------------
 
 # pre-process gfw data
