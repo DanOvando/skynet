@@ -28,9 +28,9 @@ library(tidyverse)
 
 demons::load_functions("functions")
 
-run_name <- "v2.0"
+run_name <- "v2.1"
 
-run_description <- "Fix FishData query and run updated models"
+run_description <- "With weighting options and not fitting to wcghl anymore, no ranger for speed"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -43,11 +43,13 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 # set section options (what to run) ---------------------------------------------------------
 
-num_cores <-  6
+num_cores <-  4
 
-run_models <- T # fit gfw models to fishdata
+run_models <- F # fit gfw models to fishdata
 
 vasterize <- F # run vast or load saved object
+
+no_wcghl <- TRUE # get rid of WCGHL in model fitting
 
 impute_missing <- F
 
@@ -912,7 +914,7 @@ if (vasterize == T) {
   load(file = here::here("data", "vast_fish.Rdata"))
 }
 
-save(file = here::here("results", run_name, "gfw_data.Rdata"), gfw_data)
+# save(file = here::here("results", run_name, "gfw_data.Rdata"), gfw_data)
 # build database ----------------------------------------------------------
 
 # pre-process gfw data
@@ -1374,7 +1376,8 @@ lm_candidate_vars <- skynet_names[!skynet_names %in% c(
   never_ind_vars
 )]
 # models <- c('effort')
-models <- c("ranger", "gbm", "structural", "hours", "engine_power")
+# models <- c("ranger", "gbm", "structural", "hours", "engine_power")
+models <- c("gbm", "structural", "hours", "engine_power")
 
 delta_skynet <- skynet_data %>%
   select(-contains("lag")) %>%
@@ -1438,6 +1441,12 @@ skynet_100km = list(rescale_data(skynet_data, resolution = 100) %>%
   gather(data_subset, data)
 
 
+if (no_wcghl == T){
+
+  data_sources <- data_sources %>%
+    mutate(data = map(data, ~filter(.x, survey != "wcghl")))
+}
+
 
 test_train_data <- purrr::cross_df(list(
   test_sets = c(
@@ -1452,6 +1461,8 @@ test_train_data <- purrr::cross_df(list(
 )) %>%
   left_join(data_sources, by = "data_subset")
 
+
+
 test_train_data <- test_train_data %>%
   mutate(resampled = map2(data, test_sets, ~ generate_test_training(dat = .x, test_set = .y))) %>%
   select(-data) %>%
@@ -1465,13 +1476,15 @@ dep_vars <- c('log_density','log_biomass','density')
 skynet_models <- purrr::cross_df(list(
   dep_var = (dep_vars),
   temp = list(test_train_data),
-  model = models
+  model = models,
+  weight_surveys = c(T,F)
 )) %>%
   unnest(temp, .drop = F) %>%
   filter(!(data_subset == 'delta_skynet' & model == 'structural')) %>%
   # filter(!(model == 'structural' & data_subset != 'uncentered_skynet')) %>%
   filter( !(model %in% c('ranger','gbm') & data_subset == 'uncentered_skynet')) %>%
-  filter(!(model == 'structural' & dep_var != dep_vars[1]))
+  filter(!(model == 'structural' & dep_var != dep_vars[1]),
+         !(weight_surveys == T & !(test_sets %in% c("random","historic"))))
 
 # run models --------------------------------------------------------------
 
@@ -1480,9 +1493,9 @@ if (run_models == T) {
   sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
-    # filter(model == "ranger", dep_var == "log_biomass") %>%
+    # filter(model == "gbm", dep_var == "log_biomass") %>%
     # slice(1) %>%
-    # filter(train_set == 'random') %>%
+    # filter(train_set == 'random', data_subset == "skynet") %>%
     # slice(1:4) %>%
     # group_by(model, data_subset, dep_var) %>%
     # mutate(i = 1:length(train)) %>%
@@ -1616,6 +1629,74 @@ skynet_models <- skynet_models %>%
 
 print('processed models')
 
+
+# run downscaling analysis ------------------------------------------------
+
+skynet_models <- skynet_models %>%
+  mutate(
+    run_name = glue::glue(
+      "{.$dep_var}--{.$model}--{.$weight_surveys}--{.$test_sets}--{.$data_subset}"
+    )
+  )
+
+
+downscaled_performance <-
+  cross_df(list(
+    run_name = skynet_models$run_name,
+    resolution =  seq(25, 200, by = 25)
+  )) %>%
+  left_join(skynet_models %>% select(run_name, test_data), by = "run_name") %>%
+  left_join(
+    skynet_models %>% select(
+      run_name,
+      dep_var,
+      model,
+      weight_surveys,
+      test_sets,
+      data_subset
+    ),
+    by = "run_name"
+  ) %>%
+  arrange(run_name)
+
+downscaled_performance <-  downscaled_performance %>%
+  mutate(
+    new_grid  = map2(
+      test_data,
+      resolution,
+      create_grid,
+      lon_name = rounded_lon,
+      lat_name = rounded_lat
+    )
+  )
+
+downscaled_performance <-  downscaled_performance %>%
+  mutate(new_data = map2(test_data, new_grid, snap_to_grid,
+                         old_lon_name = rounded_lon,
+                         old_lat_name = rounded_lat,
+                         new_lon_name = lon,
+                         new_lat_name = lat))
+
+r2foo <- function(x){
+
+
+  r2 <- yardstick::rsq(x, truth = agg_mean_log_density, estimate = agg_pred)
+
+}
+
+
+downscaled_performance <- downscaled_performance %>%
+  mutate(oob_r2 = map_dbl(new_data, r2foo))
+
+
+downscaled_performance %>%
+  ggplot(aes(resolution, oob_r2, color = run_name)) +
+  geom_line(show.legend = F)
+
+
+# save outputs ------------------------------------------------------------
+
+
 save_foo <- function(test_plot,
                      model,
                      train_region,
@@ -1657,22 +1738,9 @@ pwalk(
   run_dir = run_dir
 )
 
-# pwalk(
-#   list(
-#     model = skynet_models$model,
-#     train_region = skynet_models$train_set,
-#     test_plot = skynet_models$test_resolution_plot,
-#     test_region = paste0(skynet_models$test_sets, "-resolution_plot"),
-#     data_set = skynet_models$data_subset,
-#     dep_var = skynet_models$dep_var
-#   ),
-#   save_foo,
-#   run_dir = run_dir
-# )
-
 
 print('printed models')
 
-save(file = here::here("results", run_name, "processed_skynet_models.Rdata"), skynet_models)
+save(file = here::here("results", run_name, "processed_skynet_models.Rdata"), skynet_models, downscaled_performance)
 
 print('saved processed models')

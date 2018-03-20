@@ -1789,7 +1789,7 @@ Partitiontime
 
 you need to be careful about your partitiontime statements 
 
-# 2019-02-24 - Fiture Sketches
+# 2019-02-24 - Figure Sketches
 
 ```{r}
 library(gbm)
@@ -1808,7 +1808,7 @@ demons::load_functions(func_dir = here::here("functions"))
 
 # run options -------------------------------------------------------------
 
-run_name <- 'v2.0'
+run_name <- 'v2.1'
 
 run_dir <- here::here('results',run_name)
 
@@ -1826,7 +1826,7 @@ load(file = here::here("data","global_map.Rdata"))
 
 load(file = here::here('data','fish_prices.Rdata'))
 
-load(file = here::here('results',run_name,'gfw_data.Rdata'))
+# load(file = here::here('results',run_name,'gfw_data.Rdata'))
 
 map_size <- 1
 ```
@@ -1877,7 +1877,7 @@ test_resolution <-  test_resolution %>%
 
 
 resolution_test <- skynet_models %>% 
-  filter(data_subset == "skynet", dep_var == "log_density") %>% 
+  filter(data_subset == "skynet", dep_var == "log_density", weight_surveys == T) %>% 
   mutate(upscaled_data = map(test_data, upscale_foo))
 
 resolution_test <- resolution_test %>% 
@@ -2055,15 +2055,30 @@ And out of space?
 
 ```{r}
 
-abundance %>% 
-  filter(model %in% c("ranger","gbm"), train_set == "not_west_coast") %>%
-  ggplot(aes(year, abundance, color = model)) + 
-  geom_line(aes(year, true_abundance), color = "black", linetype = 2, size = 1.25) +
-  geom_point(aes(year, true_abundance), color = "black", shape = 17, size = 1.25) +
-  geom_line() + 
-  geom_point() + 
-  facet_wrap(~approx_survey, scales = "free_y") + 
-  theme_minimal()
+# abundance %>% 
+#   filter(model %in% c("ranger","gbm"), train_set == "not_west_coast") %>%
+#   ggplot(aes(year, abundance, color = model)) + 
+#   geom_line(aes(year, true_abundance), color = "black", linetype = 2, size = 1.25) +
+#   geom_point(aes(year, true_abundance), color = "black", shape = 17, size = 1.25) +
+#   geom_line() + 
+#   geom_point() + 
+#   facet_wrap(~approx_survey, scales = "free_y") + 
+#   theme_minimal()
+
+
+```
+
+```{r}
+
+# abundance %>% 
+#   filter( train_set == "not_west_coast") %>%
+#   ggplot(aes(year, scaled_abundance, color = model)) + 
+#   geom_line(aes(year, scaled_true_abundance), color = "black", linetype = 2, size = 1.25) +
+#   geom_line() + 
+#   geom_point() + 
+#   facet_wrap(~approx_survey, scales = "free_y") + 
+#   theme_minimal()
+
 
 
 ```
@@ -2071,7 +2086,7 @@ abundance %>%
 ```{r}
 
 abundance %>% 
-  filter( train_set == "not_west_coast") %>%
+  filter( train_set == "year_leq_than_2014") %>%
   ggplot(aes(year, scaled_abundance, color = model)) + 
   geom_line(aes(year, scaled_true_abundance), color = "black", linetype = 2, size = 1.25) +
   geom_line() + 
@@ -2112,6 +2127,80 @@ abundance %>%
   theme_minimal()
 
 ``` 
+
+Let's try this map idea. 
+
+
+```{r}
+
+  pacific_map <- global_map %>%
+  as("Spatial") %>%
+  maptools::nowrapRecenter() %>%
+  sf::st_as_sf()
+
+
+ skynet_box <- skynet_data %>% 
+    group_by(knot, year, rounded_lat, rounded_lon) %>% 
+    summarise(total_density = sum(density)) %>% 
+    ungroup() %>% 
+      mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) 
+
+  
+  skynet_map <-  skynet_box %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+
+bbox <- sf::st_bbox(skynet_map)
+
+
+base_map <- pacific_map %>% 
+ggplot() + 
+  geom_sf() + 
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) + 
+theme_ipsum() +
+  theme(panel.grid = element_blank(),
+        text = element_blank(),
+         plot.margin = unit(c(0,1,0,1),"cm"))
+
+survey_positions <- skynet_data %>% 
+  group_by(survey) %>% 
+  summarise(mean_lat = median(rounded_lat),
+            mean_lon = median(rounded_lat)) %>% 
+  ungroup() %>% 
+  arrange(desc(mean_lat)) 
+
+random_gbm_abundance <- abundance %>% 
+  filter(train_set == "random", model == "gbm") %>% 
+  group_by(year, approx_survey) %>% 
+  gather(abundance_source, abundance, contains("abundance")) %>% 
+  left_join(survey_positions, by = c("approx_survey" = "survey"))
+
+trend_plot <- random_gbm_abundance %>% 
+  ungroup() %>% 
+  filter(str_detect(abundance_source, "scaled"),
+         approx_survey != "goabts") %>% 
+  ggplot(aes(year + -mean_lon * 0.3, 2.5*abundance + mean_lat, color = approx_survey, linetype = abundance_source)) + 
+  geom_smooth(show.legend = F) + 
+  geom_point(show.legend = F, size = 1.5) + 
+  theme_ipsum() +
+    theme(panel.grid = element_blank(),
+        text = element_blank(),
+        plot.margin = unit(c(0,0,0,0),"cm")) 
+
+  trend_map <-  ggdraw(base_map) + 
+  draw_plot(trend_plot, y = -.01,width = 0.7, height = 0.9)
+
+ggsave("test.png", trend_map, width = 8, height = 6)
+
+
+
+```
+
+
 
 
 
@@ -2177,10 +2266,12 @@ mapfoo <- function(data){
   data <- data %>% 
     group_by(knot, year, approx_long, approx_lat) %>% 
     summarise(total_density = sum(density)) %>% 
-    ungroup()
+    ungroup() %>% 
+      mutate(recenter_lon = ifelse(approx_long < 0, 180 + (180 - abs(approx_long)), approx_long)) 
+
   
   data_map <-  data %>%
-  dplyr::mutate(geometry = purrr::map2(approx_long, approx_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, approx_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
   ungroup() %>%
   mutate(geometry = sf::st_sfc(geometry, crs =
                                  "+proj=longlat +datum=WGS84 +no_defs")) %>%
@@ -2195,21 +2286,96 @@ yearly_map <- pacific_map %>%
 bbox <- sf::st_bbox(data_map)
 
 
-data_map <- data_map %>%
+data_mappy <- data_map %>%
   ggplot() +
-  geom_raster(aes(x = approx_long, y = approx_lat, fill = log(total_density)), show.legend = F, interpolate = F) +
-    geom_sf(data = yearly_map, fill = 'grey60') +
-  scale_fill_viridis() +
+  geom_sf(aes(color = log(total_density)), show.legend = F) +
+  geom_sf(data = yearly_map, fill = 'grey60') +
+  scale_color_viridis() +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
-           ylim = c(bbox['ymin'], bbox['ymax'])) +
-  labs(x = "Longitude", y = "Latitude") + 
-  facet_wrap(~year) +
-  theme_ipsum(base_size = 18, axis_title_size = 20,subtitle_size = 18, axis_text_size = 18, plot_title_size = 20, strip_text_size = 20) +
-  theme(plot.margin = unit(c(.25,.25,.25,.25), "in"))
-
-  
+  ylim = c(bbox['ymin'], bbox['ymax'])) +
+  labs(x = "Longitude", y = "Latitude") +
+  facet_wrap( ~ year) +
+  theme_ipsum(
+  base_size = 18,
+  axis_title_size = 20,
+  subtitle_size = 18,
+  axis_text_size = 18,
+  plot_title_size = 20,
+  strip_text_size = 20
+  ) +
+  theme(plot.margin = unit(c(.25, .25, .25, .25), "in"))
   
 }
 
+spatial_check <- spatial_check %>% 
+  mutate(fishmap = map(thing, mapfoo))
+
+spatial_check$fishmap[[5]] + theme_minimal()
+
 ```
+
+Aha, that could be it, the interpolated years have very weird behavior. So as an initial point fitting the models without those 
+
+
+# 2018-02-28 - we're alive again, final model steps
+
+There are two more things that I'd like to try. 
+
+First, you've got a bit of a problem by region, where you have waaaay more samples in the alaska region, so of course the model is going to do best up there. 
+
+```{r}
+skynet_data %>% 
+  group_by(survey) %>% 
+  count() %>% 
+  arrange(desc(n))
+```
+
+So, I'd like to downsample the data a bit and see how that works, or maybe upsample? Let's check out applied predictive modeling and see what it says. 
+
+Second, for the final map, you be using "all" the data. So tune the model in the best way you can, but then predict it on the new data. Ideally, every one of those predictions would be OOB.... but maybe punt on that one for the moment?
+
+Eh though the trends aren't that far off from random, so might the biggest deal in the world. Let's focus on the down/upsampling furst as one last hail mary for out-of-sample power.  
+
+
+```{r}
+
+vast_index <- vast_fish %>% 
+  mutate(index = map(vasterized_data,"time_index")) %>% 
+  select(survey, index) %>% 
+  ungroup() %>% 
+  unnest() %>% 
+  group_by(survey, Year) %>% 
+  summarise(abundance = sum(abundance)) %>% 
+  filter(abundance > 0) %>% 
+  group_by(survey) %>% 
+  mutate(cs_abundance = (abundance - mean(abundance)) / sd(abundance)) %>% 
+  ungroup()
+
+vast_index %>% 
+  ggplot(aes(Year, cs_abundance)) + 
+  geom_line() + 
+  geom_point() + 
+  facet_wrap(~survey)
+
+
+```
+
+
+Actually, looks like gbm takes weights as an option... as does ranger. Maybe try that first, and then try 
+
+Could also use caret's upSample/downSample functions to test those. So, that's three more runs ha, upsampled, downsampled, and weighted. d'oh. 
+
+# Check weighting effect
+
+weighting doens't seem to make all that much of a difference.... might just be though that it's not working? though they are different. 
+```{r}
+
+skynet_models %>% 
+  filter(model == "gbm", test_set == "random") %>% 
+  ggplot(aes(weight_surveys, r2)) + 
+  geom_boxplot()
+
+```
+
+
 

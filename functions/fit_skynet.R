@@ -19,6 +19,7 @@ fit_skynet <- function(dep_var,
                        never_ind_vars,
                        survey_prices,
                        tree_candidate_vars,
+                       weight_surveys = T,
                        lm_candidate_vars = NA,
                        structural_vars = c(
                          'log_density',
@@ -56,6 +57,25 @@ fit_skynet <- function(dep_var,
     select(-matches(paste0(never_ind_vars, collapse = '|'))) %>%
     select(matches(paste0(tree_candidate_vars, collapse = '|')))
 
+  if (weight_surveys == T){
+
+    weights <- training %>%
+      as_data_frame() %>%
+      group_by(survey) %>%
+      count() %>%
+      mutate(weight = 1/n)
+
+    weights <- training %>%
+      as_data_frame() %>%
+      select(survey,num_vessels) %>%
+      left_join(weights, by = "survey")
+
+    weights <- weights$weight
+
+  } else{
+    weights <- rep(1, nrow(training))
+  }
+
   dependent_data <- training %>%
     as.data.frame() %>%
     as.matrix()
@@ -76,7 +96,8 @@ fit_skynet <- function(dep_var,
       data = reg_data,
       method = "cforest",
       trControl = fit_control,
-      preProcess = c("center","scale")
+      preProcess = c("center","scale"),
+      weights = weights
     )
     if (tune_model == T) {
       cforest_importance <- varImp(model$finalModel)
@@ -106,7 +127,8 @@ fit_skynet <- function(dep_var,
         data = reg_data,
         method = "cforest",
         trControl = fit_control,
-        preProcess = c("center","scale")
+        preProcess = c("center","scale"),
+        weights = weights
 
       )
 
@@ -133,7 +155,8 @@ fit_skynet <- function(dep_var,
       # na.action = na.omit,
       trControl = fit_control,
       preProcess = c("center","scale"),
-      importance = "impurity_corrected"
+      importance = "impurity_corrected",
+      weights = weights
       # tuneGrid = rf_grid
     )
 
@@ -166,7 +189,8 @@ fit_skynet <- function(dep_var,
         trControl = fit_control,
         preProcess = c("center","scale"),
         importance = "impurity_corrected",
-        verbose = TRUE
+        verbose = TRUE,
+        weights = weights
         # tuneGrid = rf_grid
       )
 
@@ -194,7 +218,8 @@ fit_skynet <- function(dep_var,
       do.trace = 10,
       # na.action = na.omit,
       trControl = fit_control,
-      preProcess = c("center","scale")
+      preProcess = c("center","scale"),
+      weights = weights
 
       # tuneGrid = rf_grid
     )
@@ -229,7 +254,8 @@ fit_skynet <- function(dep_var,
         na.action = na.omit,
         trControl = fit_control,
         importance = T,
-        preProcess = c("center","scale")
+        preProcess = c("center","scale"),
+        weights = weights
       )
 
     }
@@ -251,14 +277,15 @@ fit_skynet <- function(dep_var,
     #                         shrinkage = 0.01,
     #                         n.minobsinnode = 20)
 
+
     model <- train(
       model_formula,
       data = reg_data,
       method = "gbm",
       verbose = T,
       trControl = fit_control,
-      preProcess = c("center","scale")
-      # tuneGrid = gbm_grid
+      preProcess = c("center","scale"),
+      weights = weights
     )
     # on.exit(detach('package:plyr'))
 
@@ -291,7 +318,8 @@ fit_skynet <- function(dep_var,
         method = "gbm",
         verbose = T,
         trControl = fit_control,
-        preProcess = c("center","scale")
+        preProcess = c("center","scale"),
+        weights = weights
       )
 
       # on.exit(detach('package:plyr'))

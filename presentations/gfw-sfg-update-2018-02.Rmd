@@ -38,7 +38,7 @@ extrafont::loadfonts()
 demons::load_functions("../functions")
 
 animate <- T
-run_name <- "v2.0"
+run_name <- "v2.1"
 
 run_dir <- here::here('results',run_name)
 
@@ -57,7 +57,7 @@ load(file = here::here("data","global_map.Rdata"))
 
 load(file = here::here('data','fish_prices.Rdata'))
 
-load(file = here::here('results',run_name,'gfw_data.Rdata'))
+load(file = here::here('data','gfw_data.Rdata'))
 
 width <- 5.25
 
