@@ -1,17 +1,25 @@
 generate_test_training <-
   function(dat,
            test_set,
-           kfolds = 2,
+           prop = 0.75,
            cut_year = 2014) {
     if (test_set == 'random') {
-    browser()
-      out <- modelr::crossv_kfold(dat, k = kfolds, id = 'test_set') %>%
-        mutate(train_set = 'random') %>%
-        mutate(test_set = 'random') %>%
-        slice(1)
 
-      out <- rsample::initial_split(data, prop = 0.75) %>%
-        rsample::training()
+      splits <- rsample::initial_split(dat, prop = prop, strata = "survey")
+
+      out <-
+        data_frame(train = list(rsample::training(splits)),
+                   test = list(rsample::testing(splits))) %>%
+        mutate(train_set = 'random') %>%
+        mutate(test_set = 'random')
+
+      # out <- modelr::crossv_kfold(dat, k = kfolds, id = 'test_set') %>%
+      #   mutate(train_set = 'random') %>%
+      #   mutate(test_set = 'random') %>%
+      #   slice(1)
+      #
+      # out <- rsample::initial_split(data, prop = 0.75) %>%
+      #   rsample::training()
 
       # out <- modelr::crossv_kfold(dat, k = kfolds, id = 'test_set') %>%
       #   mutate(train_set = 'random') %>%
@@ -28,11 +36,19 @@ generate_test_training <-
 
       out <-
         data_frame(
-          train = list(resample(train, 1:nrow(train))),
-          test = list(resample(test, 1:nrow(test))),
+          train = list(train),
+          test = list(test),
           test_set = 'west_coast'
         ) %>%
         mutate(train_set = 'not_west_coast')
+
+      # out <-
+      #   data_frame(
+      #     train = list(resample(train, 1:nrow(train))),
+      #     test = list(resample(test, 1:nrow(test))),
+      #     test_set = 'west_coast'
+      #   ) %>%
+      #   mutate(train_set = 'not_west_coast')
 
 
     }
@@ -44,10 +60,18 @@ generate_test_training <-
       test <- dat %>%
         filter(!survey %in% c('wcgbts', 'wcghl'))
 
+      # out <-
+      #   data_frame(
+      #     train = list(resample(train, 1:nrow(train))),
+      #     test = list(resample(test, 1:nrow(test))),
+      #     test_set = 'alaska'
+      #   ) %>%
+      #   mutate(train_set = 'west_coast')
+
       out <-
         data_frame(
-          train = list(resample(train, 1:nrow(train))),
-          test = list(resample(test, 1:nrow(test))),
+          train = list(train),
+          test = list(test),
           test_set = 'alaska'
         ) %>%
         mutate(train_set = 'west_coast')
@@ -63,8 +87,8 @@ generate_test_training <-
 
       out <-
         data_frame(
-          train = list(resample(train, 1:nrow(train))),
-          test = list(resample(test, 1:nrow(test))),
+          train = list(train),
+          test = list(test),
           test_set = paste0('year_greq_than_', cut_year)
         ) %>%
         mutate(train_set =  paste0('year_l_than_', cut_year))
@@ -81,8 +105,8 @@ generate_test_training <-
 
       out <-
         data_frame(
-          train = list(resample(train, 1:nrow(train))),
-          test = list(resample(test, 1:nrow(test))),
+          train = list(train),
+          test = list(test),
           test_set = 'ebs-ai'
         ) %>%
         mutate(train_set = 'goabts')
@@ -98,8 +122,8 @@ generate_test_training <-
 
       out <-
         data_frame(
-          train = list(resample(train, 1:nrow(train))),
-          test = list(resample(test, 1:nrow(test))),
+          train = list(train),
+          test = list(test),
           test_set = 'goa-ai'
         ) %>%
         mutate(train_set = 'ebsbts')
