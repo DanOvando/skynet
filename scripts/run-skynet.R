@@ -1309,15 +1309,6 @@ skynet_data <- skynet_data %>%
 
 uc_skynet_data <- skynet_data
 
-if (center_and_scale == T) {
-  do_scale <- skynet_names[!skynet_names %in% do_not_scale]
-
-  skynet_data <- skynet_data %>%
-    group_by(survey) %>%
-    purrrlyr::dmap_at(do_scale, ~ (.x - mean(.x, na.rm = T)) / (sd(.x, na.rm = T))) %>% # center and scale variables that should be
-    ungroup()
-}
-
 
 save(
   file = here::here("results", run_name, "skynet_data.Rdata"),
@@ -1376,6 +1367,8 @@ lm_candidate_vars <- skynet_names[!skynet_names %in% c(
   dep_var,
   never_ind_vars
 )]
+
+
 # models <- c('effort')
 # models <- c("ranger", "gbm", "structural", "hours", "engine_power")
 models <- c("gbm", "structural","ranger", "engine_power")
@@ -1458,7 +1451,7 @@ test_train_data <- purrr::cross_df(list(
     "goa-ai",
     "ebs-ai"
   ),
-  data_subset = c("skynet", "skynet_25km", "skynet_100km")
+  data_subset = c("skynet", "skynet_25km", "skynet_100km", "delta_skynet")
 )) %>%
   left_join(data_sources, by = "data_subset")
 

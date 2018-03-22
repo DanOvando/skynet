@@ -53,20 +53,20 @@ fit_skynet <- function(dep_var,
                               allowParallel = TRUE)
 
   independent_data <- training %>%
-    as.data.frame() %>%
+    # as.data.frame() %>%
     select(-matches(paste0(never_ind_vars, collapse = '|'))) %>%
     select(matches(paste0(tree_candidate_vars, collapse = '|')))
 
   if (weight_surveys == T){
 
     weights <- training %>%
-      as_data_frame() %>%
+      # as_data_frame() %>%
       group_by(survey) %>%
       count() %>%
       mutate(weight = 1/n)
 
     weights <- training %>%
-      as_data_frame() %>%
+      # as_data_frame() %>%
       select(survey,num_vessels) %>%
       left_join(weights, by = "survey")
 

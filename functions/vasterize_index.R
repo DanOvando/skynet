@@ -73,7 +73,7 @@ vasterize_index <- function(raw_data,
                        #the number of times that the k-means algorithm is run while searching for the best solution (default=100)
                        "iter.max" = iter.max)
 
-  # Really no idea what almost any of these actually do
+  # need to get a better understanding of what these do
   FieldConfig = c(
     "Omega1" = omega1,
     "Epsilon1" = epsilon1,
@@ -175,32 +175,6 @@ vasterize_index <- function(raw_data,
   )
   # Decide which years to plot
 
-  #god damn it Dens_xt is in log space
-  # dens_xt <-
-  #   SpatialDeltaGLMM::PlotResultsOnMap_Fn(
-  #     plot_set = c(3),
-  #     MappingDetails = map_details_list[["MappingDetails"]],
-  #     Report = report,
-  #     Sdreport = opt$SD,
-  #     PlotDF = map_details_list[["PlotDF"]],
-  #     MapSizeRatio = map_details_list[["MapSizeRatio"]],
-  #     Xlim = map_details_list[["Xlim"]],
-  #     Ylim = map_details_list[["Ylim"]],
-  #     FileName = ,
-  #     ,
-  #     ,
-  #     Year_Set = year_set,
-  #     Years2Include = years_2_include,
-  #     Rotate = map_details_list[["Rotate"]],
-  #     Cex = map_details_list[["Cex"]],
-  #     Legend = map_details_list[["Legend"]],
-  #     zone = map_details_list[["Zone"]],
-  #     mar = c(0, 0, 2, 0),
-  #     oma = c(3.5, 3.5, 0, 0),
-  #     cex = 1.8,
-  #     plot_legend_fig = FALSE
-  #   )
-
   spatial_densities <- report$D_xcy %>%
     reshape2::melt() %>%
     as_data_frame() %>%
@@ -251,25 +225,12 @@ vasterize_index <- function(raw_data,
       )
     )
 
-  # if (is.null(index$error)) {
-  #   index <- index$result
 
   vast_index <- index$Table %>%
     select(Year, Unit, Estimate_metric_tons) %>%
     rename(abundance = Estimate_metric_tons) %>%
     mutate(source = 'vast')
-  # } else {
-  #   vast_index <- list()
-  # }
-  # spatial_densities = cbind(
-  #   "density" = as.vector(dens_xt),
-  #   "year" = year_set[col(dens_xt)],
-  #   "e_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'E_km'],
-  #   "n_km" = spatial_list$MeshList$loc_x[row(dens_xt), 'N_km']
-  # ) %>%
-  #   as_data_frame() %>%
-  #   mutate(knot = as.numeric(factor(paste(e_km, n_km)))) %>%
-  #   arrange(knot, year)
+
 
   outlist <-
     list(
