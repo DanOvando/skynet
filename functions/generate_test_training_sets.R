@@ -4,10 +4,19 @@ generate_test_training <-
            kfolds = 2,
            cut_year = 2014) {
     if (test_set == 'random') {
+    browser()
       out <- modelr::crossv_kfold(dat, k = kfolds, id = 'test_set') %>%
         mutate(train_set = 'random') %>%
         mutate(test_set = 'random') %>%
         slice(1)
+
+      out <- rsample::initial_split(data, prop = 0.75) %>%
+        rsample::training()
+
+      # out <- modelr::crossv_kfold(dat, k = kfolds, id = 'test_set') %>%
+      #   mutate(train_set = 'random') %>%
+      #   mutate(test_set = 'random') %>%
+      #   slice(1)
 
     }
     if (test_set == 'west_coast') {
@@ -47,18 +56,18 @@ generate_test_training <-
     }
     if (test_set == 'historic') {
       train <- dat %>%
-        filter(year <= cut_year)
+        filter(year < cut_year)
 
       test <- dat %>%
-        filter(year > cut_year)
+        filter(year >= cut_year)
 
       out <-
         data_frame(
           train = list(resample(train, 1:nrow(train))),
           test = list(resample(test, 1:nrow(test))),
-          test_set = paste0('year_gr_than_', cut_year)
+          test_set = paste0('year_greq_than_', cut_year)
         ) %>%
-        mutate(train_set =  paste0('year_leq_than_', cut_year))
+        mutate(train_set =  paste0('year_l_than_', cut_year))
 
 
     }

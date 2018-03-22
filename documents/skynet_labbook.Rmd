@@ -2378,4 +2378,29 @@ skynet_models %>%
 ```
 
 
+# Solving the scale of prediction
+
+This came about after noticing discrepencies between the time series from the random split vs the historic split. Obviously, the random had less data in the splite, since it's a sampling of the data, while the historic split has the full data in each split (so the historic split is more accurate in that sense)
+
+So, that begs the question of when you want to be fitting to "all" the data. The answer is never I think. Suppose that you were actually interested in predicting the west coast, and so you do all your test and training splits to demonstrate its out of sample performance. But, for your final morel, you used all the data to predict the region. That's not the same model anymore, and so you wouldn't be able to make the same statements about predictive accuracy that you made about the "oob" tested model. So, in the case of say predicting Africa. you could of course fit the model using every scrap of data that you have, and then use that to predict Africa, but you no longer have a reliable metric of performance of that model, you're kind of back to the panel model problem. 
+
+So, from the perspective of this paper, the point of the figure that you're showing is to demonstrate out of sample performance. To predict Africa then, the most reasonable thing then seems to be to use the random splitting, test performance there, and apply to somewhere else and see how it goes. 
+
+So, I think the temporal plot you have in there works!
+
+It would be good then to also do a map showing out of region sampling performance. 
+
+From there, you need to get your hands on some other survey data. 
+
+It would be good to get things in meaningful units too 
+
+# Track units in paper
+
+WHAT THE HELL UNITS ARE THESE VAST OUTPUTS THINGS IN
+
+from line 699 of VAST_v4_0_0.cpp, it seems like metric tons per km2?
+
+Index_xcyl(x,c,y,l) = D_xcy(x,c,y) * a_xl(x,l) / 1000;  // Convert from kg to metric tonnes
+
+
 

@@ -28,9 +28,9 @@ library(tidyverse)
 
 demons::load_functions("functions")
 
-run_name <- "v2.1"
+run_name <- "v2.2"
 
-run_description <- "With weighting options and not fitting to wcghl anymore, no ranger for speed"
+run_description <- "Added ranger back in, changed historic cutoff to greater than or equal to 2014"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -45,7 +45,7 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 num_cores <-  4
 
-run_models <- F # fit gfw models to fishdata
+run_models <- T # fit gfw models to fishdata
 
 vasterize <- F # run vast or load saved object
 
@@ -911,6 +911,7 @@ if (vasterize == T) {
     vast_fish
   )
 } else {
+  print('NO VAST')
   load(file = here::here("data", "vast_fish.Rdata"))
 }
 
@@ -1377,7 +1378,7 @@ lm_candidate_vars <- skynet_names[!skynet_names %in% c(
 )]
 # models <- c('effort')
 # models <- c("ranger", "gbm", "structural", "hours", "engine_power")
-models <- c("gbm", "structural", "hours", "engine_power")
+models <- c("gbm", "structural","ranger", "engine_power")
 
 delta_skynet <- skynet_data %>%
   select(-contains("lag")) %>%
