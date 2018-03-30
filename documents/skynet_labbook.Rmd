@@ -2402,5 +2402,54 @@ from line 699 of VAST_v4_0_0.cpp, it seems like metric tons per km2?
 
 Index_xcyl(x,c,y,l) = D_xcy(x,c,y) * a_xl(x,l) / 1000;  // Convert from kg to metric tonnes
 
+# Questions for Jim
+
+turn omega and epsilon to zero if some species standard errors are going to zero
+
+TMB::optimzie(bias.correct = FALSE)
+
+pros and cons of multispecies vs single species version, more sensitive 
+
+0-1 for single species,0-numspecies in multispecies context. So if you are doing 50 species, put in as many factors as you have for number of species. Choose number of factors a priori to be a lower number. You can add factors until the next factor explains a very small proportion of 5-8 factors might be the better option. 5,5,5,5 for field config for example. 
+
+You get an improvement for rare species with the VAST version, so probably better to do individual species, since the rare species probably don't make that much of a difference. 
+
+overdispersion config = 1,1 for the west coast example. For the other ones I would fix it to 0,0
+
+double check that D_xcy spits out the rank scale densities, not log, but there's no bias correction
+
+extract plotIndex to see the bias since 
+
+look at qqplot and parameter_score.ests
+
+ecology letter fitting models with machine learning since it gives you a measure of the max predictive accuracy 
+
+loadings matrix times its transpose.... something. plotFactors function
+
+- # of knots and tuning parameters
+
+  - Test out increased number of knots for GOABTS
+  
+  - 
+
+- Batch level diagnostics
+
+- including environmental covariates?
+
+
+# One more stab at a better model
+
+
+After messing around with the ram prediction stuff, I'm realizing that what these machine learning things are great at is filling in gaps iwthin the universe of their training data, but not really for things that aren't of that universe. It's the "skin tone hand dryer problem"
+
+That is especially apparent now with the out-of-region sampling regimes, which are pure garbage for the test set. 
+
+  - look through applied predictive modeling a bit more
+  
+  - double check the dependent variable side of thigns, is there something you could be doing better there?
+  
+  - on the dependent variable side of things, what if you tried to predict the percentile rank of density? That poses a challenge of scale, but it might work better. So, there you would transform density into percentil rank of density. The dependent variables are getting centered and scaled, though I want to make sure that add_predictions is doing things right....  but if it is then I don't think that transforming effort into a rank would make that much of a difference... Though to an extent it still might. At the moment, let's say you train on alaska and center and scale there. Then, the west coast is going to look like it has really small effort, relative to the mean of the alaska data. So, might be better to center and scale the data at the splitting point. SO, the predictor is regional average effort. 
+
+
 
 

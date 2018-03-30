@@ -41,6 +41,7 @@ vasterize_index <- function(raw_data,
                             method = 'Mesh',
                             strata = "All_areas",
                             n_x = 1000,
+                            spp,
                             grid_size_km = 25,
                             randomseed = 1,
                             nstart = 100,
@@ -82,13 +83,14 @@ vasterize_index <- function(raw_data,
   )
 
   RhoConfig = c(
-    "Beta1" = beta1,
-    "Beta2" = beta2,
-    "Epsilon1" = epsilon1,
-    "Epsilon2" = epsilon2
+    "Beta1" = 0,
+    "Beta2" = 0,
+    "Epsilon1" = 0,
+    "Epsilon2" = 0
   )
+  # overdispersion_config = c("vessel" = vessel, "vessel_year" = vessel_year)
 
-  overdispersion_config = c("vessel" = vessel, "vessel_year" = vessel_year)
+  overdispersion_config = c("Eta1"=0, "Eta2"=0)
 
   options =  c(
     "SD_site_density" = sd_site_density,
@@ -166,6 +168,23 @@ vasterize_index <- function(raw_data,
     savedir = vast_file,
     bias.correct = FALSE
   )
+
+  # dial in TMB fit
+  opt <-  TMBhelper::Optimize(
+    obj = obj,
+    start = obj$env$last.par.best[-obj$env$random] + rnorm(length(obj$par), 0, 0.2),
+    lower = tmb_list[["Lower"]],
+    upper = tmb_list[["Upper"]],
+    getsd = TRUE,
+    savedir = vast_file,
+    bias.correct = FALSE,
+    newtonsteps = 3
+  )
+
+  if(any(abs(opt$diagnostics$final_gradient) > 0.0001)){
+    warning("VAST probably didn't converge after tuning")
+  }
+
   report <-  obj$report()
 
   map_details_list <-  SpatialDeltaGLMM::MapDetails_Fn(
@@ -190,9 +209,9 @@ vasterize_index <- function(raw_data,
     drop() %>%
     reshape2::melt() %>%
     as_data_frame() %>%
-    set_names(c('knot', 'species', 'year', 'biomass')) %>%
+    set_names(c('knot', 'year', 'biomass')) %>%
     mutate(
-      species = factor(species, labels = unique(raw_data$spp) %>% as.character()) %>% as.character(),
+      species = factor(spp, labels = spp %>% as.character()) %>% as.character(),
       year = factor(year, labels = years) %>% as.character() %>% as.numeric()
     ) %>%
     left_join(spatial_list$loc_x_lat_long, by = 'knot')
@@ -240,7 +259,8 @@ vasterize_index <- function(raw_data,
       time_index = vast_index,
       report = report,
       obj = obj,
-      opt = opt
+      opt = opt,
+      diagnostics = diagnostics
     )
 
   return(outlist)
