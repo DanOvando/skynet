@@ -34,7 +34,7 @@ library(tidyverse)
 
 # run options -------------------------------------------------------------
 
-run_name <- 'v2.2'
+run_name <- 'v3.0'
 
 run_dir <- here::here('results',run_name)
 
@@ -68,7 +68,9 @@ map_theme <-   theme_get() +theme(legend.key.height = unit(1.5,"cm"),
                      axis.text.x = element_text(size = 10),
                      axis.text.y = element_text(size = 10),
                      plot.margin = unit(c(0,0,0,0),"cm"),
-                     legend.box.margin =  margin(0,0,0,0))
+                     legend.box.margin =  ggplot2::margin(0,0,0,0))
+
+vast_fish <- vast_fish[!map_lgl(vast_fish$vasterized_data, is.null), ]
 
 ```
 
@@ -153,10 +155,11 @@ Primary data were collected from two sources: GFW provides our data on the amoun
 
 knots <- vast_fish %>%
   filter(!survey %in% bad_surveys) %>% 
-  select(survey, vasterized_data) %>%
+  select(survey,spp,vasterized_data) %>%
   mutate(knots = map(vasterized_data, c('spatial_list', 'loc_x_lat_long'))) %>%
-  select(-vasterized_data) %>%
+  select(-vasterized_data,-spp) %>%
   unnest() %>%
+  unique() %>% 
   mutate(recenter_lon = ifelse(approx_long < 0, 180 + (180 - abs(approx_long)), approx_long))
   
 
@@ -190,7 +193,7 @@ Each of the surveys contains a variety of different species, including highly ab
 ```{r fish-plot, fig.cap = "Number of positive encounters for the top-10 most observed species in each research survey (XXswitch to common names"}
 
 fish_summary <- vast_fish %>% 
-  select(survey, data) %>% 
+  select(survey, data,spp) %>% 
   unnest() %>% 
   group_by(survey, spp, year) %>%
   summarise(mean_catch = mean(catch_kg, na.rm = T)) %>% 
@@ -199,7 +202,7 @@ fish_summary <- vast_fish %>%
   ungroup()
 
 fish_summary <- vast_fish %>% 
-  select(survey, data) %>% 
+  select(survey, data,spp) %>% 
   unnest() %>% 
   group_by(survey, spp) %>%
   summarise(n_seen = sum(catch_kg > 0)) %>% 
@@ -231,7 +234,7 @@ The result of VAST is a network of "knots" that define polygons of equal density
 fish_abundance <- skynet_data %>% 
   filter(!survey %in% bad_surveys) %>% 
   group_by(survey,knot, rounded_lat, rounded_lon,year) %>% 
-  summarise(total_density = sum(density)) %>% 
+  summarise(total_density = mean(density)) %>% 
   mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon))
   
   fish_abundance <-  fish_abundance %>%
@@ -474,6 +477,32 @@ skynet_models %>%
 
 ```
 
+```{r}
+
+a = skynet_models %>% 
+  group_by(model) %>% 
+  mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(model = fct_reorder(model, mean_r2)) %>% 
+  filter(mean_r2 == max(mean_r2), dep_var == "log_density") %>% 
+  group_by(test_set) %>% 
+  mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(test_set = fct_reorder(test_set, -mean_r2)) %>% 
+  select(dep_var, weight_surveys, test_sets, data_subset, training_data) %>% 
+  mutate(obs_pred = map2(training_data,dep_var, ~.x %>% select(.y,pred))) %>% 
+  select(-training_data) %>% 
+  unnest() %>% 
+  gather(observed_name, observed,contains("log")) %>% 
+  ggplot(aes(observed, pred, fill = weight_surveys)) + 
+  geom_point(shape = 21) + 
+  facet_wrap(dep_var ~ test_sets, scales = "free") + 
+  theme_minimal()
+
+a
+```
+
+
 
 ### Fig.2 Upscaling/downscaling performance
 
@@ -528,7 +557,7 @@ spatial_performance <- skynet_models %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
   } %>% 
-  mutate(resid = exp(pred) - exp(log_density))
+  mutate(resid = pmax(-200,exp(pred) - exp(log_density)))
 ```
 
 

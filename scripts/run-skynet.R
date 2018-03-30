@@ -28,9 +28,9 @@ library(tidyverse)
 
 demons::load_functions("functions")
 
-run_name <- "v2.2"
+run_name <- "v3.0"
 
-run_description <- "Added ranger back in, changed historic cutoff to greater than or equal to 2014"
+run_description <- "improved vast"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -131,9 +131,9 @@ knots_per_survey <- tribble(
   ~ knots,
   # --/--
   "ebsbts",
-  200,
+  300,
   "goabts",
-  200,
+  400,
   "aibts",
   200,
   "wcgbts",
@@ -857,7 +857,7 @@ subset_fish_data <- fish_data %>%
   select(-times_seen, -seen_every_year) %>%
   ungroup() %>%
   as.data.frame() %>%
-  nest(-survey, -survey_region, -knots) # note that this breaks if it's a tibble, should make a bit more flexible
+  nest(-survey, -survey_region, -knots,-spp) # note that this breaks if it's a tibble, should make a bit more flexible
 
 
 # vasterize ---------------------------------------------------------------
@@ -879,13 +879,15 @@ if (vasterize == T) {
         list(
           region = survey_region,
           raw_data = data,
-          n_x = knots
+          n_x = knots,
+          spp = spp
         ),
         safely(vasterize_index),
-        version = "VAST_v4_0_0",
+        version = "VAST_v4_1_0",
         run_dir = run_dir,
-        nstart = 100,
-        obs_model = c(2, 0)
+        nstart = 200,
+        obs_model = c(2, 0),
+        epsilon1 = 1
       )
     )
 
@@ -959,10 +961,19 @@ skynet_data <- gfw_data %>%
 
 # pre process fishdata
 
+vast_worked <- !map_lgl(vast_fish$vasterized_data, is.null)
+
+vast_fish <- vast_fish[vast_worked, ]
+
 knots <- vast_fish %>%
   select(survey, vasterized_data) %>%
   mutate(knots = map(vasterized_data, c("spatial_list", "loc_x_lat_long"))) %>%
-  select(-vasterized_data)
+  select(-vasterized_data) %>%
+  unnest() %>%
+  unique() %>%
+  nest(-survey, .key = "knots")
+
+
 
 
 if (fished_only == T) {
@@ -970,7 +981,7 @@ if (fished_only == T) {
 
   total_fish_data <- vast_fish %>%
     mutate(spatial_densities = map(vasterized_data, "spatial_densities")) %>%
-    select(survey, spatial_densities) %>%
+    select(survey,spatial_densities) %>%
     unnest() %>%
     filter(str_replace(species, "_", " ") %in% fished_species$sci_name)
 } else {
@@ -1371,7 +1382,7 @@ lm_candidate_vars <- skynet_names[!skynet_names %in% c(
 
 # models <- c('effort')
 # models <- c("ranger", "gbm", "structural", "hours", "engine_power")
-models <- c("gbm", "structural","ranger", "engine_power")
+models <- c("gbm", "structural", "engine_power")
 
 delta_skynet <- skynet_data %>%
   select(-contains("lag")) %>%
