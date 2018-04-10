@@ -335,6 +335,43 @@ fit_skynet <- function(dep_var,
 
   }
 
+  if (model_name == "mars"){
+
+    cl <- parallel::makeCluster(cores)
+
+    doParallel::registerDoParallel(cl)
+
+    mars_grid <- expand.grid(degree = 1:2, nprune = seq(2, ncol(reg_data), by = 2))
+
+
+    model <- train(
+     as.formula(paste0(dep_var," ~ .")),
+      data = reg_data,
+      method = "earth",
+      trControl = fit_control,
+      weights = weights,
+      tuneGrid = mars_grid,
+      trace = 1
+    )
+
+    stopCluster(cl)
+
+    pred_testing <- predict(model, newdata = testing) %>% as.numeric()
+
+    pred_training<- predict(model, newdata = training) %>% as.numeric()
+
+
+    out_testing <- testing %>%
+    as_data_frame() %>%
+    mutate(pred = pred_testing)
+
+    out_training <- training %>%
+      as_data_frame() %>%
+      mutate(pred = pred_training)
+
+
+  }
+
   if (model_name == 'structural') {
 
     compile(here::here('scripts','fit_structural_skynet.cpp'))
@@ -420,8 +457,7 @@ fit_skynet <- function(dep_var,
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|')))
 
-    model <- lm(as.formula(glue::glue("{dep_var} ~ log(total_hours)")), data = independent_data)
-
+    model <- lm(as.formula(glue::glue("{dep_var} ~ log(total_hours)")), data = independent_data %>% filter(total_hours > 0))
     out_training <- training %>%
       as_data_frame() %>%
       mutate(pred = predict(model, newdata = training))
@@ -457,7 +493,6 @@ fit_skynet <- function(dep_var,
       mutate(pred = predict(model, newdata = testing))
 
   } # close hours model
-
   return(list(model = model, test_predictions = out_testing,
          training_predictions = out_training))
 

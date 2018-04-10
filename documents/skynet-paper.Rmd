@@ -34,7 +34,7 @@ library(tidyverse)
 
 # run options -------------------------------------------------------------
 
-run_name <- 'v3.0'
+run_name <- 'v3.2-unfished'
 
 run_dir <- here::here('results',run_name)
 
@@ -480,26 +480,31 @@ skynet_models %>%
 ```{r}
 
 a = skynet_models %>% 
-  group_by(model) %>% 
+  group_by(model, data_subset) %>% 
   mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
   ungroup() %>% 
   mutate(model = fct_reorder(model, mean_r2)) %>% 
-  filter(mean_r2 == max(mean_r2), dep_var == "log_density") %>% 
+  filter(model == "gbm") %>% 
+  filter(mean_r2 == max(mean_r2)) %>%
   group_by(test_set) %>% 
   mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
   ungroup() %>% 
   mutate(test_set = fct_reorder(test_set, -mean_r2)) %>% 
-  select(dep_var, weight_surveys, test_sets, data_subset, training_data) %>% 
-  mutate(obs_pred = map2(training_data,dep_var, ~.x %>% select(.y,pred))) %>% 
-  select(-training_data) %>% 
+  select(dep_var, weight_surveys, test_sets, data_subset, test_data) %>% 
+  mutate(obs_pred = map2(test_data,dep_var, ~.x %>% select(.y,pred))) %>% 
+  select(-test_data) %>% 
   unnest() %>% 
-  gather(observed_name, observed,contains("log")) %>% 
+  gather(observed_name, observed,contains("log"), contains("density")) %>% 
   ggplot(aes(observed, pred, fill = weight_surveys)) + 
   geom_point(shape = 21) + 
+  geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "pink") +
   facet_wrap(dep_var ~ test_sets, scales = "free") + 
   theme_minimal()
 
 a
+
+huh <- skynet_models %>% 
+  filter(test_sets == "alaska")
 ```
 
 
@@ -1062,5 +1067,11 @@ see @vanPutten2012 for references supporting fish abundance as a driver of econo
 
 @Gillis2012 for an alternative economic model to the ideal free distribution. Also has great citations for behavior tracking abundance for snow crabs, as well as failures for other fisheries
 # Works Cited
+
+look into urban economics 
+
+structraul models around migration. It's too costly for people to move
+
+John kennon econometrica, costs and benefits of moving from point a to point b
 
 

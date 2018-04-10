@@ -2450,6 +2450,21 @@ That is especially apparent now with the out-of-region sampling regimes, which a
   
   - on the dependent variable side of things, what if you tried to predict the percentile rank of density? That poses a challenge of scale, but it might work better. So, there you would transform density into percentil rank of density. The dependent variables are getting centered and scaled, though I want to make sure that add_predictions is doing things right....  but if it is then I don't think that transforming effort into a rank would make that much of a difference... Though to an extent it still might. At the moment, let's say you train on alaska and center and scale there. Then, the west coast is going to look like it has really small effort, relative to the mean of the alaska data. So, might be better to center and scale the data at the splitting point. SO, the predictor is regional average effort. 
 
+On the centering and scaling side, the key question is really how is caret/add recipes dealing with the centering and scaling: are they doing what recipes does and storing the mean and sd for the training data and using that to rescale the testing data, or are they recalculating on the fly?
+
+So here's what I think you need to do. 
+
+Raw data that is centered and scaled locally for the v-fold cross validation step. Once you have the best parameters, then use those parameters to train on the already centered and scaled data, and then predict on the the pre (and locally) centered and scaled testing data. 
+
+Aha, from the caret documentation
+
+"Note that, in all cases, the preProcess function estimates whatever it requires from a specific data set (e.g. the training set) and then applies these transformations to any data set without recomputing the values"... so that's not really what you want. So, I think sadly here you are going to have to roll your own.... though maybe use caret for the model tuning? 
+
+that's an idea. Use caret for model tuning on the training data. Then, use your own calls, using the tuned parameters, to gbm, ranger, whatever, on the locally centered and scaled test and training data 
+
+What about time there? In that case, you would still center and scale by region
+
+Aha, as I suspected, the centered ones can't beat the best of the log density, but they don't get as bad. There's progress to be made here. 
 
 
 
