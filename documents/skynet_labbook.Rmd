@@ -2466,5 +2466,26 @@ What about time there? In that case, you would still center and scale by region
 
 Aha, as I suspected, the centered ones can't beat the best of the log density, but they don't get as bad. There's progress to be made here. 
 
+# Where to from here
+
+
+The fact that the models actually work better on the unfished species than the fished is troubling to say the least. It seems to suggest to me that what the models are basically doing is habitat mapping, and that might explain why understanding the unfished is actually easier (less regulations to distort behavior). Given just GFW data then, our hypothesis is that behavior is reflective of economic priorities, which include abundance. Given that the model is just as good at picking up species that aren't fished, it seems like it's just tuning to patterns that aren't reflective of economic choices per say, and as such are likely to have a hard time generalizing. This could just be a mismatch of scale, but point being it's hard to get good evidence from this that we can uSE GFW to predict where and when fish are in places without the surveys. 
+
+So, the options
+
+  - Tinker some more. Can still mess around with a few more transformations of the data
+    - more data
+  
+  - Go with a negative result
+    - Effort data is not a good predictor of spatio-temporal distribution of fish
+    - Effort provide a predictable but idosynchratic link to abundance
+    - Important to stake a well defended claim to the idea before someone publishes something simpler and wrong
+    - Is there just a "well duh, the data don't match well enough" problem here
+    
+  - KISS
+    - Go back to RAM and look at gross biomass v. effort
+    - Integrate with catch data, SP models?
+    
+
 
 

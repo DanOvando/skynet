@@ -1504,7 +1504,7 @@ test_train_data <- purrr::cross_df(list(
     sfm <- safely(fit_skynet)
 
     skynet_models <- skynet_models %>%
-      # filter(model == "mars") %>%
+      filter(model == "structural") %>%
       # slice(1) %>%
       # filter(train_set == "not_west_coast", dep_var == "cs_density") %>%
       # filter(model == "gbm", dep_var == "log_biomass") %>%
@@ -1622,6 +1622,10 @@ test_train_data <- purrr::cross_df(list(
       )
     )
 
+#
+#   skynet_models %>%
+#     ggplot(aes(data_subset, r2)) +
+#     geom_boxplot()
 
   # check <- skynet_models %>%
   #   filter(data_subset == "skynet_100km", model == "gbm", test_set == "goa-ai", train_set == "ebsbts")

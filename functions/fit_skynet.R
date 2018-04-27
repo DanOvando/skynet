@@ -24,14 +24,14 @@ fit_skynet <- function(dep_var,
                        structural_vars = c(
                          'log_density',
                          'dist_from_port',
+                         "dist_from_shore",
                          'mean_vessel_length',
                          'm_below_sea_level',
                          'restricted_use_mpa',
                          'no_take_mpa',
                          'total_hours',
                          'total_engine_power',
-                         'aggregate_price'
-                       ),
+                         "aggregate_price"),
                        fitcontrol_method = 'repeatedcv',
                        fitcontrol_number = 1,
                        fitcontrol_repeats = 1,
@@ -380,11 +380,14 @@ fit_skynet <- function(dep_var,
 
     independent_data <- training %>%
       as.data.frame() %>%
-      select(matches(paste0(structural_vars, collapse = '|')))
+      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      mutate(intercept = 1)
 
     testing_frame <- testing %>%
       as.data.frame() %>%
-      select(matches(paste0(structural_vars, collapse = '|')))
+      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      mutate(intercept = 1)
+
     struct_data <- list(
       data = as.matrix(independent_data %>%
                          select(dist_from_port,
@@ -392,7 +395,9 @@ fit_skynet <- function(dep_var,
                                 total_engine_power,
                                 no_take_mpa,
                                 restricted_use_mpa,
-                                m_below_sea_level)),
+                                m_below_sea_level,
+                                intercept,
+                                dist_from_shore)),
       log_d = as.numeric(independent_data$log_density),
       effort = as.numeric(independent_data$total_hours),
       price = as.numeric(independent_data$aggregate_price),
@@ -408,6 +413,8 @@ fit_skynet <- function(dep_var,
 
     model <- MakeADFun(data=struct_data,parameters=struct_params)
 
+
+
     mle_fit <-
       nlminb(
         model$par,
@@ -422,7 +429,7 @@ fit_skynet <- function(dep_var,
                    mle_report = mle_fit_report
                   )
 
-  testing_prediction <- predict_structural_model(mle_fit = mle_fit,
+    testing_prediction <- predict_structural_model(mle_fit = mle_fit,
                                     data = testing_frame,
                                     mle_vars = colnames(struct_data$data),
                                     mp = 0)
