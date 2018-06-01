@@ -2480,11 +2480,14 @@ So, the options
     - Effort data is not a good predictor of spatio-temporal distribution of fish
     - Effort provide a predictable but idosynchratic link to abundance
     - Important to stake a well defended claim to the idea before someone publishes something simpler and wrong
-    - Is there just a "well duh, the data don't match well enough" problem here
+    - Is there just a "well duh, the data don't match well enough" problem here?
+    - Definitely don't believe that effort is random, so that would mean either that
+      - Mismatch between abundance data and resulting effort
     
   - KISS
     - Go back to RAM and look at gross biomass v. effort
     - Integrate with catch data, SP models?
+    - Hard since can't really allocate effort to different sectors. 
     
 
 

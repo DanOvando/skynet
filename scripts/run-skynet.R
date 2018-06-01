@@ -59,7 +59,7 @@ plot_data <- F # plot covariates and maps
 
 query_fishdata <- F # get trawl survey data or load saved
 
-query_gfw <- F # get gfw data or load saved
+query_gfw <- T # get gfw data or load saved
 
 min_times_seen <- 9
 
@@ -121,7 +121,7 @@ lat_lon_res <-
 res <- 1 / lat_lon_res
 
 
-min_year <- 2012
+min_year <- 2010
 
 species_list <-
   c("Gadus_chalcogrammus",
@@ -255,6 +255,7 @@ if (query_gfw == T) {
       FROM (
       SELECT
       YEAR(timestamp) year,
+      MONTH(timestamp) month,
       mmsi,
       FLOOR(lat*{res})/{res} rounded_lat,
       FLOOR(lon*{res})/{res} rounded_lon,
@@ -282,6 +283,7 @@ if (query_gfw == T) {
       GROUP BY
       mmsi,
       year,
+      month,
       rounded_lat,
       rounded_lon,
       mparu,
@@ -349,6 +351,20 @@ gfw_bbox <- gfw_data %>% # calculate bounding box for GFW data
   )
 
 # process gfw data
+
+survey_months <- tribble(~survey,~survey_months,
+        "wcgbts", c(5:10),
+        "ebsbts",c(7,8),
+        "wcgbts",c(7,8),
+        "goabts", c(7,8),
+        "wcghl", c(7,8),
+        "aibts", c(7,8)
+)
+
+gfw_data <- gfw_data %>%
+  left_join(survey_months, by = "survey") %>%
+  mutate(data = map2(data,survey_months, ~filter(.x, month %in% .y))) %>%
+  select(-survey_months)
 
 merge_known_and_inferred <- function(known, inferred, cap = NA) {
   if (is.na(cap)) {

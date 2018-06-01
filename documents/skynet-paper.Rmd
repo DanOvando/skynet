@@ -40,8 +40,7 @@ run_dir <- here::here('results',run_name)
 
 fig_theme <- theme_ipsum(base_size = 14, axis_title_size = 18)
 
-fig_theme <- theme_get() + 
-  theme(axis.text = element_text(family = "comic-sans"))
+fig_theme <- theme_get()
 
 theme_set(fig_theme)
 
