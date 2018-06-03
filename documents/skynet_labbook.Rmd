@@ -2490,5 +2490,11 @@ So, the options
     - Hard since can't really allocate effort to different sectors. 
     
 
+# data filtering
 
+Runs to create options for
+- GFW vars only
+- fished/unfished only
+- survey months only
+- lagged biomass
 

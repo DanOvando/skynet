@@ -82,7 +82,7 @@ rescale_data <- function(data, resolution = 25, lon_name = rounded_lon, lat_name
       ungroup() %>%
       spread(variable, rescaled_value)
 
-    rescaled_data <- rescaled_data[, colnames(skynet_data)]
+    rescaled_data <- rescaled_data[, colnames(data)]
 
     rescaled_data$any_fishing <- rescaled_data$total_hours > 0
 
