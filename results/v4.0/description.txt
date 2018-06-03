@@ -1,1 +1,1 @@
-add in a few more candidate dependent variables, no mars for now 
+Revamped run with all the options

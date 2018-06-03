@@ -30,7 +30,7 @@ demons::load_functions("functions")
 
 run_name <- "v4.0"
 
-run_description <- "add in a few more candidate dependent variables, no mars for now "
+run_description <- "Revamped run with all the options"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -47,7 +47,9 @@ num_cores <- 1
 
 run_models <- T # fit gfw models to fishdata
 
-models <- c("gbm", "structural", "engine_power", "hours")
+models <- c("gbm","mars" "structural", "engine_power", "hours")
+
+models <- c("mars")
 
 vasterize <- F # run vast or load saved object
 
@@ -1136,8 +1138,7 @@ tree_candidate_vars <- skynet_names[!skynet_names %in% c(dep_vars,
                                     == F &
                                       str_detect(skynet_names, "lag") == F]
 
-gfw_only_tree_candidate_vars <- tree_candidate_vars <-
-  c(tree_candidate_vars[tree_candidate_vars %in% gfw_vars], "random_var")
+gfw_only_tree_candidate_vars <- c(tree_candidate_vars[tree_candidate_vars %in% gfw_vars], "random_var")
 
 lm_candidate_vars <- skynet_names[!skynet_names %in% c(dep_vars,
                                                        never_ind_vars)]
@@ -1266,6 +1267,7 @@ test_train_data <- purrr::cross_df(list(
     sfm <- safely(fit_skynet)
 
     skynet_models <- skynet_models %>%
+      slice(1) %>%
       # filter(model == "structural") %>%
       # slice(1) %>%
       # filter(train_set == "not_west_coast", dep_var == "cs_density") %>%
@@ -1317,6 +1319,11 @@ test_train_data <- purrr::cross_df(list(
     mutate(no_error = map_lgl(error, is.null)) %>%
     filter(no_error)
 
+  # b <- skynet_models %>%
+  #   mutate(error = map(fitted_model, "error")) %>%
+  #   mutate(no_error = map_lgl(error, is.null)) %>%
+  #   filter(!no_error)
+
 
   diagnostic_plot_foo <- function(data,
                                   r2,
@@ -1341,7 +1348,7 @@ test_train_data <- purrr::cross_df(list(
         ),
         subtitle = paste0("data subset is: ", data_set)
       )
-  }
+  } # close diagnostic functions
 
 
   skynet_models <- skynet_models %>%

@@ -457,12 +457,14 @@ fit_skynet <- function(dep_var,
 
     independent_data <- training %>%
       as.data.frame() %>%
-      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      select(dep_var, structural_vars) %>%
       filter(total_hours > 0)
 
     testing_frame <- testing %>%
       as.data.frame() %>%
-      select(matches(paste0(structural_vars, collapse = '|')))
+      select(dep_var, structural_vars) %>%
+      filter(total_hours > 0)
+
 
     model <- lm(as.formula(glue::glue("{dep_var} ~ log(total_hours)")), data = independent_data %>% filter(total_hours > 0))
     out_training <- training %>%
@@ -481,12 +483,16 @@ fit_skynet <- function(dep_var,
 
     independent_data <- training %>%
       as.data.frame() %>%
-      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      select(dep_var, structural_vars) %>%
+      # select(matches(paste0(structural_vars, collapse = '|'))) %>%
       filter(total_engine_power > 0)
 
     testing_frame <- testing %>%
       as.data.frame() %>%
-      select(matches(paste0(structural_vars, collapse = '|')))
+      select(dep_var, structural_vars) %>%
+      filter(total_engine_power > 0)
+
+
 
     model <- lm(as.formula(glue::glue("{dep_var} ~ log(total_engine_power)")), data = independent_data)
 
