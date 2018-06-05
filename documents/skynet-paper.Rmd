@@ -34,7 +34,7 @@ library(tidyverse)
 
 # run options -------------------------------------------------------------
 
-run_name <- 'v3.2-unfished'
+run_name <- 'v4.0'
 
 run_dir <- here::here('results',run_name)
 
@@ -59,6 +59,11 @@ load(file = here::here('data','gfw_data.Rdata'))
 map_size <- 1
 
 
+skynet_data <- candidate_data %>% 
+  filter(fished_only == T, survey_months_only ==T) %>% 
+  select(skynet_data) %>% 
+  unnest() 
+
 # prep things
 
 pacific_map <- global_map %>%
@@ -78,12 +83,12 @@ vast_fish <- vast_fish[!map_lgl(vast_fish$vasterized_data, is.null), ]
 
 ```{r filter}
 
-bad_data <- "delta_skynet"
-
+# bad_data <- "delta_skynet"
+# 
 bad_surveys <- "wcghl"
-
-skynet_models <- skynet_models %>% 
-  filter(!data_subset %in% bad_data)
+# 
+# skynet_models <- skynet_models %>% 
+#   filter(!data_subset %in% bad_data)
 
 ```
 
@@ -195,15 +200,7 @@ Each of the surveys contains a variety of different species, including highly ab
 ```{r fish-plot, fig.cap = "Number of positive encounters for the top-10 most observed species in each research survey (XXswitch to common names"}
 
 fish_summary <- vast_fish %>% 
-  select(survey, data,spp) %>% 
-  unnest() %>% 
-  group_by(survey, spp, year) %>%
-  summarise(mean_catch = mean(catch_kg, na.rm = T)) %>% 
-  group_by(survey, spp) %>% 
-  mutate(scaled_catch = (mean_catch - mean(mean_catch, na.rm = T))) %>% 
-  ungroup()
-
-fish_summary <- vast_fish %>% 
+    filter(!survey %in% bad_surveys) %>% 
   select(survey, data,spp) %>% 
   unnest() %>% 
   group_by(survey, spp) %>%
@@ -235,7 +232,7 @@ The result of VAST is a network of "knots" that define polygons of equal density
 
 fish_abundance <- skynet_data %>% 
   filter(!survey %in% bad_surveys) %>% 
-  group_by(survey,knot, rounded_lat, rounded_lon,year) %>% 
+  group_by(survey,knot, rounded_lat, rounded_lon) %>% 
   summarise(total_density = mean(density)) %>% 
   mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon))
   
@@ -255,7 +252,8 @@ fish_abundance <- skynet_data %>%
   geom_sf(data = pacific_map, fill = 'grey60') +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
-  scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)))+ 
+      scale_color_viridis(name =bquote("Density"~(ton/km^2)))+ 
+  # scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)))+ 
   theme(legend.key.height = unit(1.5,"cm"))
 
 
@@ -314,7 +312,8 @@ gfw_effort <- gfw_data %>%
   geom_sf(data = pacific_map, fill = 'grey60') +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
-  scale_color_viridis(trans = "log10", name = "Fishing Hours", labels = scales::comma) + 
+  scale_color_viridis(name = "Fishing Hours", labels = scales::comma) + 
+      # scale_color_viridis(trans = "log10", name = "Fishing Hours", labels = scales::comma) + 
   theme(legend.key.height = unit(1.5,"cm"))
   
   gfw_map
@@ -510,6 +509,16 @@ huh <- skynet_models %>%
 ```
 
 
+```{r}
+skynet_models %>% 
+  ggplot(aes(data_subset, r2, fill = dep_var )) + 
+  ggbeeswarm::geom_beeswarm(shape = 21) + 
+  scale_fill_viridis_d() + 
+  coord_flip() + 
+  facet_wrap(~test_sets)
+```
+
+
 
 ### Fig.2 Upscaling/downscaling performance
 
@@ -569,6 +578,8 @@ spatial_performance <- skynet_models %>%
 
 
 For visual clarity, we present results upscaled to the 100km^2^ resolution. At each 100km^2^ cell, we calculate the residual as the difference in predicted and observed densities of fish. The median of the residuals is `r median(spatial_performance$resid)` tons, though the mean is `r mean(spatial_performance$resid)`, driven negative by a long left tail in the residuals, corresponding to a region in the north central Eastern Bering Sea where the model dramatically under-predicted the observed abundance of fish. However for most regions we see that the model does a good job or predicting both the abundance and spatial distribution of fish (Fig. \@ref(fig:spatial-plot))
+
+ XXNEED TO DO MEAN BY YEAR OR JUST FINAL YEAR, OTHERWISE SUMMING MORE RESIDUALS FOR SOME PLACESXX
 
 ```{r spatial-plot, fig.cap = "Spatial residuals predicted by GBM model (log(density) is dependent variable). Negative residuals (red) indicate model underpredicted the true density, positive residuals (blue) indicate the model overpredicted. Data aggregated at 100km^2^ resolution"}
 

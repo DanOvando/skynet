@@ -2498,3 +2498,14 @@ Runs to create options for
 - survey months only
 - lagged biomass
 
+# Final Analyses
+
+Unless things take a serious turn, you're not getting any better results from the analysis. So, what do you need to do?
+
+## filling in spatial gaps
+
+Can you use GFW to augment assessments by filling in spatial gaps in the survey? Evidence so far suggest not really if it's the case of going from Alaska to GOA, and you already have that run. But you haven't really explored the within-survey side of things much. 
+
+So, what you need is a thing that does test and training internally, e.g subdivide each region, either by splitting or spatially correlated sampling. 
+
+From there, you should also do historic, but by region as well. 

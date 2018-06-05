@@ -43,13 +43,13 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 # set section options (what to run) ---------------------------------------------------------
 
-num_cores <- 1
+num_cores <- 3
 
-run_models <- T # fit gfw models to fishdata
+run_models <- F # fit gfw models to fishdata
 
-models <- c("gbm","mars" "structural", "engine_power", "hours")
+models <- c("gbm", "structural", "engine_power", "hours")
 
-models <- c("mars")
+# models <- c("mars")
 
 vasterize <- F # run vast or load saved object
 
@@ -1245,7 +1245,8 @@ test_train_data <- purrr::cross_df(list(
     dep_var = (dep_vars),
     temp = list(test_train_data),
     model = models,
-    weight_surveys = c(T, F)
+    weight_surveys = c(T, F),
+    gfw_only = c(TRUE, FALSE)
   )) %>%
     unnest(temp, .drop = F) %>%
     filter(!(data_subset == 'delta_skynet' &
@@ -1267,7 +1268,6 @@ test_train_data <- purrr::cross_df(list(
     sfm <- safely(fit_skynet)
 
     skynet_models <- skynet_models %>%
-      slice(1) %>%
       # filter(model == "structural") %>%
       # slice(1) %>%
       # filter(train_set == "not_west_coast", dep_var == "cs_density") %>%
@@ -1282,8 +1282,10 @@ test_train_data <- purrr::cross_df(list(
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
+      ifelse(gfw_only == T,
+      list(gfw_only_tree_candidate_vars),
       list(tree_candidate_vars)
-    )) %>%
+    ))) %>%
       mutate(
         fitted_model = pmap(
           list(
