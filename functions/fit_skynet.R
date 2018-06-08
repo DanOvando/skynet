@@ -12,7 +12,8 @@
 #' @return a list of model fits
 #' @export
 #'
-fit_skynet <- function(dep_var,
+fit_skynet <- function(data_subset,
+                       dep_var,
                        model_name,
                        training,
                        testing,
@@ -31,43 +32,56 @@ fit_skynet <- function(dep_var,
                          'no_take_mpa',
                          'total_hours',
                          'total_engine_power',
-                         "aggregate_price"),
+                         "aggregate_price"
+                       ),
                        fitcontrol_method = 'repeatedcv',
                        fitcontrol_number = 1,
                        fitcontrol_repeats = 1,
                        tune_model = T,
-                       cores = 4) {
+                       cores = 4,
+                       data_sources) {
   # model_formula <-
   #   paste(dep_var, '~', ind_vars) %>% as.formula() # construct model forumla
   #
   #
 
 
+
   doMC::registerDoMC(cores = cores)
   # cluster <- makeCluster(cores) # convention to leave 1 core for OS
   # doParallel::registerDoParallel(cluster)
 
-  fit_control <- trainControl(method = fitcontrol_method,
-                              number = fitcontrol_number,
-                              repeats = fitcontrol_repeats,
-                              allowParallel = TRUE)
+  fit_control <- trainControl(
+    method = fitcontrol_method,
+    number = fitcontrol_number,
+    repeats = fitcontrol_repeats,
+    allowParallel = TRUE
+  )
+  dat <-
+    data_sources$data[[which(data_sources$data_subset == data_subset)]]
+
+  training <- dat %>%
+    filter(index %in% training)
+
+  testing <- dat %>%
+    filter(index %in% testing)
+
 
   independent_data <- training %>%
     # as.data.frame() %>%
     select(-matches(paste0(never_ind_vars, collapse = '|'))) %>%
     select(matches(paste0(tree_candidate_vars, collapse = '|')))
 
-  if (weight_surveys == T){
-
+  if (weight_surveys == T) {
     weights <- training %>%
       # as_data_frame() %>%
       group_by(survey) %>%
       count() %>%
-      mutate(weight = 1/n)
+      mutate(weight = 1 / n)
 
     weights <- training %>%
       # as_data_frame() %>%
-      select(survey,num_vessels) %>%
+      select(survey, num_vessels) %>%
       left_join(weights, by = "survey")
 
     weights <- weights$weight
@@ -90,13 +104,23 @@ fit_skynet <- function(dep_var,
     as_data_frame() %>%
     mutate(!!dep_var := dependent_data)
 
+
+  train_recipe <- recipes::recipe(model_formula,
+                                  data = reg_data) %>%
+    step_nzv(all_predictors()) %>%
+    step_center(all_predictors()) %>%
+    step_scale(all_predictors())
+
+  prep_recipe <- prep(train_recipe, data = reg_data, retain = T)
+
+
   if (model_name == 'cforest') {
     model <- train(
       model_formula,
       data = reg_data,
       method = "cforest",
       trControl = fit_control,
-      preProcess = c("center","scale"),
+      preProcess = c("center", "scale"),
       weights = weights
     )
     if (tune_model == T) {
@@ -127,7 +151,7 @@ fit_skynet <- function(dep_var,
         data = reg_data,
         method = "cforest",
         trControl = fit_control,
-        preProcess = c("center","scale"),
+        preProcess = c("center", "scale"),
         weights = weights
 
       )
@@ -154,7 +178,7 @@ fit_skynet <- function(dep_var,
       method = "ranger",
       # na.action = na.omit,
       trControl = fit_control,
-      preProcess = c("center","scale"),
+      preProcess = c("center", "scale"),
       importance = "impurity_corrected",
       weights = weights
       # tuneGrid = rf_grid
@@ -187,7 +211,7 @@ fit_skynet <- function(dep_var,
         method = "ranger",
         # na.action = na.omit,
         trControl = fit_control,
-        preProcess = c("center","scale"),
+        preProcess = c("center", "scale"),
         importance = "impurity_corrected",
         verbose = TRUE,
         weights = weights
@@ -218,7 +242,7 @@ fit_skynet <- function(dep_var,
       do.trace = 10,
       # na.action = na.omit,
       trControl = fit_control,
-      preProcess = c("center","scale"),
+      preProcess = c("center", "scale"),
       weights = weights
 
       # tuneGrid = rf_grid
@@ -254,7 +278,7 @@ fit_skynet <- function(dep_var,
         na.action = na.omit,
         trControl = fit_control,
         importance = T,
-        preProcess = c("center","scale"),
+        preProcess = c("center", "scale"),
         weights = weights
       )
 
@@ -272,22 +296,22 @@ fit_skynet <- function(dep_var,
 
   if (model_name == 'gbm') {
 
+    on.exit(detach('package:plyr'))
+
     # gbm_grid <-  expand.grid(interaction.depth = c(1, 5),
     #                         n.trees = (1:10)*100,
     #                         shrinkage = 0.01,
     #                         n.minobsinnode = 20)
 
-
-    model <- train(
-      model_formula,
+    model <- caret::train(
+      train_recipe,
       data = reg_data,
       method = "gbm",
       verbose = T,
-      trControl = fit_control,
-      preProcess = c("center","scale"),
-      weights = weights
+      trControl = fit_control
     )
-    # on.exit(detach('package:plyr'))
+
+    # detach('package:plyr')
 
 
     if (tune_model == T) {
@@ -312,40 +336,64 @@ fit_skynet <- function(dep_var,
         paste0(dep_var, '~', paste(vars_to_include, collapse = '+')) %>%
         as.formula()
 
+      train_recipe <- recipes::recipe(model_formula,
+                                      data = reg_data) %>%
+        step_nzv(all_predictors()) %>%
+        step_center(all_predictors()) %>%
+        step_scale(all_predictors())
+
       model <- train(
-        model_formula,
+        train_recipe,
         data = reg_data,
         method = "gbm",
         verbose = T,
-        trControl = fit_control,
-        preProcess = c("center","scale"),
-        weights = weights
+        trControl = fit_control
       )
+
+      # detach('package:plyr')
+
 
       # on.exit(detach('package:plyr'))
 
     }
+
+    prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
+
+    proc_training <- juice(prepped_recipe)
+
+    proc_testing <- bake(prepped_recipe, newdata = testing)
+
+     training_pred <-
+      predict(model$finalModel,
+              newdata =  proc_training,
+              n.trees = model$finalModel$n.trees)
+
+     testing_pred <-
+       predict(model$finalModel,
+               newdata =  proc_testing,
+               n.trees = model$finalModel$n.trees)
+
     out_testing <- testing %>%
-      as_data_frame() %>%
-      add_predictions(model)
+      mutate(pred = testing_pred)
 
     out_training <- training %>%
-      as_data_frame() %>%
-      add_predictions(model)
+      mutate(pred = training_pred)
+
+    model <- model$finalModel
 
   }
 
-  if (model_name == "mars"){
-
+  if (model_name == "mars") {
     cl <- parallel::makeCluster(cores)
 
     doParallel::registerDoParallel(cl)
 
-    mars_grid <- expand.grid(degree = 1:2, nprune = seq(2, ncol(reg_data), by = 2))
+    mars_grid <-
+      expand.grid(degree = 1:2, nprune = seq(2, ncol(reg_data), by = 2))
 
 
     model <- train(
-     as.formula(paste0(dep_var," ~ .")),
+      as.formula(paste0(dep_var, " ~ .")),
       data = reg_data,
       method = "earth",
       trControl = fit_control,
@@ -356,14 +404,16 @@ fit_skynet <- function(dep_var,
 
     stopCluster(cl)
 
-    pred_testing <- predict(model, newdata = testing) %>% as.numeric()
+    pred_testing <-
+      predict(model, newdata = testing) %>% as.numeric()
 
-    pred_training<- predict(model, newdata = training) %>% as.numeric()
+    pred_training <-
+      predict(model, newdata = training) %>% as.numeric()
 
 
     out_testing <- testing %>%
-    as_data_frame() %>%
-    mutate(pred = pred_testing)
+      as_data_frame() %>%
+      mutate(pred = pred_testing)
 
     out_training <- training %>%
       as_data_frame() %>%
@@ -373,10 +423,9 @@ fit_skynet <- function(dep_var,
   }
 
   if (model_name == 'structural') {
+    compile(here::here('scripts', 'fit_structural_skynet.cpp'))
 
-    compile(here::here('scripts','fit_structural_skynet.cpp'))
-
-    dyn.load(dynlib(here::here("scripts","fit_structural_skynet")))
+    dyn.load(dynlib(here::here("scripts", "fit_structural_skynet")))
 
     independent_data <- training %>%
       as.data.frame() %>%
@@ -389,15 +438,19 @@ fit_skynet <- function(dep_var,
       mutate(intercept = 1)
 
     struct_data <- list(
-      data = as.matrix(independent_data %>%
-                         select(dist_from_port,
-                                mean_vessel_length,
-                                total_engine_power,
-                                no_take_mpa,
-                                restricted_use_mpa,
-                                m_below_sea_level,
-                                intercept,
-                                dist_from_shore)),
+      data = as.matrix(
+        independent_data %>%
+          select(
+            dist_from_port,
+            mean_vessel_length,
+            total_engine_power,
+            no_take_mpa,
+            restricted_use_mpa,
+            m_below_sea_level,
+            intercept,
+            dist_from_shore
+          )
+      ),
       log_d = as.numeric(independent_data$log_density),
       effort = as.numeric(independent_data$total_hours),
       price = as.numeric(independent_data$aggregate_price),
@@ -411,7 +464,7 @@ fit_skynet <- function(dep_var,
       logit_q = log(.001 / (1 - .001))
     )
 
-    model <- MakeADFun(data=struct_data,parameters=struct_params)
+    model <- MakeADFun(data = struct_data, parameters = struct_params)
 
 
 
@@ -426,13 +479,15 @@ fit_skynet <- function(dep_var,
     mle_fit_report <- model$report()
 
     model <-  list(mle_fit = mle_fit,
-                   mle_report = mle_fit_report
-                  )
+                   mle_report = mle_fit_report)
 
-    testing_prediction <- predict_structural_model(mle_fit = mle_fit,
-                                    data = testing_frame,
-                                    mle_vars = colnames(struct_data$data),
-                                    mp = 0)
+    testing_prediction <-
+      predict_structural_model(
+        mle_fit = mle_fit,
+        data = testing_frame,
+        mle_vars = colnames(struct_data$data),
+        mp = 0
+      )
 
     out_training <- training %>%
       as_data_frame() %>%
@@ -453,8 +508,6 @@ fit_skynet <- function(dep_var,
   } #close structural
 
   if (model_name == 'hours') {
-
-
     independent_data <- training %>%
       as.data.frame() %>%
       select(dep_var, structural_vars) %>%
@@ -466,7 +519,8 @@ fit_skynet <- function(dep_var,
       filter(total_hours > 0)
 
 
-    model <- lm(as.formula(glue::glue("{dep_var} ~ log(total_hours)")), data = independent_data %>% filter(total_hours > 0))
+    model <-
+      lm(as.formula(glue::glue("{dep_var} ~ log(total_hours)")), data = independent_data %>% filter(total_hours > 0))
     out_training <- training %>%
       as_data_frame() %>%
       mutate(pred = predict(model, newdata = training))
@@ -479,8 +533,6 @@ fit_skynet <- function(dep_var,
   } # close hours model
 
   if (model_name == 'engine_power') {
-
-
     independent_data <- training %>%
       as.data.frame() %>%
       select(dep_var, structural_vars) %>%
@@ -494,7 +546,10 @@ fit_skynet <- function(dep_var,
 
 
 
-    model <- lm(as.formula(glue::glue("{dep_var} ~ log(total_engine_power)")), data = independent_data)
+    model <-
+      lm(as.formula(glue::glue(
+        "{dep_var} ~ log(total_engine_power)"
+      )), data = independent_data)
 
     out_training <- training %>%
       as_data_frame() %>%
@@ -506,7 +561,13 @@ fit_skynet <- function(dep_var,
       mutate(pred = predict(model, newdata = testing))
 
   } # close hours model
-  return(list(model = model, test_predictions = out_testing,
-         training_predictions = out_training))
+
+  return(
+    list(
+      model = model,
+      test_predictions = out_testing,
+      training_predictions = out_training
+    )
+  )
 
 }

@@ -99,6 +99,8 @@ rescale_data <- function(data, resolution = 25, lon_name = rounded_lon, lat_name
     #   facet_wrap(~source) +
     #   scale_fill_viridis()
 
+    rescaled_data$index <- 1:nrow(rescaled_data)
+
     return(rescaled_data)
 
 

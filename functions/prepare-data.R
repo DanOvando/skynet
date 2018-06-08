@@ -263,7 +263,9 @@ prepare_data <-
       ) %>%
       ungroup()
 
+    total_fish_data$index <- 1:nrow(total_fish_data)
 
+    skynet_data$index <- 1:nrow(skynet_data)
 
     return(list(total_fish_data = total_fish_data,
                 skynet_data = skynet_data))

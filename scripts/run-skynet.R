@@ -26,9 +26,11 @@ library(recipes)
 library(sf)
 library(tidyverse)
 
+filter <- dplyr::filter
+
 demons::load_functions("functions")
 
-run_name <- "v4.0"
+run_name <- "v4.1"
 
 run_description <- "Revamped run with all the options"
 
@@ -43,7 +45,7 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 # set section options (what to run) ---------------------------------------------------------
 
-num_cores <- 3
+num_cores <- 1
 
 run_models <- F # fit gfw models to fishdata
 
@@ -897,7 +899,6 @@ if (vasterize == T) {
   save(file = here::here("data", "vast_fish.Rdata"),
        vast_fish)
 } else {
-  print('NO VAST')
   load(file = here::here("data", "vast_fish.Rdata"))
 }
 
@@ -1224,9 +1225,11 @@ test_train_data <- purrr::cross_df(list(
   test_sets = c("random",
                 "alaska",
                 "west_coast",
-                "historic"),
-                # "goa-ai",
-                # "ebs-ai"),
+                "historic",
+                "spatial_alaska",
+                "spatial_west_coast",
+                "historic_alaska",
+                "historic_west_coast"),
   data_subset = data_sources$data_subset
 )) %>%
     left_join(data_sources, by = "data_subset")
@@ -1256,10 +1259,12 @@ test_train_data <- purrr::cross_df(list(
       model %in% c('ranger', 'gbm') &
         data_subset == 'uncentered_skynet'
     )) %>%
-    filter(!(model == 'structural' & dep_var != dep_vars[1]),!(weight_surveys == T &
-                                                                 !(test_sets %in% c(
-                                                                   "random", "historic"
-                                                                 ))))
+    filter(!(model == 'structural' &
+               dep_var != dep_vars[1]),
+           !(weight_surveys == T &
+               !(test_sets %in% c(
+                 "random", "historic"
+               ))))
 
   # run models --------------------------------------------------------------
 
@@ -1268,6 +1273,10 @@ test_train_data <- purrr::cross_df(list(
     sfm <- safely(fit_skynet)
 
     skynet_models <- skynet_models %>%
+      filter(error_1) %>%
+      slice(1) %>%
+    # filter(train_set == "spatial_alaska") %>%
+    #   slice(1) %>%
       # filter(model == "structural") %>%
       # slice(1) %>%
       # filter(train_set == "not_west_coast", dep_var == "cs_density") %>%
@@ -1289,6 +1298,7 @@ test_train_data <- purrr::cross_df(list(
       mutate(
         fitted_model = pmap(
           list(
+            data_subset = data_subset,
             dep_var = dep_var,
             model_name = model,
             training = train,
@@ -1297,14 +1307,16 @@ test_train_data <- purrr::cross_df(list(
           ),
           sfm,
           fitcontrol_number = 10,
-          fitcontrol_repeats = 1,
+          fitcontrol_repeats = 2,
           never_ind_vars = never_ind_vars,
           tune_model = T,
-          cores = num_cores
+          cores = num_cores,
+          data_sources = data_sources
         )
       )
 
     print('ran models')
+
     save(file = paste0(run_dir, "skynet_models.Rdata"),
          skynet_models)
     print('saved models')
@@ -1316,10 +1328,17 @@ test_train_data <- purrr::cross_df(list(
   # diagnose models ---------------------------------------------------------
 
 
+
   skynet_models <- skynet_models %>%
     mutate(error = map(fitted_model, "error")) %>%
     mutate(no_error = map_lgl(error, is.null)) %>%
     filter(no_error)
+
+  errors <- skynet_models$error %>% unique()
+
+  error_1 <- map_lgl(skynet_models$error, ~ifelse(is.null(.x),FALSE,as.character(.x) == as.character(errors[[4]])))
+
+  skynet_models$error[error_1]
 
   # b <- skynet_models %>%
   #   mutate(error = map(fitted_model, "error")) %>%
@@ -1359,6 +1378,7 @@ test_train_data <- purrr::cross_df(list(
       training_data = map(fitted_model, c("result", "training_predictions")),
       results = map(fitted_model, c("result", "model"))
     ) %>%
+    select(-fitted_model) %>%
     mutate(
       var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
       r2 = map2_dbl(test_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
@@ -1393,24 +1413,6 @@ test_train_data <- purrr::cross_df(list(
       )
     )
 
-#
-#   skynet_models %>%
-#     ggplot(aes(data_subset, r2)) +
-#     geom_boxplot()
-
-  # check <- skynet_models %>%
-  #   filter(data_subset == "skynet_100km", model == "gbm", test_set == "goa-ai", train_set == "ebsbts")
-  #
-  # skynet_models %>%
-  #   group_by(train_set, test_set) %>%
-  #   summarise(best_model = model[psuedo_r2_training == max(psuedo_r2_training)],
-  #             best_data = data_subset[psuedo_r2_training == max(psuedo_r2_training)],
-  #             best_depvar = dep_var[psuedo_r2_training == max(psuedo_r2_training)])
-
-  # skynet_models <- skynet_models %>%
-  #   mutate(resolution_test = map2(test_data, dep_var, resolution_effect)) %>%
-  #   mutate(test_resolution_plot = map(resolution_test, plot_resolution_effect))
-
 
   print('processed models')
 
@@ -1428,7 +1430,7 @@ test_train_data <- purrr::cross_df(list(
   downscaled_performance <-
     cross_df(list(
       run_name = skynet_models$run_name,
-      resolution =  seq(25, 200, by = 25)
+      resolution =  seq(25, 200, by = 50)
     )) %>%
     left_join(skynet_models %>% select(run_name, test_data), by = "run_name") %>%
     left_join(
