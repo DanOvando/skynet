@@ -28,7 +28,9 @@ library(tidyverse)
 
 filter <- dplyr::filter
 
-demons::load_functions("functions")
+functions <- list.files(here::here("functions"))
+
+walk(functions, ~ here::here("functions", .x) %>% source()) # load local functions
 
 run_name <- "v4.1"
 
@@ -45,9 +47,9 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 # set section options (what to run) ---------------------------------------------------------
 
-num_cores <- 1
+num_cores <- 4
 
-run_models <- F # fit gfw models to fishdata
+run_models <- T # fit gfw models to fishdata
 
 models <- c("gbm", "structural", "engine_power", "hours")
 
@@ -80,7 +82,7 @@ round_environmentals <- T
 
 raw_fish <- F
 
-dep_vars <- c('log_density', "cs_density", "relative_density", "log_economic_density")
+dep_vars <- c('log_density', "cs_density", "relative_density", "log_economic_density","economic_density")
 
 gfw_vars_only <- T
 
@@ -1121,7 +1123,8 @@ never_ind_vars <-
     "vessel_hours",
     "total_engine_hours",
     "aggregate_price.x",
-    "aggregate_price.y"
+    "aggregate_price.y",
+    "index"
   )
 
 
@@ -1226,6 +1229,8 @@ test_train_data <- purrr::cross_df(list(
                 "alaska",
                 "west_coast",
                 "historic",
+                "random_alaska",
+                "random_west_coast",
                 "spatial_alaska",
                 "spatial_west_coast",
                 "historic_alaska",
@@ -1272,9 +1277,48 @@ test_train_data <- purrr::cross_df(list(
   if (run_models == T) {
     sfm <- safely(fit_skynet)
 
-    skynet_models <- skynet_models %>%
-      filter(error_1) %>%
+    prepped_train <- skynet_models %>%
+      filter(data_subset == "skynet",
+             test_sets == "random",
+             model == "gbm",
+             gfw_only == FALSE)  %>%
       slice(1) %>%
+      mutate(candidate_vars = ifelse(
+        str_detect(.$data_subset, "delta"),
+        list(delta_candidate_vars),
+        ifelse(gfw_only == T,
+               list(gfw_only_tree_candidate_vars),
+               list(tree_candidate_vars)
+        ))) %>%
+      mutate(
+        fitted_model = pmap(
+          list(
+            data_subset = data_subset,
+            dep_var = dep_var,
+            model_name = model,
+            training = train,
+            testing = test,
+            tree_candidate_vars = candidate_vars
+          ),
+          prep_train,
+          fitcontrol_number = 5,
+          fitcontrol_repeats = 2,
+          never_ind_vars = never_ind_vars,
+          tune_model = T,
+          cores = num_cores,
+          data_sources = data_sources
+        )
+      )
+
+    tuned_pars <- map(prepped_train$fitted_model,~.) %>%
+      set_names(prepped_train$model)
+
+
+    skynet_models <- skynet_models %>%
+      # filter(data_subset == "skynet",
+      #        test_sets == "random",
+      #        model == "structural",
+      #        gfw_only == FALSE) %>%
     # filter(train_set == "spatial_alaska") %>%
     #   slice(1) %>%
       # filter(model == "structural") %>%
@@ -1311,7 +1355,8 @@ test_train_data <- purrr::cross_df(list(
           never_ind_vars = never_ind_vars,
           tune_model = T,
           cores = num_cores,
-          data_sources = data_sources
+          data_sources = data_sources,
+          tuned_pars = tuned_pars
         )
       )
 
@@ -1319,6 +1364,7 @@ test_train_data <- purrr::cross_df(list(
 
     save(file = paste0(run_dir, "skynet_models.Rdata"),
          skynet_models)
+
     print('saved models')
 
   } else {
@@ -1330,20 +1376,11 @@ test_train_data <- purrr::cross_df(list(
 
 
   skynet_models <- skynet_models %>%
+    mutate(index = 1:nrow(.)) %>%
     mutate(error = map(fitted_model, "error")) %>%
     mutate(no_error = map_lgl(error, is.null)) %>%
     filter(no_error)
 
-  errors <- skynet_models$error %>% unique()
-
-  error_1 <- map_lgl(skynet_models$error, ~ifelse(is.null(.x),FALSE,as.character(.x) == as.character(errors[[4]])))
-
-  skynet_models$error[error_1]
-
-  # b <- skynet_models %>%
-  #   mutate(error = map(fitted_model, "error")) %>%
-  #   mutate(no_error = map_lgl(error, is.null)) %>%
-  #   filter(!no_error)
 
 
   diagnostic_plot_foo <- function(data,
@@ -1375,8 +1412,7 @@ test_train_data <- purrr::cross_df(list(
   skynet_models <- skynet_models %>%
     mutate(
       test_data = map(fitted_model, c("result", "test_predictions")),
-      training_data = map(fitted_model, c("result", "training_predictions")),
-      results = map(fitted_model, c("result", "model"))
+      training_data = map(fitted_model, c("result", "training_predictions"))
     ) %>%
     select(-fitted_model) %>%
     mutate(

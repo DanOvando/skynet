@@ -17,6 +17,7 @@ fit_skynet <- function(data_subset,
                        model_name,
                        training,
                        testing,
+                       tuned_pars,
                        never_ind_vars,
                        survey_prices,
                        tree_candidate_vars,
@@ -51,12 +52,6 @@ fit_skynet <- function(data_subset,
   # cluster <- makeCluster(cores) # convention to leave 1 core for OS
   # doParallel::registerDoParallel(cluster)
 
-  fit_control <- trainControl(
-    method = fitcontrol_method,
-    number = fitcontrol_number,
-    repeats = fitcontrol_repeats,
-    allowParallel = TRUE
-  )
   dat <-
     data_sources$data[[which(data_sources$data_subset == data_subset)]]
 
@@ -296,38 +291,45 @@ fit_skynet <- function(data_subset,
 
   if (model_name == 'gbm') {
 
-    on.exit(detach('package:plyr'))
+    # on.exit(detach('package:plyr'))
 
-    # gbm_grid <-  expand.grid(interaction.depth = c(1, 5),
-    #                         n.trees = (1:10)*100,
-    #                         shrinkage = 0.01,
-    #                         n.minobsinnode = 20)
+    tuned_pars <- tuned_pars %>%
+      pluck(model_name)
 
-    model <- caret::train(
-      train_recipe,
-      data = reg_data,
-      method = "gbm",
-      verbose = T,
-      trControl = fit_control
-    )
+    prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
 
-    # detach('package:plyr')
+    proc_training <- juice(prepped_recipe)
+
+    # gbm_grid <-  expand.grid(interaction.depth = c(5,10),
+    #                         n.trees = c(3000,5000,10000),
+    #                         shrinkage = c(0.001,.01),
+    #                         n.minobsinnode = c(10,20))
+
+    model <- gbm(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+                 data = proc_training,
+                 n.trees = tuned_pars$n.trees,
+                 interaction.depth = tuned_pars$interaction.depth,
+                 shrinkage = tuned_pars$shrinkage,
+                 n.minobsinnode = tuned_pars$n.minobsinnode,
+                 weights = weights,
+                 verbose = TRUE,
+                 keep.data = FALSE)
 
 
     if (tune_model == T) {
-      var_importance <- varImp(model$finalModel)
+      var_importance <- summary(model)
 
       varimp <- var_importance %>%
         mutate(varname = rownames(.)) %>%
-        arrange(desc(Overall)) %>%
+        arrange(desc(rel.inf)) %>%
         mutate(varname = str_replace(varname, '(TRUE)|(FALSE)', ''))
 
 
       random_imp <-
-        varimp$Overall[varimp$varname == 'random_var']
+        varimp$rel.inf[varimp$varname == 'random_var']
 
       vars_to_include <- varimp %>%
-        filter(Overall > random_imp) %>% {
+        filter(rel.inf > random_imp) %>% {
           .$varname
         } %>% unique()
       reg_data <- reg_data[, c(dep_var, vars_to_include)]
@@ -342,44 +344,41 @@ fit_skynet <- function(data_subset,
         step_center(all_predictors()) %>%
         step_scale(all_predictors())
 
-      model <- train(
-        train_recipe,
-        data = reg_data,
-        method = "gbm",
-        verbose = T,
-        trControl = fit_control
-      )
+      prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
 
-      # detach('package:plyr')
+      proc_training <- juice(prepped_recipe)
 
 
-      # on.exit(detach('package:plyr'))
+      model <- gbm(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+                   data = proc_training,
+                   n.trees = tuned_pars$n.trees,
+                   interaction.depth = tuned_pars$interaction.depth,
+                   shrinkage = tuned_pars$shrinkage,
+                   n.minobsinnode = tuned_pars$n.minobsinnode,
+                   weights = weights,
+                   verbose = TRUE,
+                   keep.data = FALSE)
 
     }
 
-    prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
-
-    proc_training <- juice(prepped_recipe)
 
     proc_testing <- bake(prepped_recipe, newdata = testing)
 
      training_pred <-
-      predict(model$finalModel,
+      predict(model,
               newdata =  proc_training,
-              n.trees = model$finalModel$n.trees)
+              n.trees = model$n.trees)
 
      testing_pred <-
-       predict(model$finalModel,
+       predict(model,
                newdata =  proc_testing,
-               n.trees = model$finalModel$n.trees)
+               n.trees = model$n.trees)
 
     out_testing <- testing %>%
       mutate(pred = testing_pred)
 
     out_training <- training %>%
       mutate(pred = training_pred)
-
-    model <- model$finalModel
 
   }
 
@@ -564,7 +563,6 @@ fit_skynet <- function(data_subset,
 
   return(
     list(
-      model = model,
       test_predictions = out_testing,
       training_predictions = out_training
     )

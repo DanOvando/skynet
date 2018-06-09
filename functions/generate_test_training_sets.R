@@ -59,7 +59,46 @@ generate_test_training <-
         mutate(train_set = 'random') %>%
         mutate(test_set = 'random')
 
-       }
+     }
+
+    if (test_set == 'random_alaska') {
+
+      dat <- dat %>%
+        filter(!dat$survey %in% c('wcgbts', 'wcghl'))
+
+      splits <- rsample::initial_split(dat, prop = prop, strata = "survey")
+
+      train_dex <- dat$index[splits$in_id]
+
+      test_dex <- dat$index[!dat$index %in% train_dex]
+
+      out <-
+        data_frame(train = list(train_dex),
+                   test = list(test_dex)) %>%
+        mutate(train_set = 'random_alaska') %>%
+        mutate(test_set = 'random_alaska')
+
+    }
+    if (test_set == 'random_west_coast') {
+
+      dat <- dat %>%
+        filter(dat$survey %in% c('wcgbts', 'wcghl'))
+
+      splits <- rsample::initial_split(dat, prop = prop, strata = "survey")
+
+      train_dex <- dat$index[splits$in_id]
+
+      test_dex <- dat$index[!dat$index %in% train_dex]
+
+      out <-
+        data_frame(train = list(train_dex),
+                   test = list(test_dex)) %>%
+        mutate(train_set = 'random_west_coast') %>%
+        mutate(test_set = 'random_west_coast')
+
+    }
+
+
     if (test_set == 'west_coast') {
 
       train <- dat %>%
