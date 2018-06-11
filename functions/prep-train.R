@@ -40,6 +40,7 @@ prep_train <- function(data_subset,
                        tune_model = T,
                        cores = 4,
                        data_sources) {
+
   doMC::registerDoMC(cores = cores)
   # cluster <- makeCluster(cores) # convention to leave 1 core for OS
   # doParallel::registerDoParallel(cluster)
@@ -176,10 +177,10 @@ browser()
     on.exit(detach('package:plyr'))
 
     gbm_grid <-  expand.grid(
-      interaction.depth = c(3),
-      n.trees = c(3000),
-      shrinkage = c(0.005),
-      n.minobsinnode = c(10)
+      interaction.depth = c(3,5,10),
+      n.trees = c(3000,6000,8000),
+      shrinkage = c(0.001,0.005),
+      n.minobsinnode = c(10,20)
     )
 
     model <- caret::train(

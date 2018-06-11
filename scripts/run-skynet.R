@@ -47,7 +47,7 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 # set section options (what to run) ---------------------------------------------------------
 
-num_cores <- 4
+num_cores <- 3
 
 run_models <- T # fit gfw models to fishdata
 
@@ -1317,21 +1317,7 @@ test_train_data <- purrr::cross_df(list(
     skynet_models <- skynet_models %>%
       # filter(data_subset == "skynet",
       #        test_sets == "random",
-      #        model == "structural",
       #        gfw_only == FALSE) %>%
-    # filter(train_set == "spatial_alaska") %>%
-    #   slice(1) %>%
-      # filter(model == "structural") %>%
-      # slice(1) %>%
-      # filter(train_set == "not_west_coast", dep_var == "cs_density") %>%
-      # filter(model == "gbm", dep_var == "log_biomass") %>%
-      # slice(1) %>%
-      # filter(train_set == 'random', data_subset == "skynet") %>%
-      # slice(1:4) %>%
-      # group_by(model, data_subset, dep_var) %>%
-      # mutate(i = 1:length(train)) %>%
-      # filter(i <=1) %>%
-      # ungroup() %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
