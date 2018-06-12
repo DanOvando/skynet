@@ -49,9 +49,11 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 num_cores <- 3
 
-run_models <- F # fit gfw models to fishdata
+run_models <- TRUE # fit gfw models to fishdata
 
-models <- c("gbm", "structural", "engine_power", "hours")
+tune_paras <- TRUE # pre-tune machine learning models
+
+models <- c("ranger","mars","gbm", "structural", "engine_power", "hours")
 
 # models <- c("mars")
 
@@ -82,7 +84,7 @@ round_environmentals <- T
 
 raw_fish <- F
 
-dep_vars <- c('log_density', "cs_density", "relative_density", "log_economic_density","economic_density")
+dep_vars <- c("density","economic_density")
 
 gfw_vars_only <- T
 
@@ -1253,7 +1255,7 @@ test_train_data <- purrr::cross_df(list(
     dep_var = (dep_vars),
     temp = list(test_train_data),
     model = models,
-    weight_surveys = c(T, F),
+    weight_surveys = c(F),
     gfw_only = c(TRUE, FALSE)
   )) %>%
     unnest(temp, .drop = F) %>%
@@ -1275,14 +1277,17 @@ test_train_data <- purrr::cross_df(list(
 
 
   if (run_models == T) {
-    sfm <- safely(fit_skynet)
+
+    if (prep_models == T){
 
     prepped_train <- skynet_models %>%
       filter(data_subset == "skynet",
              test_sets == "random",
-             model == "gbm",
+             model %in% c("mars"),
              gfw_only == FALSE)  %>%
+      group_by(model) %>%
       slice(1) %>%
+      ungroup() %>%
       mutate(candidate_vars = ifelse(
         str_detect(.$data_subset, "delta"),
         list(delta_candidate_vars),
@@ -1301,7 +1306,7 @@ test_train_data <- purrr::cross_df(list(
             tree_candidate_vars = candidate_vars
           ),
           prep_train,
-          fitcontrol_number = 5,
+          fitcontrol_number = 10,
           fitcontrol_repeats = 2,
           never_ind_vars = never_ind_vars,
           tune_model = T,
@@ -1313,11 +1318,25 @@ test_train_data <- purrr::cross_df(list(
     tuned_pars <- map(prepped_train$fitted_model,~.) %>%
       set_names(prepped_train$model)
 
+    saveRDS(file = paste0(run_dir, "tuned_pars.RDS"),
+         tuned_pars)
+
+    } else {
+
+      tuned_pars <- readRDS(file = paste0(run_dir, "tuned_pars.RDS"))
+
+    }
+
+
+    sfm <- safely(fit_skynet)
 
     skynet_models <- skynet_models %>%
       # filter(data_subset == "skynet",
       #        test_sets == "random",
-      #        gfw_only == FALSE) %>%
+      #        gfw_only == FALSE,
+      #        weight_surveys == FALSE,
+      #        model == "mars"
+      #        ) %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
@@ -1441,143 +1460,79 @@ test_train_data <- purrr::cross_df(list(
 
   # run downscaling analysis ------------------------------------------------
 
-  skynet_models <- skynet_models %>%
-    mutate(
-      run_name = glue::glue(
-        "{.$dep_var}--{.$model}--{.$weight_surveys}--{.$test_sets}--{.$data_subset}"
-      )
-    )
-
-
-  downscaled_performance <-
-    cross_df(list(
-      run_name = skynet_models$run_name,
-      resolution =  seq(25, 200, by = 50)
-    )) %>%
-    left_join(skynet_models %>% select(run_name, test_data), by = "run_name") %>%
-    left_join(
-      skynet_models %>% select(
-        run_name,
-        dep_var,
-        model,
-        weight_surveys,
-        test_sets,
-        data_subset
-      ),
-      by = "run_name"
-    ) %>%
-    arrange(run_name)
-
-  downscaled_performance <-  downscaled_performance %>%
-    mutate(
-      new_grid  = map2(
-        test_data,
-        resolution,
-        safely(create_grid),
-        lon_name = rounded_lon,
-        lat_name = rounded_lat
-      )
-    )
-
-  downscaled_performance <-  downscaled_performance %>%
-    mutate(
-      new_data = map2(
-        test_data,
-        new_grid,
-        snap_to_grid,
-        old_lon_name = rounded_lon,
-        old_lat_name = rounded_lat,
-        new_lon_name = lon,
-        new_lat_name = lat
-      )
-    )
-
-  r2foo <- function(x) {
-    r2 <-
-      yardstick::rsq(x, truth = agg_mean_log_density, estimate = agg_pred)
-
-  }
-
-
-  downscaled_performance <- downscaled_performance %>%
-    mutate(oob_r2 = map_dbl(new_data, r2foo))
-
-
-  downscaled_performance %>%
-    ggplot(aes(resolution, oob_r2, color = run_name)) +
-    geom_line(show.legend = F)
+  # skynet_models <- skynet_models %>%
+  #   mutate(
+  #     run_name = glue::glue(
+  #       "{.$dep_var}--{.$model}--{.$weight_surveys}--{.$test_sets}--{.$data_subset}"
+  #     )
+  #   )
+  #
+  #
+  # downscaled_performance <-
+  #   cross_df(list(
+  #     run_name = skynet_models$run_name,
+  #     resolution =  seq(25, 200, by = 50)
+  #   )) %>%
+  #   left_join(skynet_models %>% select(run_name, test_data), by = "run_name") %>%
+  #   left_join(
+  #     skynet_models %>% select(
+  #       run_name,
+  #       dep_var,
+  #       model,
+  #       weight_surveys,
+  #       test_sets,
+  #       data_subset
+  #     ),
+  #     by = "run_name"
+  #   ) %>%
+  #   arrange(run_name)
+  #
+  # downscaled_performance <-  downscaled_performance %>%
+  #   mutate(
+  #     new_grid  = map2(
+  #       test_data,
+  #       resolution,
+  #       safely(create_grid),
+  #       lon_name = rounded_lon,
+  #       lat_name = rounded_lat
+  #     )
+  #   )
+  #
+  # downscaled_performance <-  downscaled_performance %>%
+  #   mutate(
+  #     new_data = map2(
+  #       test_data,
+  #       new_grid,
+  #       snap_to_grid,
+  #       old_lon_name = rounded_lon,
+  #       old_lat_name = rounded_lat,
+  #       new_lon_name = lon,
+  #       new_lat_name = lat
+  #     )
+  #   )
+  #
+  # r2foo <- function(x) {
+  #   r2 <-
+  #     yardstick::rsq(x, truth = agg_mean_log_density, estimate = agg_pred)
+  #
+  # }
+  #
+  #
+  # downscaled_performance <- downscaled_performance %>%
+  #   mutate(oob_r2 = map_dbl(new_data, r2foo))
+  #
+  #
+  # downscaled_performance %>%
+  #   ggplot(aes(resolution, oob_r2, color = run_name)) +
+  #   geom_line(show.legend = F)
 
 
   # save outputs ------------------------------------------------------------
 
-
-  # save_foo <- function(test_plot,
-  #                      model,
-  #                      train_region,
-  #                      test_region,
-  #                      data_set,
-  #                      dep_var,
-  #                      run_dir) {
-  #   ggsave(
-  #     filename = paste0(
-  #       run_dir,
-  #       model,
-  #       "-train_",
-  #       train_region,
-  #       "-test_",
-  #       test_region,
-  #       "-data_",
-  #       data_set,
-  #       '-depvar_',
-  #       dep_var,
-  #       ".pdf"
-  #     ),
-  #     test_plot,
-  #     height = 8,
-  #     width = 8
-  #   )
-  # }
-  #
-  # pwalk(
-  #   list(
-  #     model = skynet_models$model,
-  #     train_region = skynet_models$train_set,
-  #     test_plot = skynet_models$test_plot,
-  #     test_region = skynet_models$test_sets,
-  #     data_set = skynet_models$data_subset,
-  #     dep_var = skynet_models$dep_var
-  #   ),
-  #   save_foo,
-  #   run_dir = run_dir
+  # save(
+  #   file = here::here("results", run_name, "processed_skynet_models.Rdata"),
+  #   skynet_models
   # )
 
-  # pwalk(
-  #   list(
-  #     model = skynet_models$model,
-  #     test_plot = skynet_models$training_plot,
-  #     train_region = skynet_models$train_set,
-  #     test_region = paste0(skynet_models$test_sets, "-training plot"),
-  #     data_set = skynet_models$data_subset,
-  #     dep_var = skynet_models$dep_var
-  #   ),
-  #   save_foo,
-  #   run_dir = run_dir
-  # )
-
-
-  print('printed models')
-
-
-  save(
-    file = here::here("results", run_name, "processed_skynet_models.Rdata"),
-    skynet_models
-  )
-
-
-  save(
-    file = here::here("results", run_name, "processed_skynet_models.Rdata"),
-    skynet_models,
-    downscaled_performance
-  )
 
   print('saved processed models')

@@ -42,8 +42,6 @@ prep_train <- function(data_subset,
                        data_sources) {
 
   doMC::registerDoMC(cores = cores)
-  # cluster <- makeCluster(cores) # convention to leave 1 core for OS
-  # doParallel::registerDoParallel(cluster)
 
   fit_control <- trainControl(
     method = fitcontrol_method,
@@ -62,7 +60,6 @@ prep_train <- function(data_subset,
 
 
   independent_data <- training %>%
-    # as.data.frame() %>%
     select(-matches(paste0(never_ind_vars, collapse = '|'))) %>%
     select(matches(paste0(tree_candidate_vars, collapse = '|')))
 
@@ -88,6 +85,13 @@ prep_train <- function(data_subset,
     as.data.frame() %>%
     as.matrix()
 
+
+  if (model_name == "mars"){
+
+    dep_var <- glue::glue("log_",dep_var)
+
+  }
+
   dependent_data <- dependent_data[, dep_var] %>% as.numeric()
 
   model_formula <-
@@ -96,91 +100,54 @@ prep_train <- function(data_subset,
 
   reg_data <- independent_data %>%
     as_data_frame() %>%
-    mutate(!!dep_var := dependent_data)
+    mutate(!!dep_var := dependent_data) %>%
+    dmap_if(is.logical, as.numeric)
 
 
-  train_recipe <- recipes::recipe(model_formula,
+  train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
                                   data = reg_data) %>%
     step_nzv(all_predictors()) %>%
-    step_center(all_predictors()) %>%
-    step_scale(all_predictors())
+    step_BoxCox(all_predictors())
 
   prep_recipe <- prep(train_recipe, data = reg_data, retain = T)
 
   if (model_name == 'ranger') {
     #fit random forest
-browser()
 
-    rf_grid <-  expand.grid(mtry = c(3,5))
+    default <- ncol(independent_data) %>% sqrt() %>% floor()
 
-
-
-    model <- train(
-      independent_data %>% dmap_if(is.logical, as.numeric),
-      dependent_data,
-      method = "ranger",
-      # na.action = na.omit,
-      trControl = fit_control,
-      tuneGrid = rf_grid,
-      preProcess = c("center", "scale"),
-      importance = "impurity_corrected",
-      weights = weights
-      # tuneGrid = rf_grid
-    )
-
-    if (tune_model == T) {
-      impnames <-
-        model$finalModel$variable.importance %>% as.data.frame() %>% purrr::pluck(attr_getter("row.names"))
-      varimp <-  model$finalModel$variable.importance %>%
-        as_data_frame() %>%
-        mutate(varname = impnames) %>%
-        arrange(desc(value)) %>%
-        mutate(varname = str_replace(varname, '(TRUE)|(FALSE)', ''))
-
-      random_imp <-
-        varimp$value[varimp$varname == 'random_var']
-
-
-      vars_to_include <- varimp %>%
-        filter(value > random_imp) %>% {
-          .$varname
-        } %>% unique()
-
-      independent_data <- independent_data[, vars_to_include]
-
-
-      model <- train(
-        independent_data %>% dmap_if(is.logical, as.numeric),
-        dependent_data,
-        method = "ranger",
-        # na.action = na.omit,
-        trControl = fit_control,
-        preProcess = c("center", "scale"),
-        importance = "impurity_corrected",
-        verbose = TRUE,
-        weights = weights
-        # tuneGrid = rf_grid
+    rf_grid <-
+      expand.grid(
+        mtry = c(2, default, ncol(independent_data) - 2),
+        splitrule = c("variance", "extratrees", "maxstat"),
+        min.node.size = c(5)
       )
 
+    model <- train(
+      train_recipe,
+      reg_data,
+      method = "ranger",
+      trControl = fit_control,
+      tuneGrid = rf_grid
+    )
 
-    }
-    out_testing <- testing %>%
-      as_data_frame() %>%
-      add_predictions(model)
-
-    out_training <- training %>%
-      as_data_frame() %>%
-      add_predictions(model)
   } # close ranger rf
 
   if (model_name == 'gbm') {
     on.exit(detach('package:plyr'))
 
+    # gbm_grid <-  expand.grid(
+    #   interaction.depth = c(3,5,10),
+    #   n.trees = c(3000,6000,8000),
+    #   shrinkage = c(0.001,0.005),
+    #   n.minobsinnode = c(10,20)
+    # )
+
     gbm_grid <-  expand.grid(
-      interaction.depth = c(3,5,10),
-      n.trees = c(3000,6000,8000),
-      shrinkage = c(0.001,0.005),
-      n.minobsinnode = c(10,20)
+      interaction.depth = c(5, 10),
+      n.trees = c(5000,8000),
+      shrinkage = c(0.001),
+      n.minobsinnode = c(20)
     )
 
     model <- caret::train(
@@ -193,6 +160,28 @@ browser()
     )
 
   }
+
+  if (model_name == 'mars') {
+
+    on.exit(detach('package:earth'))
+
+    default <- ncol(independent_data) %>% sqrt() %>% floor()
+
+    mars_grid <-  expand.grid(nprune = c(ncol(independent_data) + 1, default),
+                              # number of terms
+                              degree = 1:5)
+
+    model <- caret::train(
+      train_recipe,
+      data = reg_data,
+      method = "earth",
+      trControl = fit_control,
+      tuneGrid = mars_grid,
+      trace = 1
+    )
+
+  }
+
 
   out <- model$bestTune %>% mutate(model = model_name)
 

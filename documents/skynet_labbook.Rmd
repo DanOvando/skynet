@@ -2579,3 +2579,155 @@ skynet_models %>%
   geom_boxplot()
 ```
 
+# Final steps
+
+If this thing is to be applied, need to pick a way to do it, since you won't know the specifics of a new location per say. So one option is to do a lot of kitchen sink presentation, but that's annoying in my humble opinion. So, one option is to narrow down to the "best" model and just present that one for most of the paper. Another is to identify "best" for each task (future trend prediction/absolute abundance/spatial distribution) The things to choose from are basically model, dependent variable, variable set, and geographic scale. 
+
+First, look at what's the "best" dependent variable, including "delta" as the thing being predicted. Once you've picked that, then look at the performance of that 
+
+Not a lot of evidence that any one of these is particularly better than another, so might be best to just stick with density as it's the simplest thing to measure. Though also need to make sure that once you exponentiate it still holds up as the "best" since that's what would actually be used on management scale. 
+
+```{r}
+
+skynet_models %>% 
+  ggplot(aes(dep_var, r2)) + 
+  geom_boxplot() + 
+  facet_grid(data_subset ~test_set) + 
+  coord_flip()
+
+```
+
+
+```{r}
+
+log_check <- skynet_models %>%
+  filter(dep_var == "log_density",
+  data_subset == "skynet",
+  train_set == "random_alaska",
+  model == "gbm",
+  weight_surveys == FALSE,
+  gfw_only == FALSE) %>% 
+  select(test_data) %>% 
+  unnest() %>% 
+  mutate(exp_pred = exp(pred))
+
+log_plot <- log_check %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_point() + 
+  geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  labs(title = glue::glue("R2 is {yardstick::rsq(log_check, log_density, pred) %>% round(2)}"))
+  
+
+linear_plot <- log_check %>% 
+  ggplot(aes(density, exp_pred)) + 
+  geom_point() + 
+    geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  labs(title = glue::glue("R2 is {yardstick::rsq(log_check, density, exp_pred) %>% round(2)}")) + 
+  lims(x = c(0,600))
+
+log_plot + linear_plot
+  
+```
+
+
+```{r}
+
+log_check <- skynet_models %>%
+  filter(dep_var == "log_economic_density",
+  data_subset == "skynet",
+  train_set == "random_alaska",
+  model == "gbm",
+  weight_surveys == FALSE,
+  gfw_only == FALSE) %>% 
+  select(test_data) %>% 
+  unnest() %>% 
+  mutate(exp_pred = exp(pred))
+
+linear_check <- skynet_models %>%
+  filter(dep_var == "economic_density",
+  data_subset == "skynet",
+  train_set == "random_alaska",
+  model == "gbm",
+  weight_surveys == FALSE,
+  gfw_only == FALSE) %>% 
+  select(test_data) %>% 
+  unnest() %>% 
+  mutate(exp_pred = exp(pred))
+
+log_plot <- log_check %>% 
+  ggplot(aes(log_economic_density, pred)) + 
+  geom_point() + 
+  geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  labs(title = glue::glue("R2 is {yardstick::rsq(log_check, log_economic_density, pred) %>% round(2)}"))
+  
+
+linear_plot <- log_check %>% 
+  ggplot(aes(economic_density, exp_pred)) + 
+  geom_point() + 
+    geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  labs(title = glue::glue("R2 is {yardstick::rsq(log_check, economic_density, exp_pred) %>% round(2)}")) 
+
+true_linear_plot <- linear_check %>% 
+  ggplot(aes(economic_density, pred)) + 
+  geom_point() + 
+    geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  labs(title = glue::glue("R2 is {yardstick::rsq(linear_check, economic_density, pred) %>% round(2)}")) 
+
+log_plot + linear_plot + true_linear_plot
+  
+```
+
+Oh interesting. Just running on the damn raw stuff does better then transforming. Let's do a quick check if that holds true for the raw density not just economic. 
+
+```{r}
+
+log_check <- skynet_models %>%
+  filter(dep_var == "log_density",
+  data_subset == "skynet",
+  train_set == "random",
+  model == "gbm",
+  weight_surveys == FALSE,
+  gfw_only == FALSE) %>% 
+  select(test_data) %>% 
+  unnest() %>% 
+  mutate(exp_pred = exp(pred))
+
+linear_check <- skynet_models %>%
+  filter(dep_var == "density",
+  data_subset == "skynet",
+  train_set == "random",
+  model == "gbm",
+  weight_surveys == FALSE,
+  gfw_only == FALSE) %>% 
+  select(test_data) %>% 
+  unnest() %>% 
+  mutate(exp_pred = exp(pred))
+
+log_plot <- log_check %>% 
+  ggplot(aes(log_density, pred)) + 
+  geom_point() + 
+  geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  labs(title = glue::glue("R2 is {yardstick::rsq(log_check, log_density, pred) %>% round(2)}"))
+  
+
+linear_plot <- log_check %>% 
+  ggplot(aes(density, exp_pred)) + 
+  geom_point() + 
+    geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  labs(title = glue::glue("R2 is {yardstick::rsq(log_check, density, exp_pred) %>% round(2)}")) 
+
+true_linear_plot <- linear_check %>% 
+  ggplot(aes(density, pred)) + 
+  geom_point() + 
+    geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  labs(title = glue::glue("R2 is {yardstick::rsq(linear_check,density, pred) %>% round(2)}")) 
+
+log_plot + linear_plot + true_linear_plot
+
+```
+
+Evidence then is that just fitting on the damn thing you're interested in is the best option.. interesting. Let's check 
+
+
+
+

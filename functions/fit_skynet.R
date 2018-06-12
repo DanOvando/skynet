@@ -55,6 +55,9 @@ fit_skynet <- function(data_subset,
   dat <-
     data_sources$data[[which(data_sources$data_subset == data_subset)]]
 
+  dat <- dat %>%
+  dmap_if(is.logical, as.numeric)
+
   training <- dat %>%
     filter(index %in% training)
 
@@ -89,6 +92,12 @@ fit_skynet <- function(data_subset,
     as.data.frame() %>%
     as.matrix()
 
+  if (model_name == "mars"){
+
+    dep_var <- glue::glue("log_",dep_var)
+
+  }
+
   dependent_data <- dependent_data[, dep_var] %>% as.numeric()
 
   model_formula <-
@@ -100,11 +109,12 @@ fit_skynet <- function(data_subset,
     mutate(!!dep_var := dependent_data)
 
 
-  train_recipe <- recipes::recipe(model_formula,
+  train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
                                   data = reg_data) %>%
     step_nzv(all_predictors()) %>%
-    step_center(all_predictors()) %>%
-    step_scale(all_predictors())
+    step_BoxCox(all_predictors())
+    # step_center(all_predictors()) %>%
+    # step_scale(all_predictors())
 
   prep_recipe <- prep(train_recipe, data = reg_data, retain = T)
 
@@ -166,23 +176,28 @@ fit_skynet <- function(data_subset,
   if (model_name == 'ranger') {
     #fit random forest
 
-    # rf_grid <-  expand.grid(mtry = c(3,5))
-    model <- train(
-      independent_data %>% dmap_if(is.logical, as.numeric),
-      dependent_data,
-      method = "ranger",
-      # na.action = na.omit,
-      trControl = fit_control,
-      preProcess = c("center", "scale"),
-      importance = "impurity_corrected",
-      weights = weights
-      # tuneGrid = rf_grid
-    )
+    tuned_pars <- tuned_pars %>%
+      pluck(model_name)
+
+    prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
+
+    proc_training <- juice(prepped_recipe)
+
+    model <- ranger::ranger(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+                 data = proc_training,
+                  mtry = tuned_pars$mtry,
+                 splitrule = tuned_pars$splitrule,
+                 min.node.size = tuned_pars$min.node.size,
+                 importance = "impurity_corrected",
+                 verbose = TRUE)
 
     if (tune_model == T) {
+
+
       impnames <-
-        model$finalModel$variable.importance %>% as.data.frame() %>% purrr::pluck(attr_getter("row.names"))
-      varimp <-  model$finalModel$variable.importance %>%
+        model$variable.importance %>% as.data.frame() %>% purrr::pluck(attr_getter("row.names"))
+
+      varimp <-  model$variable.importance %>%
         as_data_frame() %>%
         mutate(varname = impnames) %>%
         arrange(desc(value)) %>%
@@ -197,97 +212,49 @@ fit_skynet <- function(data_subset,
           .$varname
         } %>% unique()
 
-      independent_data <- independent_data[, vars_to_include]
+      reg_data <- reg_data[, c(dep_var, vars_to_include)]
+
+      train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
+                                      data = reg_data) %>%
+        step_nzv(all_predictors()) %>%
+        step_BoxCox(all_predictors())
+      #
+      # step_center(all_predictors()) %>%
+      # step_scale(all_predictors())
+
+      prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
+
+      proc_training <- juice(prepped_recipe)
 
 
-      model <- train(
-        independent_data %>% dmap_if(is.logical, as.numeric),
-        dependent_data,
-        method = "ranger",
-        # na.action = na.omit,
-        trControl = fit_control,
-        preProcess = c("center", "scale"),
-        importance = "impurity_corrected",
-        verbose = TRUE,
-        weights = weights
-        # tuneGrid = rf_grid
-      )
+      model <- ranger::ranger(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+                              data = proc_training,
+                              mtry = pmin(ncol(proc_training) - 2,tuned_pars$mtry),
+                              splitrule = tuned_pars$splitrule,
+                              min.node.size = tuned_pars$min.node.size,
+                              verbose = TRUE)
 
 
     }
+
+    proc_testing <- bake(prepped_recipe, newdata = testing)
+
+    training_pred <-
+      predict(model,
+              data =  proc_training)
+
+    testing_pred <-
+      predict(model,
+              data =  proc_testing)
+
     out_testing <- testing %>%
-      as_data_frame() %>%
-      add_predictions(model)
+      mutate(pred = testing_pred$predictions)
 
     out_training <- training %>%
-      as_data_frame() %>%
-      add_predictions(model)
+      mutate(pred = training_pred$predictions)
+
   } # close ranger rf
 
-
-  if (model_name == 'rf') {
-    #fit random forest
-
-    # rf_grid <-  expand.grid(mtry = c(3,5))
-
-    model <- train(
-      independent_data,
-      dependent_data,
-      method = "rf",
-      do.trace = 10,
-      # na.action = na.omit,
-      trControl = fit_control,
-      preProcess = c("center", "scale"),
-      weights = weights
-
-      # tuneGrid = rf_grid
-    )
-
-    if (tune_model == T) {
-      impnames <-
-        model$finalModel$importance %>% as.data.frame() %>% purrr::pluck(attr_getter("row.names"))
-      varimp <-  model$finalModel$importance %>%
-        as_data_frame() %>%
-        mutate(varname = impnames) %>%
-        arrange(desc(IncNodePurity)) %>%
-        mutate(varname = str_replace(varname, '(TRUE)|(FALSE)', ''))
-
-      random_imp <-
-        varimp$IncNodePurity[varimp$varname == 'random_var']
-
-
-
-      vars_to_include <- varimp %>%
-        filter(IncNodePurity > random_imp) %>% {
-          .$varname
-        } %>% unique()
-
-      independent_data <- independent_data[, vars_to_include]
-
-
-      model <- train(
-        independent_data,
-        dependent_data,
-        method = "rf",
-        do.trace = 10,
-        na.action = na.omit,
-        trControl = fit_control,
-        importance = T,
-        preProcess = c("center", "scale"),
-        weights = weights
-      )
-
-    }
-
-    out_testing <- testing %>%
-      as_data_frame() %>%
-      add_predictions(model)
-
-    out_training <- training %>%
-      as_data_frame() %>%
-      add_predictions(model)
-
-  } # close rf
 
   if (model_name == 'gbm') {
 
@@ -299,11 +266,6 @@ fit_skynet <- function(data_subset,
     prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
 
     proc_training <- juice(prepped_recipe)
-
-    # gbm_grid <-  expand.grid(interaction.depth = c(5,10),
-    #                         n.trees = c(3000,5000,10000),
-    #                         shrinkage = c(0.001,.01),
-    #                         n.minobsinnode = c(10,20))
 
     model <- gbm(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
                  data = proc_training,
@@ -332,17 +294,20 @@ fit_skynet <- function(data_subset,
         filter(rel.inf > random_imp) %>% {
           .$varname
         } %>% unique()
+
       reg_data <- reg_data[, c(dep_var, vars_to_include)]
 
       model_formula <-
         paste0(dep_var, '~', paste(vars_to_include, collapse = '+')) %>%
         as.formula()
 
-      train_recipe <- recipes::recipe(model_formula,
+      train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
                                       data = reg_data) %>%
         step_nzv(all_predictors()) %>%
-        step_center(all_predictors()) %>%
-        step_scale(all_predictors())
+        step_BoxCox(all_predictors())
+        #
+        # step_center(all_predictors()) %>%
+        # step_scale(all_predictors())
 
       prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
 
@@ -383,40 +348,41 @@ fit_skynet <- function(data_subset,
   }
 
   if (model_name == "mars") {
-    cl <- parallel::makeCluster(cores)
 
-    doParallel::registerDoParallel(cl)
+    tuned_pars <- tuned_pars %>%
+      pluck(model_name)
 
-    mars_grid <-
-      expand.grid(degree = 1:2, nprune = seq(2, ncol(reg_data), by = 2))
+    prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
 
+    proc_training <- juice(prepped_recipe)
 
-    model <- train(
-      as.formula(paste0(dep_var, " ~ .")),
-      data = reg_data,
-      method = "earth",
-      trControl = fit_control,
-      weights = weights,
-      tuneGrid = mars_grid,
-      trace = 1
-    )
+    model <- earth::earth(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+                 data = proc_training,
+                 nprune = tuned_pars$nprune,
+                 degree = tuned_pars$degree,
+                 trace = 1,
+                 nfold = 10,
+                 ncross = 2,
+                 glm = list(family = gaussian)
+                 )
 
-    stopCluster(cl)
+    proc_testing <- bake(prepped_recipe, newdata = testing)
 
-    pred_testing <-
-      predict(model, newdata = testing) %>% as.numeric()
+    se_estimate <- sd(model$residuals)
 
-    pred_training <-
-      predict(model, newdata = training) %>% as.numeric()
+    training_pred <-
+      predict(model,
+              newdata =  proc_training)
 
+    testing_pred <-
+      predict(model,
+              newdata =  proc_testing)
 
     out_testing <- testing %>%
-      as_data_frame() %>%
-      mutate(pred = pred_testing)
+      mutate(pred = exp(testing_pred + se_estimate^2/2) %>% as.numeric())
 
     out_training <- training %>%
-      as_data_frame() %>%
-      mutate(pred = pred_training)
+      mutate(pred = exp(training_pred + se_estimate^2/2) %>% as.numeric())
 
 
   }
