@@ -34,7 +34,7 @@ library(tidyverse)
 
 # run options -------------------------------------------------------------
 
-run_name <- 'v4.0'
+run_name <- 'v4.1'
 
 run_dir <- here::here('results',run_name)
 
@@ -253,8 +253,8 @@ fish_abundance <- skynet_data %>%
   geom_sf(data = pacific_map, fill = 'grey60') +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
-      scale_color_viridis(name =bquote("Density"~(ton/km^2)))+ 
-  # scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)))+ 
+      # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+ 
+  scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)))+
   theme(legend.key.height = unit(1.5,"cm"))
 
 
@@ -293,9 +293,9 @@ GFW data were obtained using the `bigrquery` package in R from the GFW servers (
 gfw_effort <- gfw_data %>%
   unnest() %>% 
   group_by(year, rounded_lat, rounded_lon) %>% 
-  summarise(total_effort = sum(total_hours)) %>% 
+  summarise(total_effort = median(total_hours, na.rm = T)) %>% 
   mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
-  filter(total_effort > 0)
+  filter(total_effort > 0, year == max(year))
   
   gfw_map <-  gfw_effort %>%
   dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
@@ -313,8 +313,8 @@ gfw_effort <- gfw_data %>%
   geom_sf(data = pacific_map, fill = 'grey60') +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
-  scale_color_viridis(name = "Fishing Hours", labels = scales::comma) + 
-      # scale_color_viridis(trans = "log10", name = "Fishing Hours", labels = scales::comma) + 
+  # scale_color_viridis(name = "Fishing Hours", labels = scales::comma) + 
+      scale_color_viridis(trans = "log10", name = "Fishing Hours", labels = scales::comma) +
   theme(legend.key.height = unit(1.5,"cm"))
   
   gfw_map
@@ -481,45 +481,24 @@ skynet_models %>%
 
 ```
 
-```{r}
-
-a = skynet_models %>% 
-  group_by(model, data_subset) %>% 
-  mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(model = fct_reorder(model, mean_r2)) %>% 
-  filter(model == "gbm") %>% 
-  filter(mean_r2 == max(mean_r2)) %>%
-  group_by(test_set) %>% 
-  mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(test_set = fct_reorder(test_set, -mean_r2)) %>% 
-  select(dep_var, weight_surveys, test_sets, data_subset, test_data) %>% 
-  mutate(obs_pred = map2(test_data,dep_var, ~.x %>% select(.y,pred))) %>% 
-  select(-test_data) %>% 
-  unnest() %>% 
-  gather(observed_name, observed,contains("log"), contains("density")) %>% 
-  ggplot(aes(observed, pred, fill = weight_surveys)) + 
-  geom_point(shape = 21) + 
-  geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "pink") +
-  facet_wrap(dep_var ~ test_sets, scales = "free") + 
-  theme_minimal()
-
-a
-
-huh <- skynet_models %>% 
-  filter(test_sets == "alaska")
-```
-
 
 ```{r}
-skynet_models %>% 
-  ggplot(aes(data_subset, r2, fill = dep_var )) + 
-  ggbeeswarm::geom_beeswarm(shape = 21) + 
-  scale_fill_viridis_d() + 
-  coord_flip() + 
-  facet_wrap(~test_sets)
+best_models <- skynet_models %>% 
+  mutate(unfished_only = str_detect(data_subset,"unfished")) %>% 
+  group_by(test_sets, unfished_only) %>% 
+  filter(r2 == max(r2, na.rm = T))
+
+best_models %>%
+  group_by(test_sets) %>% 
+  mutate(max_r2 = max(r2)) %>% 
+  ungroup() %>% 
+  mutate(test_sets = fct_reorder(test_sets, max_r2)) %>% 
+  ggplot(aes(test_sets,r2)) + 
+  geom_line() +
+  geom_point(shape = 21, size = 4, aes(fill = unfished_only)) +
+  coord_flip()
 ```
+
 
 
 
@@ -554,12 +533,14 @@ upscale_plot <- skynet_models %>%
   mutate(model = fct_reorder(model, -meanr2)) %>% 
   mutate(data_subset = fct_relevel(data_subset,c("skynet","skynet_25km","skynet_100km"))) %>% 
   ggplot(aes(data_subset,r2, fill = model)) + 
-  geom_col(position = "dodge") + 
-  scale_x_discrete(labels = c("Raw", bquote("25"~km^2), bquote("100"~km^2))) + 
+  geom_col(position = "dodge") #+ 
+  # scale_x_discrete(labels = c("Raw", bquote("25"~km^2), bquote("100"~km^2))) + 
   labs(title = "B)") + 
   theme(axis.title.y = element_blank(), axis.title.x = element_blank())
 
-downscale_plot + upscale_plot 
+upscale_plot + coord_flip() + 
+  scale_fill_viridis_d(option = "A")
+# downscale_plot + upscale_plot 
 
 ```
 
@@ -571,12 +552,13 @@ Due to the extremely poor performance of the structural and linear models, we fo
 How well can the model predict abundance at locations that are not included in the model training but are in the same geographic region as the training data? To test this, we split the data into randomized training (75% of the data) and testing (25%) splits. We train each model (using v-fold cross validation of the training data where needed for tuning) on the training data, and then use the trained model to predicted the testing data. Since the data are spatial and temporal, we expect that the model should perform fairly well at this task; densities at one location and time are correlated with densities at a nearby location and time, and therefore a model fit on a subset of data should do a good job of predicting omitted neighbors, but this is a useful starting point for model assessment. 
 
 ```{r}
-spatial_performance <- skynet_models %>% 
+spatial_performance <- best_models %>% 
   filter(test_set == "random", dep_var == "log_density")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
   } %>% 
-  mutate(resid = pmax(-200,exp(pred) - exp(log_density)))
+  group_by(rounded_lat, rounded_lon, survey) %>% 
+  summarise(resid = mean(exp(pred) - exp(log_density)))
 ```
 
 
@@ -636,7 +618,7 @@ Our estimates of absolute density in the testing data (the west coast groundfish
 ```{r oor-plot, fig.cap = "Spatial residuals predicted by GBM model (log(density) is dependent variable). Negative residuals (red) indicate model underpredicted the true density, positive residuals (blue) indicate the model overpredicted. Data aggregated at 100km^2^ resolution"}
 
 train_performance <- skynet_models %>% 
-  filter(test_set == "west_coast", dep_var == "log_density", data_subset == "skynet_100km")  %>%
+  filter(test_set == "random_alaska", dep_var == "log_density", data_subset == "skynet")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
   } %>% 
@@ -644,7 +626,7 @@ train_performance <- skynet_models %>%
   mutate(split = "Training")
 
 test_performance <- skynet_models %>% 
-  filter(test_set == "west_coast", dep_var == "log_density", data_subset == "skynet_100km")  %>%
+  filter(test_set == "random_alaska", dep_var == "log_density", data_subset == "skynet")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$test_data[[1]]
   } %>% 

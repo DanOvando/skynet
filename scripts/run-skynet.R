@@ -49,7 +49,7 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 num_cores <- 3
 
-run_models <- T # fit gfw models to fishdata
+run_models <- F # fit gfw models to fishdata
 
 models <- c("gbm", "structural", "engine_power", "hours")
 
@@ -1473,7 +1473,7 @@ test_train_data <- purrr::cross_df(list(
       new_grid  = map2(
         test_data,
         resolution,
-        create_grid,
+        safely(create_grid),
         lon_name = rounded_lon,
         lat_name = rounded_lat
       )
@@ -1511,61 +1511,68 @@ test_train_data <- purrr::cross_df(list(
   # save outputs ------------------------------------------------------------
 
 
-  save_foo <- function(test_plot,
-                       model,
-                       train_region,
-                       test_region,
-                       data_set,
-                       dep_var,
-                       run_dir) {
-    ggsave(
-      filename = paste0(
-        run_dir,
-        model,
-        "-train_",
-        train_region,
-        "-test_",
-        test_region,
-        "-data_",
-        data_set,
-        '-depvar_',
-        dep_var,
-        ".pdf"
-      ),
-      test_plot,
-      height = 8,
-      width = 8
-    )
-  }
+  # save_foo <- function(test_plot,
+  #                      model,
+  #                      train_region,
+  #                      test_region,
+  #                      data_set,
+  #                      dep_var,
+  #                      run_dir) {
+  #   ggsave(
+  #     filename = paste0(
+  #       run_dir,
+  #       model,
+  #       "-train_",
+  #       train_region,
+  #       "-test_",
+  #       test_region,
+  #       "-data_",
+  #       data_set,
+  #       '-depvar_',
+  #       dep_var,
+  #       ".pdf"
+  #     ),
+  #     test_plot,
+  #     height = 8,
+  #     width = 8
+  #   )
+  # }
+  #
+  # pwalk(
+  #   list(
+  #     model = skynet_models$model,
+  #     train_region = skynet_models$train_set,
+  #     test_plot = skynet_models$test_plot,
+  #     test_region = skynet_models$test_sets,
+  #     data_set = skynet_models$data_subset,
+  #     dep_var = skynet_models$dep_var
+  #   ),
+  #   save_foo,
+  #   run_dir = run_dir
+  # )
 
-  pwalk(
-    list(
-      model = skynet_models$model,
-      train_region = skynet_models$train_set,
-      test_plot = skynet_models$test_plot,
-      test_region = skynet_models$test_sets,
-      data_set = skynet_models$data_subset,
-      dep_var = skynet_models$dep_var
-    ),
-    save_foo,
-    run_dir = run_dir
-  )
-
-  pwalk(
-    list(
-      model = skynet_models$model,
-      test_plot = skynet_models$training_plot,
-      train_region = skynet_models$train_set,
-      test_region = paste0(skynet_models$test_sets, "-training plot"),
-      data_set = skynet_models$data_subset,
-      dep_var = skynet_models$dep_var
-    ),
-    save_foo,
-    run_dir = run_dir
-  )
+  # pwalk(
+  #   list(
+  #     model = skynet_models$model,
+  #     test_plot = skynet_models$training_plot,
+  #     train_region = skynet_models$train_set,
+  #     test_region = paste0(skynet_models$test_sets, "-training plot"),
+  #     data_set = skynet_models$data_subset,
+  #     dep_var = skynet_models$dep_var
+  #   ),
+  #   save_foo,
+  #   run_dir = run_dir
+  # )
 
 
   print('printed models')
+
+
+  save(
+    file = here::here("results", run_name, "processed_skynet_models.Rdata"),
+    skynet_models
+  )
+
 
   save(
     file = here::here("results", run_name, "processed_skynet_models.Rdata"),
