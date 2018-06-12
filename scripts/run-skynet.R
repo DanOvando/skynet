@@ -26,9 +26,13 @@ library(recipes)
 library(sf)
 library(tidyverse)
 
-demons::load_functions("functions")
+filter <- dplyr::filter
 
-run_name <- "v4.0"
+functions <- list.files(here::here("functions"))
+
+walk(functions, ~ here::here("functions", .x) %>% source()) # load local functions
+
+run_name <- "v4.1"
 
 run_description <- "Revamped run with all the options"
 
@@ -78,7 +82,7 @@ round_environmentals <- T
 
 raw_fish <- F
 
-dep_vars <- c('log_density', "cs_density", "relative_density", "log_economic_density")
+dep_vars <- c('log_density', "cs_density", "relative_density", "log_economic_density","economic_density")
 
 gfw_vars_only <- T
 
@@ -897,7 +901,6 @@ if (vasterize == T) {
   save(file = here::here("data", "vast_fish.Rdata"),
        vast_fish)
 } else {
-  print('NO VAST')
   load(file = here::here("data", "vast_fish.Rdata"))
 }
 
@@ -1120,7 +1123,8 @@ never_ind_vars <-
     "vessel_hours",
     "total_engine_hours",
     "aggregate_price.x",
-    "aggregate_price.y"
+    "aggregate_price.y",
+    "index"
   )
 
 
@@ -1224,9 +1228,13 @@ test_train_data <- purrr::cross_df(list(
   test_sets = c("random",
                 "alaska",
                 "west_coast",
-                "historic"),
-                # "goa-ai",
-                # "ebs-ai"),
+                "historic",
+                "random_alaska",
+                "random_west_coast",
+                "spatial_alaska",
+                "spatial_west_coast",
+                "historic_alaska",
+                "historic_west_coast"),
   data_subset = data_sources$data_subset
 )) %>%
     left_join(data_sources, by = "data_subset")
@@ -1256,10 +1264,12 @@ test_train_data <- purrr::cross_df(list(
       model %in% c('ranger', 'gbm') &
         data_subset == 'uncentered_skynet'
     )) %>%
-    filter(!(model == 'structural' & dep_var != dep_vars[1]),!(weight_surveys == T &
-                                                                 !(test_sets %in% c(
-                                                                   "random", "historic"
-                                                                 ))))
+    filter(!(model == 'structural' &
+               dep_var != dep_vars[1]),
+           !(weight_surveys == T &
+               !(test_sets %in% c(
+                 "random", "historic"
+               ))))
 
   # run models --------------------------------------------------------------
 
@@ -1267,18 +1277,47 @@ test_train_data <- purrr::cross_df(list(
   if (run_models == T) {
     sfm <- safely(fit_skynet)
 
+    prepped_train <- skynet_models %>%
+      filter(data_subset == "skynet",
+             test_sets == "random",
+             model == "gbm",
+             gfw_only == FALSE)  %>%
+      slice(1) %>%
+      mutate(candidate_vars = ifelse(
+        str_detect(.$data_subset, "delta"),
+        list(delta_candidate_vars),
+        ifelse(gfw_only == T,
+               list(gfw_only_tree_candidate_vars),
+               list(tree_candidate_vars)
+        ))) %>%
+      mutate(
+        fitted_model = pmap(
+          list(
+            data_subset = data_subset,
+            dep_var = dep_var,
+            model_name = model,
+            training = train,
+            testing = test,
+            tree_candidate_vars = candidate_vars
+          ),
+          prep_train,
+          fitcontrol_number = 5,
+          fitcontrol_repeats = 2,
+          never_ind_vars = never_ind_vars,
+          tune_model = T,
+          cores = num_cores,
+          data_sources = data_sources
+        )
+      )
+
+    tuned_pars <- map(prepped_train$fitted_model,~.) %>%
+      set_names(prepped_train$model)
+
+
     skynet_models <- skynet_models %>%
-      # filter(model == "structural") %>%
-      # slice(1) %>%
-      # filter(train_set == "not_west_coast", dep_var == "cs_density") %>%
-      # filter(model == "gbm", dep_var == "log_biomass") %>%
-      # slice(1) %>%
-      # filter(train_set == 'random', data_subset == "skynet") %>%
-      # slice(1:4) %>%
-      # group_by(model, data_subset, dep_var) %>%
-      # mutate(i = 1:length(train)) %>%
-      # filter(i <=1) %>%
-      # ungroup() %>%
+      # filter(data_subset == "skynet",
+      #        test_sets == "random",
+      #        gfw_only == FALSE) %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
@@ -1289,6 +1328,7 @@ test_train_data <- purrr::cross_df(list(
       mutate(
         fitted_model = pmap(
           list(
+            data_subset = data_subset,
             dep_var = dep_var,
             model_name = model,
             training = train,
@@ -1297,16 +1337,20 @@ test_train_data <- purrr::cross_df(list(
           ),
           sfm,
           fitcontrol_number = 10,
-          fitcontrol_repeats = 1,
+          fitcontrol_repeats = 2,
           never_ind_vars = never_ind_vars,
           tune_model = T,
-          cores = num_cores
+          cores = num_cores,
+          data_sources = data_sources,
+          tuned_pars = tuned_pars
         )
       )
 
     print('ran models')
+
     save(file = paste0(run_dir, "skynet_models.Rdata"),
          skynet_models)
+
     print('saved models')
 
   } else {
@@ -1316,15 +1360,13 @@ test_train_data <- purrr::cross_df(list(
   # diagnose models ---------------------------------------------------------
 
 
+
   skynet_models <- skynet_models %>%
+    mutate(index = 1:nrow(.)) %>%
     mutate(error = map(fitted_model, "error")) %>%
     mutate(no_error = map_lgl(error, is.null)) %>%
     filter(no_error)
 
-  # b <- skynet_models %>%
-  #   mutate(error = map(fitted_model, "error")) %>%
-  #   mutate(no_error = map_lgl(error, is.null)) %>%
-  #   filter(!no_error)
 
 
   diagnostic_plot_foo <- function(data,
@@ -1356,9 +1398,9 @@ test_train_data <- purrr::cross_df(list(
   skynet_models <- skynet_models %>%
     mutate(
       test_data = map(fitted_model, c("result", "test_predictions")),
-      training_data = map(fitted_model, c("result", "training_predictions")),
-      results = map(fitted_model, c("result", "model"))
+      training_data = map(fitted_model, c("result", "training_predictions"))
     ) %>%
+    select(-fitted_model) %>%
     mutate(
       var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
       r2 = map2_dbl(test_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
@@ -1393,24 +1435,6 @@ test_train_data <- purrr::cross_df(list(
       )
     )
 
-#
-#   skynet_models %>%
-#     ggplot(aes(data_subset, r2)) +
-#     geom_boxplot()
-
-  # check <- skynet_models %>%
-  #   filter(data_subset == "skynet_100km", model == "gbm", test_set == "goa-ai", train_set == "ebsbts")
-  #
-  # skynet_models %>%
-  #   group_by(train_set, test_set) %>%
-  #   summarise(best_model = model[psuedo_r2_training == max(psuedo_r2_training)],
-  #             best_data = data_subset[psuedo_r2_training == max(psuedo_r2_training)],
-  #             best_depvar = dep_var[psuedo_r2_training == max(psuedo_r2_training)])
-
-  # skynet_models <- skynet_models %>%
-  #   mutate(resolution_test = map2(test_data, dep_var, resolution_effect)) %>%
-  #   mutate(test_resolution_plot = map(resolution_test, plot_resolution_effect))
-
 
   print('processed models')
 
@@ -1428,7 +1452,7 @@ test_train_data <- purrr::cross_df(list(
   downscaled_performance <-
     cross_df(list(
       run_name = skynet_models$run_name,
-      resolution =  seq(25, 200, by = 25)
+      resolution =  seq(25, 200, by = 50)
     )) %>%
     left_join(skynet_models %>% select(run_name, test_data), by = "run_name") %>%
     left_join(
@@ -1449,7 +1473,7 @@ test_train_data <- purrr::cross_df(list(
       new_grid  = map2(
         test_data,
         resolution,
-        create_grid,
+        safely(create_grid),
         lon_name = rounded_lon,
         lat_name = rounded_lat
       )
@@ -1487,61 +1511,68 @@ test_train_data <- purrr::cross_df(list(
   # save outputs ------------------------------------------------------------
 
 
-  save_foo <- function(test_plot,
-                       model,
-                       train_region,
-                       test_region,
-                       data_set,
-                       dep_var,
-                       run_dir) {
-    ggsave(
-      filename = paste0(
-        run_dir,
-        model,
-        "-train_",
-        train_region,
-        "-test_",
-        test_region,
-        "-data_",
-        data_set,
-        '-depvar_',
-        dep_var,
-        ".pdf"
-      ),
-      test_plot,
-      height = 8,
-      width = 8
-    )
-  }
+  # save_foo <- function(test_plot,
+  #                      model,
+  #                      train_region,
+  #                      test_region,
+  #                      data_set,
+  #                      dep_var,
+  #                      run_dir) {
+  #   ggsave(
+  #     filename = paste0(
+  #       run_dir,
+  #       model,
+  #       "-train_",
+  #       train_region,
+  #       "-test_",
+  #       test_region,
+  #       "-data_",
+  #       data_set,
+  #       '-depvar_',
+  #       dep_var,
+  #       ".pdf"
+  #     ),
+  #     test_plot,
+  #     height = 8,
+  #     width = 8
+  #   )
+  # }
+  #
+  # pwalk(
+  #   list(
+  #     model = skynet_models$model,
+  #     train_region = skynet_models$train_set,
+  #     test_plot = skynet_models$test_plot,
+  #     test_region = skynet_models$test_sets,
+  #     data_set = skynet_models$data_subset,
+  #     dep_var = skynet_models$dep_var
+  #   ),
+  #   save_foo,
+  #   run_dir = run_dir
+  # )
 
-  pwalk(
-    list(
-      model = skynet_models$model,
-      train_region = skynet_models$train_set,
-      test_plot = skynet_models$test_plot,
-      test_region = skynet_models$test_sets,
-      data_set = skynet_models$data_subset,
-      dep_var = skynet_models$dep_var
-    ),
-    save_foo,
-    run_dir = run_dir
-  )
-
-  pwalk(
-    list(
-      model = skynet_models$model,
-      test_plot = skynet_models$training_plot,
-      train_region = skynet_models$train_set,
-      test_region = paste0(skynet_models$test_sets, "-training plot"),
-      data_set = skynet_models$data_subset,
-      dep_var = skynet_models$dep_var
-    ),
-    save_foo,
-    run_dir = run_dir
-  )
+  # pwalk(
+  #   list(
+  #     model = skynet_models$model,
+  #     test_plot = skynet_models$training_plot,
+  #     train_region = skynet_models$train_set,
+  #     test_region = paste0(skynet_models$test_sets, "-training plot"),
+  #     data_set = skynet_models$data_subset,
+  #     dep_var = skynet_models$dep_var
+  #   ),
+  #   save_foo,
+  #   run_dir = run_dir
+  # )
 
 
   print('printed models')
+
+
+  save(
+    file = here::here("results", run_name, "processed_skynet_models.Rdata"),
+    skynet_models
+  )
+
 
   save(
     file = here::here("results", run_name, "processed_skynet_models.Rdata"),

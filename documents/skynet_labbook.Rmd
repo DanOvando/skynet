@@ -2509,3 +2509,73 @@ Can you use GFW to augment assessments by filling in spatial gaps in the survey?
 So, what you need is a thing that does test and training internally, e.g subdivide each region, either by splitting or spatially correlated sampling. 
 
 From there, you should also do historic, but by region as well. 
+
+# Why are unfished easier to predict?
+
+Well, it's not because they are less variable... they are more variable. 
+
+
+```{r}
+a = candidate_data %>%
+  filter((fished_only == TRUE |
+           unfished_only == T) & survey_months_only == TRUE) %>% 
+select(fished_only, skynet_data) %>% 
+  unnest()
+
+a %>% 
+  ggplot(aes(log_density, fill = fished_only)) + 
+  geom_histogram()
+
+a %>% 
+  group_by(fished_only) %>% 
+  summarise(vd = sd(log_density))
+```
+
+```{r}
+
+
+fish_abundance <- a %>% 
+  filter(survey == "ebsbts") %>% 
+  group_by(survey,knot, rounded_lat, rounded_lon, fished_only) %>% 
+  summarise(total_density = mean(density)) %>% 
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon))
+  
+  fish_abundance <-  fish_abundance %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+  "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf() 
+  
+  bbox <- sf::st_bbox(map_knots)
+  
+  fish_map <- fish_abundance %>%
+  ggplot() +
+  geom_sf(aes(color = total_density), size = 2, alpha = 0.5) +
+  # geom_sf(data = pacific_map, fill = 'grey60') +
+  # coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+  # ylim = c(bbox['ymin'], bbox['ymax'])) +
+      # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+ 
+  scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)))+
+  theme(legend.key.height = unit(1.5,"cm")) +
+    facet_wrap(~fished_only)
+  
+
+
+  
+    
+  
+  fish_map
+
+```
+
+
+
+```{r}
+skynet_models %>% 
+  filter(gfw_only == T) %>% 
+  arrange(desc(r2)) %>% 
+  ggplot(aes(data_subset, r2)) + 
+  geom_boxplot()
+```
+

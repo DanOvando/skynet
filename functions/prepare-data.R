@@ -34,6 +34,10 @@ prepare_data <-
         total_hours = sum(te),
         total_engine_power = sum(inferred_engine_power),
         total_engine_hours = sum(te * inferred_engine_power),
+        positive_hours = sum(te > 0),
+        median_hours = median(te),
+        median_engine_power = median(inferred_engine_power),
+        median_engine_hours = median(te * inferred_engine_power),
         dist_from_port = mean(mean_distance_from_port),
         dist_from_shore = mean(mean_distance_from_shore),
         mean_vessel_length = mean(inferred_length),
@@ -263,7 +267,9 @@ prepare_data <-
       ) %>%
       ungroup()
 
+    total_fish_data$index <- 1:nrow(total_fish_data)
 
+    skynet_data$index <- 1:nrow(skynet_data)
 
     return(list(total_fish_data = total_fish_data,
                 skynet_data = skynet_data))
