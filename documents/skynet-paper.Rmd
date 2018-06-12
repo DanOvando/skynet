@@ -618,7 +618,7 @@ Our estimates of absolute density in the testing data (the west coast groundfish
 ```{r oor-plot, fig.cap = "Spatial residuals predicted by GBM model (log(density) is dependent variable). Negative residuals (red) indicate model underpredicted the true density, positive residuals (blue) indicate the model overpredicted. Data aggregated at 100km^2^ resolution"}
 
 train_performance <- skynet_models %>% 
-  filter(test_set == "random_alaska", dep_var == "log_density", data_subset == "skynet")  %>%
+  filter(test_set == "spatial_alaska", dep_var == "log_density", data_subset == "skynet")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
   } %>% 
@@ -626,7 +626,7 @@ train_performance <- skynet_models %>%
   mutate(split = "Training")
 
 test_performance <- skynet_models %>% 
-  filter(test_set == "random_alaska", dep_var == "log_density", data_subset == "skynet")  %>%
+  filter(test_set == "spatial_alaska", dep_var == "log_density", data_subset == "skynet")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$test_data[[1]]
   } %>% 

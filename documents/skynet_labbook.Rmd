@@ -2576,6 +2576,6 @@ skynet_models %>%
   filter(gfw_only == T) %>% 
   arrange(desc(r2)) %>% 
   ggplot(aes(data_subset, r2)) + 
-  geom_boxplot()
+  geom_violin()
 ```
 
