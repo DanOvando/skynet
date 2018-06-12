@@ -46,7 +46,7 @@ theme_set(fig_theme)
 
 load(here::here("results", run_name,'skynet_data.Rdata'))
 
-load(here::here("results", run_name,'processed_skynet_models.Rdata'))
+load(here::here("results", run_name,'skynet_models.Rdata'))
 
 load(here::here("data","vast_fish.Rdata"))
 
@@ -78,6 +78,83 @@ map_theme <-   theme_get() +theme(legend.key.height = unit(1.5,"cm"),
                      legend.box.margin =  ggplot2::margin(0,0,0,0))
 
 vast_fish <- vast_fish[!map_lgl(vast_fish$vasterized_data, is.null), ]
+
+
+
+  skynet_models <- skynet_models %>%
+    mutate(index = 1:nrow(.)) %>%
+    mutate(error = map(fitted_model, "error")) %>%
+    mutate(no_error = map_lgl(error, is.null)) %>%
+    filter(no_error)
+
+
+
+  diagnostic_plot_foo <- function(data,
+                                  r2,
+                                  dep_var,
+                                  test_region,
+                                  train_region,
+                                  data_set) {
+    data %>%
+      ggplot(aes_(as.name(dep_var), ~ pred)) +
+      geom_abline(aes(intercept = 0, slope = 1),
+                  color = "red",
+                  linetype = 2) +
+      geom_point(alpha = 0.75) +
+      labs(
+        title = paste0(
+          "tested on ",
+          test_region,
+          "- trained on ",
+          train_region,
+          "; R2 = ",
+          r2
+        ),
+        subtitle = paste0("data subset is: ", data_set)
+      )
+  } # close diagnostic functions
+
+
+  skynet_models <- skynet_models %>%
+    mutate(
+      test_data = map(fitted_model, c("result", "test_predictions")),
+      training_data = map(fitted_model, c("result", "training_predictions"))
+    ) %>%
+    select(-fitted_model) %>%
+    mutate(
+      var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
+      r2 = map2_dbl(test_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
+      rmse = map2_dbl(test_data, dep_var, ~ yardstick::rmse(.x, .y, "pred")),
+      ccc = map2_dbl(test_data, dep_var, ~ yardstick::ccc(.x, .y, "pred")),
+      r2_training = map2_dbl(training_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
+      rmse_training = map2_dbl(training_data, dep_var, ~ yardstick::rmse(.x, .y, "pred")),
+      ccc_training = map2_dbl(training_data, dep_var, ~ yardstick::ccc(.x, .y, "pred"))
+    ) %>%
+    mutate(
+      test_plot = pmap(
+        list(
+          data = test_data,
+          r2 = r2,
+          test_region = test_sets,
+          train_region = train_set,
+          data_set = data_subset,
+          dep_var = dep_var
+        ),
+        diagnostic_plot_foo
+      ),
+      training_plot = pmap(
+        list(
+          data = training_data,
+          r2 = r2_training,
+          test_region = paste0(test_sets),
+          train_region = paste0(train_set, "- training plot"),
+          data_set = data_subset,
+          dep_var = dep_var
+        ),
+        diagnostic_plot_foo
+      )
+    )
+
 
 ```
 

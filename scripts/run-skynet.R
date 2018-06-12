@@ -51,7 +51,7 @@ num_cores <- 3
 
 run_models <- TRUE # fit gfw models to fishdata
 
-tune_paras <- TRUE # pre-tune machine learning models
+tune_pars <- TRUE # pre-tune machine learning models
 
 models <- c("ranger","mars","gbm", "structural", "engine_power", "hours")
 
@@ -1278,7 +1278,7 @@ test_train_data <- purrr::cross_df(list(
 
   if (run_models == T) {
 
-    if (prep_models == T){
+    if (tune_pars == T){
 
     prepped_train <- skynet_models %>%
       filter(data_subset == "skynet",
