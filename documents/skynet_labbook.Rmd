@@ -2772,6 +2772,8 @@ Looks like you can pass vfold_cv objects to perf_mod... not a bad idea. So you w
 ```
 
 
+So tasks to test this tomorrow are whether you can get the final predictions out of a train object (model$pred), store them, and then pass them to tidyposterior::perf_mod for model comparison. If you can do that, then seems worth going the train route for now, saves some effort. 
+
 Ranger is fitting by sampling the data with replacement, so already creating a bunch of synthetic datasets to generate the model fitting, and using OOB for the actual predictions. 
 
 

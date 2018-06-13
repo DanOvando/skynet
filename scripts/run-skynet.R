@@ -1331,8 +1331,10 @@ test_train_data <- purrr::cross_df(list(
     sfm <- safely(fit_skynet)
 
     skynet_models <- skynet_models %>%
-      # filter(model == "mars",
-      #        test_sets == "historic_west_coast") %>%
+      # slice(a$index) %>%
+      filter(model == "mars") %>%
+      slice(4) %>%
+
       # slice(1:2) %>%
       # filter(data_subset == "skynet",
       #        test_sets == "random",
@@ -1358,8 +1360,8 @@ test_train_data <- purrr::cross_df(list(
             tree_candidate_vars = candidate_vars
           ),
           sfm,
-          fitcontrol_number = 10,
-          fitcontrol_repeats = 2,
+          fitcontrol_number = 2,
+          fitcontrol_repeats = 1,
           never_ind_vars = never_ind_vars,
           tune_model = T,
           cores = num_cores,
