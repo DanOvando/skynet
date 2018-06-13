@@ -2728,6 +2728,54 @@ log_plot + linear_plot + true_linear_plot
 
 Evidence then is that just fitting on the damn thing you're interested in is the best option.. interesting. Let's check 
 
+# model comparison
+
+So, you've got things working much better now. Still leaves a question of deciding which model to use. So far, you're just using RMSE/R2 for model selection. Should you be using tidyposterior for this, or is that just overkill?
+
+Or more specifically, do you need to run v-fold cross validation on the tuned model to then generate a distribution of predictive power? Seems like a pain in the arse with little payoff from comittee... though it is the right way to do it. But the idea here would be to use once set of cross cv to fit the effing model. So for each model you fit it, but you also create a bunch of bootstrapped/cross fold samples of the training data and use that to assess model performance. Let's do a speed test I guess...
+
+Looks like you can pass vfold_cv objects to perf_mod... not a bad idea. So you would then Take the model... and train it and predict it on each split, then calculate statistic like RMSE, and use that to compare the damn models. woof. Let's see how hard it would be... 
+
+```{r}
+
+    mars_foo <- function(data){
+      
+      
+      prepped_recipe <- recipes::prep(train_recipe, rsample::training(data), retain = T)
+      
+      proc_training <- juice(prepped_recipe)
+      
+      model <- earth::earth(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+                            data = proc_training,
+                            nprune = tuned_pars$nprune,
+                            degree = tuned_pars$degree,
+                            trace = 1,
+                            glm = list(family = gaussian)
+      )
+      
+      proc_testing <- bake(prepped_recipe, rsample::testing(data))
+      
+      
+      pred <- predict(model, newdata = proc_testing)
+      
+      proc_testing <- proc_testing %>% 
+        mutate(log_pred = pred ) %>% 
+        mutate(resid = dep_var)
+      
+      pred_rmse <- 
+      
+      
+    }
+    
+    kfold_training <- rsample::vfold_cv(training, v = 10)
+    
+```
+
+
+Ranger is fitting by sampling the data with replacement, so already creating a bunch of synthetic datasets to generate the model fitting, and using OOB for the actual predictions. 
+
+
+
 
 
 

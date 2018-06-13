@@ -630,12 +630,12 @@ How well can the model predict abundance at locations that are not included in t
 
 ```{r}
 spatial_performance <- best_models %>% 
-  filter(test_set == "random", dep_var == "log_density")  %>%
+  filter(test_set == "random", dep_var == "density")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
   } %>% 
   group_by(rounded_lat, rounded_lon, survey) %>% 
-  summarise(resid = mean(exp(pred) - exp(log_density)))
+  summarise(resid = mean(pred - density))
 ```
 
 

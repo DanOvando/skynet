@@ -185,7 +185,7 @@ fit_skynet <- function(data_subset,
 
     model <- ranger::ranger(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
                  data = proc_training,
-                  mtry = tuned_pars$mtry,
+                  mtry = pmin(ncol(proc_training) -2, tuned_pars$mtry),
                  splitrule = tuned_pars$splitrule,
                  min.node.size = tuned_pars$min.node.size,
                  importance = "impurity_corrected",
@@ -361,8 +361,6 @@ fit_skynet <- function(data_subset,
                  nprune = tuned_pars$nprune,
                  degree = tuned_pars$degree,
                  trace = 1,
-                 nfold = 10,
-                 ncross = 2,
                  glm = list(family = gaussian)
                  )
 

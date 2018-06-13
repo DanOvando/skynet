@@ -51,7 +51,7 @@ num_cores <- 3
 
 run_models <- TRUE # fit gfw models to fishdata
 
-tune_pars <- TRUE # pre-tune machine learning models
+tune_pars <- FALSE # pre-tune machine learning models
 
 models <- c("ranger","mars","gbm", "structural", "engine_power", "hours")
 
@@ -1283,7 +1283,7 @@ test_train_data <- purrr::cross_df(list(
     prepped_train <- skynet_models %>%
       filter(data_subset == "skynet",
              test_sets == "random",
-             model %in% c("mars"),
+             model %in% c("gbm","mars", "ranger"),
              gfw_only == FALSE)  %>%
       group_by(model) %>%
       slice(1) %>%
@@ -1331,6 +1331,9 @@ test_train_data <- purrr::cross_df(list(
     sfm <- safely(fit_skynet)
 
     skynet_models <- skynet_models %>%
+      # filter(model == "mars",
+      #        test_sets == "historic_west_coast") %>%
+      # slice(1:2) %>%
       # filter(data_subset == "skynet",
       #        test_sets == "random",
       #        gfw_only == FALSE,
