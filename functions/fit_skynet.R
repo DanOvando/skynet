@@ -112,7 +112,8 @@ fit_skynet <- function(data_subset,
   train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
                                   data = reg_data) %>%
     step_nzv(all_predictors()) %>%
-    step_BoxCox(all_predictors())
+    step_BoxCox(all_predictors()) %>%
+    step_knnimpute(all_predictors())
     # step_center(all_predictors()) %>%
     # step_scale(all_predictors())
 
@@ -185,7 +186,7 @@ fit_skynet <- function(data_subset,
 
     model <- ranger::ranger(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
                  data = proc_training,
-                  mtry = pmin(ncol(proc_training) -2, tuned_pars$mtry),
+                  mtry = pmin(pmax(1,ncol(proc_training) -2), tuned_pars$mtry),
                  splitrule = tuned_pars$splitrule,
                  min.node.size = tuned_pars$min.node.size,
                  importance = "impurity_corrected",
@@ -217,7 +218,8 @@ fit_skynet <- function(data_subset,
       train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
                                       data = reg_data) %>%
         step_nzv(all_predictors()) %>%
-        step_BoxCox(all_predictors())
+        step_BoxCox(all_predictors()) %>%
+        step_knnimpute(all_predictors())
       #
       # step_center(all_predictors()) %>%
       # step_scale(all_predictors())
@@ -229,7 +231,7 @@ fit_skynet <- function(data_subset,
 
       model <- ranger::ranger(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
                               data = proc_training,
-                              mtry = pmin(ncol(proc_training) - 2,tuned_pars$mtry),
+                              mtry = pmin(pmax(1,ncol(proc_training) - 2),tuned_pars$mtry),
                               splitrule = tuned_pars$splitrule,
                               min.node.size = tuned_pars$min.node.size,
                               verbose = TRUE)
@@ -304,7 +306,8 @@ fit_skynet <- function(data_subset,
       train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
                                       data = reg_data) %>%
         step_nzv(all_predictors()) %>%
-        step_BoxCox(all_predictors())
+        step_BoxCox(all_predictors()) %>%
+        step_knnimpute(all_predictors())
         #
         # step_center(all_predictors()) %>%
         # step_scale(all_predictors())
