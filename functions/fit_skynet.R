@@ -92,7 +92,7 @@ fit_skynet <- function(data_subset,
     as.data.frame() %>%
     as.matrix()
 
-  if (model_name == "mars") {
+  if (str_detect(model_name, "mars")) {
     dep_var <- glue::glue("log_", dep_var)
 
   }
@@ -119,60 +119,6 @@ fit_skynet <- function(data_subset,
 
   prep_recipe <- prep(train_recipe, data = reg_data, retain = T)
 
-
-  if (model_name == 'cforest') {
-    model <- train(
-      model_formula,
-      data = reg_data,
-      method = "cforest",
-      trControl = fit_control,
-      preProcess = c("center", "scale"),
-      weights = weights
-    )
-    if (tune_model == T) {
-      cforest_importance <- varImp(model$finalModel)
-
-      varimp <- cforest_importance %>%
-        mutate(varname = rownames(.)) %>%
-        arrange(desc(Overall)) %>%
-        mutate(varname = str_replace(varname, '(TRUE)|(FALSE)', ''))
-
-
-      random_imp <-
-        varimp$Overall[varimp$varname == 'random_var']
-
-      vars_to_include <- varimp %>%
-        filter(Overall > random_imp) %>% {
-          .$varname
-        } %>% unique()
-
-      reg_data <- reg_data[, c(dep_var, vars_to_include)]
-
-      model_formula <-
-        paste0(dep_var, '~', paste(vars_to_include, collapse = '+')) %>%
-        as.formula()
-
-      model <- train(
-        model_formula,
-        data = reg_data,
-        method = "cforest",
-        trControl = fit_control,
-        preProcess = c("center", "scale"),
-        weights = weights
-
-      )
-
-    }
-
-    out_training <- training %>%
-      as_data_frame() %>%
-      add_predictions(model)
-
-    out_testing <- testing %>%
-      as_data_frame() %>%
-      add_predictions(model)
-
-  } # close cforest
 
   if (model_name == 'ranger') {
     #fit random forest
@@ -362,6 +308,51 @@ fit_skynet <- function(data_subset,
 
     out_training <- training %>%
       mutate(pred = training_pred)
+
+  }
+
+
+  if (model_name == "bagged_mars") {
+
+    tuned_pars <- data_frame(degree = 2)
+
+    # tuned_pars <- tuned_pars %>%
+    #   pluck(model_name)
+
+    fit_control <- trainControl(
+      method = "none",
+      allowParallel = TRUE,
+      savePredictions = "final"
+    )
+
+    model <- caret::train(
+      train_recipe,
+      data = reg_data,
+      method = "bagEarthGCV",
+      trControl = fit_control,
+      tuneGrid = tuned_pars,
+      trace = 1,
+      B = 50
+    )
+
+    training_pred <-
+      predict(model,
+              newdata =  training)
+
+    out_training <- training %>%
+      mutate(pred = training_pred)
+
+    se_estimate <- sd(out_training$log_density - out_training$pred)
+
+    out_training$pred <- exp(out_training$pred + se_estimate^2/2)
+
+    testing_pred <-
+      predict(model,
+              newdata =  testing)
+
+    out_testing <- testing %>%
+      mutate(pred = exp(testing_pred + se_estimate ^ 2 / 2))
+
 
   }
 

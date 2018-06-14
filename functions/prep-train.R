@@ -86,7 +86,7 @@ prep_train <- function(data_subset,
     as.matrix()
 
 
-  if (model_name == "mars"){
+  if (str_detect(model_name,"mars")) {
 
     dep_var <- glue::glue("log_",dep_var)
 
@@ -178,6 +178,22 @@ prep_train <- function(data_subset,
       trControl = fit_control,
       tuneGrid = mars_grid,
       trace = 1
+    )
+
+  }
+
+  if (model_name == 'bagged_mars') {
+
+    mars_grid <-  expand.grid(degree = 1:5)
+
+    model <- caret::train(
+      train_recipe,
+      data = reg_data,
+      method = "bagEarthGCV",
+      trControl = fit_control,
+      tuneGrid = mars_grid,
+      trace = 1,
+      B = 50
     )
 
   }

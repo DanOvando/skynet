@@ -53,7 +53,7 @@ run_models <- TRUE # fit gfw models to fishdata
 
 tune_pars <- FALSE # pre-tune machine learning models
 
-models <- c("ranger","mars","gbm", "structural", "engine_power", "hours")
+models <- c("ranger","bagged_mars","mars","gbm", "structural", "engine_power", "hours")
 
 # models <- c("mars")
 
@@ -1283,7 +1283,7 @@ test_train_data <- purrr::cross_df(list(
     prepped_train <- skynet_models %>%
       filter(data_subset == "skynet",
              test_sets == "random",
-             model %in% c("ranger"),
+             model %in% c("bagged_mars"),
              gfw_only == FALSE)  %>%
       group_by(model) %>%
       slice(1) %>%
@@ -1306,8 +1306,8 @@ test_train_data <- purrr::cross_df(list(
             tree_candidate_vars = candidate_vars
           ),
           prep_train,
-          fitcontrol_number = 10,
-          fitcontrol_repeats = 2,
+          fitcontrol_number = 2,
+          fitcontrol_repeats = 1,
           never_ind_vars = never_ind_vars,
           tune_model = T,
           cores = num_cores,
@@ -1331,15 +1331,8 @@ test_train_data <- purrr::cross_df(list(
     sfm <- safely(fit_skynet)
 
     skynet_models <- skynet_models %>%
-      # filter(model == "mars",
-      #        test_sets == "historic_west_coast") %>%
-      # slice(1:2) %>%
-      # filter(data_subset == "skynet",
-      #        test_sets == "random",
-      #        gfw_only == FALSE,
-      #        weight_surveys == FALSE,
-      #        model == "mars"
-      #        ) %>%
+      filter(model == "bagged_mars") %>%
+      slice(1:3) %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
