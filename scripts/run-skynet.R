@@ -1283,7 +1283,7 @@ test_train_data <- purrr::cross_df(list(
     prepped_train <- skynet_models %>%
       filter(data_subset == "skynet",
              test_sets == "random",
-             model %in% c("bagged_mars"),
+             model %in% c("ranger","gbm","mars","bagged_mars"),
              gfw_only == FALSE)  %>%
       group_by(model) %>%
       slice(1) %>%
@@ -1315,7 +1315,10 @@ test_train_data <- purrr::cross_df(list(
         )
       )
 
-    tuned_pars <- map(prepped_train$fitted_model,~.) %>%
+    tuned_pars <- map(prepped_train$fitted_model,"tuned_pars") %>%
+      set_names(prepped_train$model)
+
+    kfold_preds <- map(prepped_train$fitted_model,"kfold_preds") %>%
       set_names(prepped_train$model)
 
     saveRDS(file = paste0(run_dir, "tuned_pars.RDS"),

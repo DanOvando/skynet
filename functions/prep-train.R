@@ -47,6 +47,7 @@ prep_train <- function(data_subset,
     method = fitcontrol_method,
     number = fitcontrol_number,
     repeats = fitcontrol_repeats,
+    savePredictions = "final",
     allowParallel = TRUE
   )
   dat <-
@@ -123,6 +124,7 @@ prep_train <- function(data_subset,
         min.node.size = c(5,10,20)
       )
 
+    set.seed(42)
     model <- train(
       train_recipe,
       reg_data,
@@ -144,12 +146,13 @@ prep_train <- function(data_subset,
     # )
 
     gbm_grid <-  expand.grid(
-      interaction.depth = c(5, 10),
-      n.trees = c(5000,8000),
+      interaction.depth = c(2,5),
+      n.trees = c(5000),
       shrinkage = c(0.001),
       n.minobsinnode = c(20)
     )
 
+    set.seed(42)
     model <- caret::train(
       train_recipe,
       data = reg_data,
@@ -171,6 +174,7 @@ prep_train <- function(data_subset,
                               # number of terms
                               degree = 1:5)
 
+    set.seed(42)
     model <- caret::train(
       train_recipe,
       data = reg_data,
@@ -180,12 +184,19 @@ prep_train <- function(data_subset,
       trace = 1
     )
 
+    se_estimate <- sd(model$pred$obs - model$pred$pred)
+
+    model$pred$obs <- exp(model$pred$obs)
+
+    model$pred$pred <- exp(model$pred$pred + se_estimate^2/2)
+
   }
 
   if (model_name == 'bagged_mars') {
 
     mars_grid <-  expand.grid(degree = 1:5)
 
+    set.seed(42)
     model <- caret::train(
       train_recipe,
       data = reg_data,
@@ -196,10 +207,17 @@ prep_train <- function(data_subset,
       B = 50
     )
 
+    se_estimate <- sd(model$pred$obs - model$pred$pred)
+
+    model$pred$obs <- exp(model$pred$obs)
+
+    model$pred$pred <- exp(model$pred$pred + se_estimate^2/2)
+
   }
 
 
-  out <- model$bestTune %>% mutate(model = model_name)
+  out <- list(tuned_pars = model$bestTune %>% mutate(model = model_name),
+              kfold_preds = model$pred)
 
   return(out)
 

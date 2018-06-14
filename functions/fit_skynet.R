@@ -314,10 +314,8 @@ fit_skynet <- function(data_subset,
 
   if (model_name == "bagged_mars") {
 
-    tuned_pars <- data_frame(degree = 2)
-
-    # tuned_pars <- tuned_pars %>%
-    #   pluck(model_name)
+    tuned_pars <- tuned_pars %>%
+      pluck(model_name)
 
     fit_control <- trainControl(
       method = "none",

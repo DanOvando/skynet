@@ -2803,6 +2803,38 @@ OK, here's the new structure
 
 scale residuals by standard deviation
 
+# tidyposterior
+
+```{r}
+
+kfold_preds_summary <-  kfold_preds %>% 
+  map_df(~., .id = "model") %>% 
+  select(Resample, model, obs, pred,) %>% 
+  group_by(Resample, model) %>% 
+  summarise(model_rmse = sqrt(mean((obs - pred)^2))) %>% 
+  rename(id = Resample) %>% 
+  spread(model, model_rmse)
+              
+
+rmse_mod <- perf_mod(kfold_preds_summary, seed = 4344, iter = 5000)
+
+rmse_post <- tidy(rmse_mod)
+
+stacked_summary <- kfold_preds_summary %>% 
+  gather(model, model_rmse, -id)
+
+ggplot(rmse_post) + 
+  # Add the observed data to check for consistency 
+  geom_point(
+    data = stacked_summary, 
+    aes(x = model, y = model_rmse), 
+    alpha = .5, col = "blue"
+  )
+
+
+```
+
+
 
 
 
