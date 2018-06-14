@@ -81,11 +81,11 @@ vast_fish <- vast_fish[!map_lgl(vast_fish$vasterized_data, is.null), ]
 
 
 
-  skynet_models <- skynet_models %>%
-    mutate(index = 1:nrow(.)) %>%
-    mutate(error = map(fitted_model, "error")) %>%
-    mutate(no_error = map_lgl(error, is.null)) %>%
-    filter(no_error)
+skynet_models <- skynet_models %>%
+  mutate(index = 1:nrow(.)) %>%
+  mutate(error = map(fitted_model, "error")) %>%
+  mutate(no_error = map_lgl(error, is.null)) %>%
+  filter(no_error)
 
 
 
@@ -154,6 +154,9 @@ vast_fish <- vast_fish[!map_lgl(vast_fish$vasterized_data, is.null), ]
         diagnostic_plot_foo
       )
     )
+  
+  skynet_models <- skynet_models %>% 
+    mutate(unfished_only = str_detect(data_subset, "unfished"))
 
 
 ```
@@ -519,6 +522,19 @@ We include this mostly to explore the basic evidence for a hypothesis that more 
 
 
 # Results 
+
+## Which Model is Best?
+
+```{r}
+
+skynet_models %>% 
+  ggplot(aes(r2_training, fill = unfished_only)) +
+  geom_histogram() +
+  facet_grid(dep_var ~ model)
+
+```
+
+
 
 These results are from model run `r run_name`. For now I am just describing the results enough to try and convey what I hope to get out of that graph, since specific results are still in flux. However, I've run these results enough different ways that I'm fairly confident that these overall results will remain relatively stable (the results are highly insensitive to things like log density vs log biomass vs density vs center-scaled density, etc.)
 

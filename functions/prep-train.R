@@ -120,7 +120,7 @@ prep_train <- function(data_subset,
       expand.grid(
         mtry = c(2, default, ncol(independent_data) - 2),
         splitrule = c("variance", "extratrees", "maxstat"),
-        min.node.size = c(5)
+        min.node.size = c(5,10,20)
       )
 
     model <- train(

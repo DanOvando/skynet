@@ -1283,7 +1283,7 @@ test_train_data <- purrr::cross_df(list(
     prepped_train <- skynet_models %>%
       filter(data_subset == "skynet",
              test_sets == "random",
-             model %in% c("gbm","mars", "ranger"),
+             model %in% c("ranger"),
              gfw_only == FALSE)  %>%
       group_by(model) %>%
       slice(1) %>%
@@ -1358,8 +1358,8 @@ test_train_data <- purrr::cross_df(list(
             tree_candidate_vars = candidate_vars
           ),
           sfm,
-          fitcontrol_number = 10,
-          fitcontrol_repeats = 2,
+          fitcontrol_number = 1,
+          fitcontrol_repeats = 1,
           never_ind_vars = never_ind_vars,
           tune_model = T,
           cores = num_cores,

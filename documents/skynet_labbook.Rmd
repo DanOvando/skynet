@@ -2774,7 +2774,34 @@ Looks like you can pass vfold_cv objects to perf_mod... not a bad idea. So you w
 
 Ranger is fitting by sampling the data with replacement, so already creating a bunch of synthetic datasets to generate the model fitting, and using OOB for the actual predictions. 
 
+SHOOT. seems like there's something broken with pred + recipes + gbm, which makes the whole thing fairly useless, unless you add it in yourself. Which seems like the right way to go. 
 
+But, not really any need to do that for every thing. That would be a 5-fold increase in run time (roughly) to run it for each model. 
+
+So instead, write a function that does a kfold cross validation of the final model on demand, and do it across a few metrics (random, spatial, time)
+
+# paper revamp
+
+OK, here's the new structure
+
+1. Background etc
+
+2. Which model is best? 
+  - Based off of training performance, not testing performance. 
+  - Assess impact on spatial scale on training performance in this step. 
+  - Do a smaller analysis using tidyposterior to dial down between candidate top models
+  - This is the model that evidence suggests has best chance to do well out of sample
+  - focus on normal density, have economic density as backpocket to show that performance isn't that different, and that actual density is slightly more fisheries management relevant. 
+3. What does the best model say?
+
+*OOB preformance will always be worse, so while machine learning might get worse, structural won't get better, and since best bet of performance is too low to be useful in the first place, so good reason to move on to machine learning and focus on model comparison there. 
+
+- Now, evaluate testing performance of JUST the best model
+
+4. Appendix
+- back up showing performance of other models to show that you're not missing the bus here
+
+scale residuals by standard deviation
 
 
 

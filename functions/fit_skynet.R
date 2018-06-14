@@ -56,7 +56,7 @@ fit_skynet <- function(data_subset,
     data_sources$data[[which(data_sources$data_subset == data_subset)]]
 
   dat <- dat %>%
-  dmap_if(is.logical, as.numeric)
+    dmap_if(is.logical, as.numeric)
 
   training <- dat %>%
     filter(index %in% training)
@@ -92,9 +92,8 @@ fit_skynet <- function(data_subset,
     as.data.frame() %>%
     as.matrix()
 
-  if (model_name == "mars"){
-
-    dep_var <- glue::glue("log_",dep_var)
+  if (model_name == "mars") {
+    dep_var <- glue::glue("log_", dep_var)
 
   }
 
@@ -109,13 +108,14 @@ fit_skynet <- function(data_subset,
     mutate(!!dep_var := dependent_data)
 
 
-  train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
-                                  data = reg_data) %>%
+  train_recipe <-
+    recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
+                    data = reg_data) %>%
     step_nzv(all_predictors()) %>%
     step_BoxCox(all_predictors()) %>%
     step_knnimpute(all_predictors())
-    # step_center(all_predictors()) %>%
-    # step_scale(all_predictors())
+  # step_center(all_predictors()) %>%
+  # step_scale(all_predictors())
 
   prep_recipe <- prep(train_recipe, data = reg_data, retain = T)
 
@@ -180,21 +180,23 @@ fit_skynet <- function(data_subset,
     tuned_pars <- tuned_pars %>%
       pluck(model_name)
 
-    prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
+    prepped_recipe <-
+      recipes::prep(train_recipe, training, retain = T)
 
     proc_training <- juice(prepped_recipe)
 
-    model <- ranger::ranger(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
-                 data = proc_training,
-                  mtry = pmin(pmax(1,ncol(proc_training) -2), tuned_pars$mtry),
-                 splitrule = tuned_pars$splitrule,
-                 min.node.size = tuned_pars$min.node.size,
-                 importance = "impurity_corrected",
-                 verbose = TRUE)
+    model <-
+      ranger::ranger(
+        formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+        data = proc_training,
+        mtry = pmin(pmax(1, ncol(proc_training) - 2), tuned_pars$mtry),
+        splitrule = tuned_pars$splitrule,
+        min.node.size = tuned_pars$min.node.size,
+        importance = "impurity_corrected",
+        verbose = TRUE
+      )
 
     if (tune_model == T) {
-
-
       impnames <-
         model$variable.importance %>% as.data.frame() %>% purrr::pluck(attr_getter("row.names"))
 
@@ -215,8 +217,9 @@ fit_skynet <- function(data_subset,
 
       reg_data <- reg_data[, c(dep_var, vars_to_include)]
 
-      train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
-                                      data = reg_data) %>%
+      train_recipe <-
+        recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
+                        data = reg_data) %>%
         step_nzv(all_predictors()) %>%
         step_BoxCox(all_predictors()) %>%
         step_knnimpute(all_predictors())
@@ -224,26 +227,30 @@ fit_skynet <- function(data_subset,
       # step_center(all_predictors()) %>%
       # step_scale(all_predictors())
 
-      prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
+      prepped_recipe <-
+        recipes::prep(train_recipe, training, retain = T)
 
       proc_training <- juice(prepped_recipe)
 
 
-      model <- ranger::ranger(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
-                              data = proc_training,
-                              mtry = pmin(pmax(1,ncol(proc_training) - 2),tuned_pars$mtry),
-                              splitrule = tuned_pars$splitrule,
-                              min.node.size = tuned_pars$min.node.size,
-                              verbose = TRUE)
+      model <-
+        ranger::ranger(
+          formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+          data = proc_training,
+          mtry = pmin(pmax(1, ncol(
+            proc_training
+          ) - 2), tuned_pars$mtry),
+          splitrule = tuned_pars$splitrule,
+          min.node.size = tuned_pars$min.node.size,
+          verbose = TRUE
+        )
 
 
     }
 
     proc_testing <- bake(prepped_recipe, newdata = testing)
 
-    training_pred <-
-      predict(model,
-              data =  proc_training)
+    training_pred <- model$predictions
 
     testing_pred <-
       predict(model,
@@ -253,31 +260,34 @@ fit_skynet <- function(data_subset,
       mutate(pred = testing_pred$predictions)
 
     out_training <- training %>%
-      mutate(pred = training_pred$predictions)
+      mutate(pred = training_pred)
 
   } # close ranger rf
 
 
   if (model_name == 'gbm') {
-
     # on.exit(detach('package:plyr'))
 
     tuned_pars <- tuned_pars %>%
       pluck(model_name)
 
-    prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
+    prepped_recipe <-
+      recipes::prep(train_recipe, training, retain = T)
 
     proc_training <- juice(prepped_recipe)
 
-    model <- gbm(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
-                 data = proc_training,
-                 n.trees = tuned_pars$n.trees,
-                 interaction.depth = tuned_pars$interaction.depth,
-                 shrinkage = tuned_pars$shrinkage,
-                 n.minobsinnode = tuned_pars$n.minobsinnode,
-                 weights = weights,
-                 verbose = TRUE,
-                 keep.data = FALSE)
+    model <-
+      gbm(
+        formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+        data = proc_training,
+        n.trees = tuned_pars$n.trees,
+        interaction.depth = tuned_pars$interaction.depth,
+        shrinkage = tuned_pars$shrinkage,
+        n.minobsinnode = tuned_pars$n.minobsinnode,
+        weights = weights,
+        verbose = TRUE,
+        keep.data = FALSE
+      )
 
 
     if (tune_model == T) {
@@ -303,44 +313,49 @@ fit_skynet <- function(data_subset,
         paste0(dep_var, '~', paste(vars_to_include, collapse = '+')) %>%
         as.formula()
 
-      train_recipe <- recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
-                                      data = reg_data) %>%
+      train_recipe <-
+        recipes::recipe(glue::glue("{dep_var} ~ .") %>% as.formula(),
+                        data = reg_data) %>%
         step_nzv(all_predictors()) %>%
         step_BoxCox(all_predictors()) %>%
         step_knnimpute(all_predictors())
-        #
-        # step_center(all_predictors()) %>%
-        # step_scale(all_predictors())
+      #
+      # step_center(all_predictors()) %>%
+      # step_scale(all_predictors())
 
-      prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
+      prepped_recipe <-
+        recipes::prep(train_recipe, training, retain = T)
 
       proc_training <- juice(prepped_recipe)
 
 
-      model <- gbm(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
-                   data = proc_training,
-                   n.trees = tuned_pars$n.trees,
-                   interaction.depth = tuned_pars$interaction.depth,
-                   shrinkage = tuned_pars$shrinkage,
-                   n.minobsinnode = tuned_pars$n.minobsinnode,
-                   weights = weights,
-                   verbose = TRUE,
-                   keep.data = FALSE)
+      model <-
+        gbm(
+          formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+          data = proc_training,
+          n.trees = tuned_pars$n.trees,
+          interaction.depth = tuned_pars$interaction.depth,
+          shrinkage = tuned_pars$shrinkage,
+          n.minobsinnode = tuned_pars$n.minobsinnode,
+          weights = weights,
+          verbose = TRUE,
+          keep.data = FALSE
+        )
 
     }
 
 
     proc_testing <- bake(prepped_recipe, newdata = testing)
 
-     training_pred <-
+    training_pred <-
       predict(model,
               newdata =  proc_training,
               n.trees = model$n.trees)
 
-     testing_pred <-
-       predict(model,
-               newdata =  proc_testing,
-               n.trees = model$n.trees)
+    testing_pred <-
+      predict(model,
+              newdata =  proc_testing,
+              n.trees = model$n.trees)
 
     out_testing <- testing %>%
       mutate(pred = testing_pred)
@@ -351,21 +366,23 @@ fit_skynet <- function(data_subset,
   }
 
   if (model_name == "mars") {
-
     tuned_pars <- tuned_pars %>%
       pluck(model_name)
 
-    prepped_recipe <- recipes::prep(train_recipe, training, retain = T)
+    prepped_recipe <-
+      recipes::prep(train_recipe, training, retain = T)
 
     proc_training <- juice(prepped_recipe)
 
-    model <- earth::earth(formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
-                 data = proc_training,
-                 nprune = tuned_pars$nprune,
-                 degree = tuned_pars$degree,
-                 trace = 1,
-                 glm = list(family = gaussian)
-                 )
+    model <-
+      earth::earth(
+        formula = glue::glue("{dep_var} ~ .") %>% as.formula(),
+        data = proc_training,
+        nprune = tuned_pars$nprune,
+        degree = tuned_pars$degree,
+        trace = 1,
+        glm = list(family = gaussian)
+      )
 
     proc_testing <- bake(prepped_recipe, newdata = testing)
 
@@ -380,18 +397,18 @@ fit_skynet <- function(data_subset,
               newdata =  proc_testing)
 
     out_testing <- testing %>%
-      mutate(pred = exp(testing_pred + se_estimate^2/2) %>% as.numeric())
+      mutate(pred = exp(testing_pred + se_estimate ^ 2 / 2) %>% as.numeric())
 
     out_training <- training %>%
-      mutate(pred = exp(training_pred + se_estimate^2/2) %>% as.numeric())
+      mutate(pred = exp(training_pred + se_estimate ^ 2 / 2) %>% as.numeric())
 
 
   }
 
   if (model_name == 'structural') {
-    compile(here::here('scripts', 'fit_structural_skynet.cpp'))
+    compile(here::here('src', 'fit_structural_skynet.cpp'))
 
-    dyn.load(dynlib(here::here("scripts", "fit_structural_skynet")))
+    dyn.load(dynlib(here::here("src", "fit_structural_skynet")))
 
     independent_data <- training %>%
       as.data.frame() %>%
@@ -430,9 +447,10 @@ fit_skynet <- function(data_subset,
       logit_q = log(.001 / (1 - .001))
     )
 
-    model <- MakeADFun(data = struct_data, parameters = struct_params)
-
-
+    model <-
+      MakeADFun(data = struct_data,
+                parameters = struct_params,
+                DLL = "fit_structural_skynet")
 
     mle_fit <-
       nlminb(
@@ -455,21 +473,16 @@ fit_skynet <- function(data_subset,
         mp = 0
       )
 
+
     out_training <- training %>%
       as_data_frame() %>%
-      mutate(pred = mle_fit_report$log_d_hat)
-
-    # out_training %>%
-    #   ggplot(aes(pred, pred2, color = total_hours > 0)) +
-    #   geom_point()
+      mutate(pred = exp(mle_fit_report$log_d_hat + mle_fit_report$sigma ^
+                          2 / 2))
 
     out_testing <- testing %>%
       as_data_frame() %>%
-      mutate(pred = testing_prediction)
-
-    # out_testing %>%
-    #   ggplot(aes(log_density, pred, color = total_hours > 0)) +
-    #   geom_point()
+      mutate(pred = exp(testing_prediction + mle_fit_report$sigma ^ 2 /
+                          2))
 
   } #close structural
 
@@ -486,15 +499,18 @@ fit_skynet <- function(data_subset,
 
 
     model <-
-      lm(as.formula(glue::glue("{dep_var} ~ log(total_hours)")), data = independent_data %>% filter(total_hours > 0))
+      lm(as.formula(glue::glue("log_{dep_var} ~ log(total_hours)")), data = independent_data %>% filter(total_hours > 0))
+
+    se_estimate <- sd(model$residuals)
+
+
     out_training <- training %>%
       as_data_frame() %>%
-      mutate(pred = predict(model, newdata = training))
-
+      mutate(pred = exp(predict(model, newdata = training) + se_estimate ^ 2 / 2))
 
     out_testing <- testing %>%
       as_data_frame() %>%
-      mutate(pred = predict(model, newdata = testing))
+      mutate(pred = exp(predict(model, newdata = testing) + se_estimate ^ 2 / 2))
 
   } # close hours model
 
@@ -510,29 +526,27 @@ fit_skynet <- function(data_subset,
       select(dep_var, structural_vars) %>%
       filter(total_engine_power > 0)
 
-
-
     model <-
       lm(as.formula(glue::glue(
-        "{dep_var} ~ log(total_engine_power)"
+        "log_{dep_var} ~ log(total_engine_power)"
       )), data = independent_data)
+
+    se_estimate <- sd(model$residuals)
 
     out_training <- training %>%
       as_data_frame() %>%
-      mutate(pred = predict(model, newdata = training))
-
+      mutate(pred = exp(predict(model, newdata = training) + se_estimate ^ 2 / 2))
 
     out_testing <- testing %>%
       as_data_frame() %>%
-      mutate(pred = predict(model, newdata = testing))
+      mutate(pred = exp(predict(model, newdata = testing) + se_estimate ^ 2 / 2))
+
 
   } # close hours model
 
-  return(
-    list(
-      test_predictions = out_testing,
-      training_predictions = out_training
-    )
-  )
+  return(list(
+    test_predictions = out_testing,
+    training_predictions = out_training
+  ))
 
 }
