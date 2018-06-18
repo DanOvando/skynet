@@ -146,10 +146,10 @@ prep_train <- function(data_subset,
     # )
 
     gbm_grid <-  expand.grid(
-      interaction.depth = c(2,5),
-      n.trees = c(5000),
+      interaction.depth = c(2,5,8),
+      n.trees = c(5000,10000),
       shrinkage = c(0.001),
-      n.minobsinnode = c(20)
+      n.minobsinnode = c(5,10,20)
     )
 
     set.seed(42)
@@ -172,7 +172,7 @@ prep_train <- function(data_subset,
 
     mars_grid <-  expand.grid(nprune = c(ncol(independent_data) + 1, default),
                               # number of terms
-                              degree = 1:5)
+                              degree = 1:8)
 
     set.seed(42)
     model <- caret::train(
@@ -194,7 +194,7 @@ prep_train <- function(data_subset,
 
   if (model_name == 'bagged_mars') {
 
-    mars_grid <-  expand.grid(degree = 1:5)
+    mars_grid <-  expand.grid(degree = 1:8)
 
     set.seed(42)
     model <- caret::train(

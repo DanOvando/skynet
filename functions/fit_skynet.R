@@ -328,7 +328,7 @@ fit_skynet <- function(data_subset,
       data = reg_data,
       method = "bagEarthGCV",
       trControl = fit_control,
-      tuneGrid = tuned_pars,
+      tuneGrid = tuned_pars %>% select(-model),
       trace = 1,
       B = 50
     )

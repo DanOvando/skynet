@@ -32,9 +32,9 @@ functions <- list.files(here::here("functions"))
 
 walk(functions, ~ here::here("functions", .x) %>% source()) # load local functions
 
-run_name <- "v4.1"
+run_name <- "v4.2"
 
-run_description <- "Revamped run with all the options"
+run_description <- "Added in bagged_gbm and kfold training"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -51,7 +51,7 @@ num_cores <- 3
 
 run_models <- TRUE # fit gfw models to fishdata
 
-tune_pars <- FALSE # pre-tune machine learning models
+tune_pars <- TRUE # pre-tune machine learning models
 
 models <- c("ranger","bagged_mars","mars","gbm", "structural", "engine_power", "hours")
 
@@ -1306,8 +1306,8 @@ test_train_data <- purrr::cross_df(list(
             tree_candidate_vars = candidate_vars
           ),
           prep_train,
-          fitcontrol_number = 2,
-          fitcontrol_repeats = 1,
+          fitcontrol_number = 10,
+          fitcontrol_repeats = 2,
           never_ind_vars = never_ind_vars,
           tune_model = T,
           cores = num_cores,
@@ -1324,6 +1324,9 @@ test_train_data <- purrr::cross_df(list(
     saveRDS(file = paste0(run_dir, "tuned_pars.RDS"),
          tuned_pars)
 
+    saveRDS(file = paste0(run_dir, "kfold_preds.RDS"),
+            kfold_preds)
+
     } else {
 
       tuned_pars <- readRDS(file = paste0(run_dir, "tuned_pars.RDS"))
@@ -1334,9 +1337,8 @@ test_train_data <- purrr::cross_df(list(
     sfm <- safely(fit_skynet)
 
     skynet_models <- skynet_models %>%
-      filter(model == "bagged_mars") %>%
-      slice(1:3) %>%
-    mutate(candidate_vars = ifelse(
+      ungroup() %>%
+     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
       ifelse(gfw_only == T,

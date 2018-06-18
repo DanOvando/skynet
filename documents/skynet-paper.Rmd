@@ -29,18 +29,24 @@ library(ggmap)
 library(caret)
 library(extrafont)
 library(patchwork)
+library(scico)
+library(wesanderson)
+library(ggridges)
+library(tidyposterior)
 library(tidyverse)
 
 
+functions <- list.files(here::here("functions"))
+
+walk(functions, ~ here::here("functions", .x) %>% source()) # load local functions
+
 # run options -------------------------------------------------------------
 
-run_name <- 'v4.1'
+run_name <- 'v4.2'
 
 run_dir <- here::here('results',run_name)
 
 fig_theme <- theme_ipsum(base_size = 14, axis_title_size = 18)
-
-fig_theme <- theme_get()
 
 theme_set(fig_theme)
 
@@ -525,14 +531,183 @@ We include this mostly to explore the basic evidence for a hypothesis that more 
 
 ## Which Model is Best?
 
-```{r}
+plot showing training r2 of machine learning and non approachs
+
+```{r model-plot, fig.cap = "Training data R2 of each tested model. Fill denotes whether the model was used to predict fished or unfished species "}
 
 skynet_models %>% 
-  ggplot(aes(r2_training, fill = unfished_only)) +
-  geom_histogram() +
-  facet_grid(dep_var ~ model)
+  group_by(model) %>% 
+  mutate(mean_r2 = mean(r2_training, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(model = fct_reorder(model, mean_r2)) %>% 
+  ggplot(aes(r2_training, model,fill = unfished_only)) +
+  geom_density_ridges(alpha = 0.75) +
+  facet_grid(~dep_var ) + 
+  scale_x_continuous(limits = c(0,1), name = bquote(R^2)) + 
+  theme(axis.title.y = element_blank()) + 
+  scale_fill_manual(values = wes_palette("Royal1"))
+  
 
 ```
+
+tidyposterior selection of best machine learning model
+
+```{r}
+
+
+    kfold_preds <- readRDS(file = here::here("results",run_name, "kfold_preds.RDS"))
+
+kfold_preds_summary <-  kfold_preds %>% 
+  map_df(~., .id = "model") %>% 
+  select(Resample, model, obs, pred,) %>% 
+  group_by(Resample, model) %>% 
+  summarise(model_rmse = sqrt(mean((obs - pred)^2))) %>% 
+  rename(id = Resample) %>% 
+  spread(model, model_rmse)
+              
+
+rmse_mod <- perf_mod(kfold_preds_summary, seed = 4344, iter = 5000)
+
+rmse_post <- tidy(rmse_mod)
+
+stacked_summary <- kfold_preds_summary %>% 
+  gather(model, model_rmse, -id)
+
+ggplot(rmse_post) + 
+  geom_point(
+    data = stacked_summary, 
+    aes(x = model, y = model_rmse), 
+    alpha = .5, col = "blue"
+  )
+
+
+best_ml_model <- rmse_mod$stan %>% 
+  tidy() %>%
+  filter(str_detect(term, "model")) %>% 
+  mutate(model = str_replace_all(term, "model","")) %>% 
+  arrange((estimate))
+  
+
+best_ml_model <- best_ml_model$model[[1]]
+
+best_fits <- skynet_models %>% 
+  filter(model == best_ml_model)
+```
+
+
+figure showing spatial resolution effects of best ML model against linear/structural models. 
+
+### Fig.2 Upscaling/downscaling performance
+
+We see then that in nearly all circumstances the machine learning approaches outperform either structural approach. However, these results are at relatively fine spatial scales (~25km^2^ XX), and we might not expect something like a structural model to accurately predict densities at that scale. To address this, we conducted "downscaling" and "upscaling" analysis. For "downscaling", we fit the model to the finest resolution data, and then calculating the average densities at increasingly coarse resolutions. For example, if the model predicted densities of 10 tons/km^2^ in one 25km^2^ block, and 0 tons/km^2^ in the neighboring 25km^2^ block, we can downscale them together into on 50km^2^ block with an average density of 5 tons/km^2^. "Upscaling" works in the same manner, but applies to the data that the model is fit on. So, we start with the finest resolution data, upscale it to a resolution of say 100km^2 blocks, calculate the average density in that block, and fit the models to that now coarser resolution data. 
+
+As would be expected, the performance of the models increases at coarser resolutions, both for the downscaling and upscaling examples. However, even at the most extreme cases,the structural or linear models does not approach acceptable performance standards (Fig.\@ref(fig:resolution-plot)).
+
+
+```{r downscaling}
+
+  sub_skynet_models <- skynet_models %>%
+    mutate(
+      run_name = glue::glue(
+        "{.$dep_var}--{.$model}--{.$weight_surveys}--{.$test_sets}--{.$data_subset}"
+      )
+    ) %>% 
+  filter(model %in% c(best_ml_model, "structural"),
+         dep_var == "density",
+         data_subset == "skynet",
+         test_set == "random",
+         gfw_only == FALSE)
+
+
+  downscaled_performance <-
+    cross_df(list(
+      run_name = sub_skynet_models$run_name,
+      resolution =  seq(25, 200, by = 50)
+    )) %>%
+    left_join(
+      sub_skynet_models %>% select(
+        run_name,
+        training_data,
+        dep_var,
+        model,
+        weight_surveys,
+        test_sets,
+        data_subset
+      ),
+      by = "run_name"
+    ) %>%
+    arrange(run_name)
+
+  downscaled_performance <-  downscaled_performance %>%
+    mutate(
+      new_grid  = map2(
+        training_data,
+        resolution,
+        create_grid,
+        lon_name = rounded_lon,
+        lat_name = rounded_lat
+      )
+    )
+
+  downscaled_performance <-  downscaled_performance %>%
+    mutate(
+      new_data = map2(
+        training_data,
+        new_grid,
+        snap_to_grid,
+        old_lon_name = rounded_lon,
+        old_lat_name = rounded_lat,
+        new_lon_name = lon,
+        new_lat_name = lat
+      )
+    )
+
+  r2foo <- function(x) {
+    r2 <-
+      yardstick::rsq(x, truth = agg_mean_density, estimate = agg_pred)
+
+  }
+
+
+  downscaled_performance <- downscaled_performance %>%
+    mutate(oob_r2 = map_dbl(new_data, r2foo))
+
+
+downscale_plot <- downscaled_performance %>% 
+  group_by(model) %>% 
+  mutate(meanr2 = mean(oob_r2, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(model = fct_reorder(model, -meanr2)) %>% 
+  ggplot(aes(resolution, oob_r2, color = model)) + 
+  geom_line(show.legend = F) + 
+  geom_point(size = 2, show.legend = F) + 
+  labs(y = bquote(R^2), x = bquote("Resolution"~(km^2)), title = "A)") + 
+  theme(axis.title.y = element_text(angle = 0))
+
+
+upscale_plot <- skynet_models %>% 
+  ungroup() %>% 
+  filter(test_sets == "random", str_detect(data_subset,"skynet"), dep_var == "density",!str_detect(data_subset,"delta"),
+         model %in% c("ranger","structural")) %>% 
+  group_by(model) %>% 
+  mutate(meanr2 = mean(r2, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(model = fct_reorder(model, -meanr2)) %>% 
+  mutate(data_subset = fct_relevel(data_subset,c("skynet","skynet_25km","skynet_100km"))) %>% 
+  ggplot(aes(data_subset,r2, fill = model)) + 
+  geom_col(position = "dodge") + 
+  # scale_x_discrete(labels = c("Raw", bquote("25"~km^2), bquote("100"~km^2))) +
+  labs(title = "B)") + 
+  theme(axis.title.y = element_blank(), axis.title.x = element_blank()) + 
+    coord_flip()
+
+upscale_plot + coord_flip() + 
+  scale_fill_viridis_d(option = "A")
+ downscale_plot + upscale_plot 
+
+```
+
+
 
 
 
@@ -555,7 +730,8 @@ How well do each of the models perform across the range of scenarios evaluated? 
 
 ```{r perf-plot, fig.cap = "Boxplots of R^2^ between observed and out-of-sample predicted densities for each model across all model configurations. Facet name reflects the testing split"}
 
-skynet_models %>% 
+best_fits %>% 
+  filter(unfished_only == F) %>% 
   group_by(model) %>% 
   mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
   ungroup() %>% 
@@ -565,9 +741,8 @@ skynet_models %>%
   mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
   ungroup() %>% 
   mutate(test_set = fct_reorder(test_set, -mean_r2)) %>% 
-  ggplot(aes(model, r2, fill = model)) + 
+  ggplot(aes(test_set, r2, fill = model)) + 
   geom_boxplot(show.legend = F) + 
-  facet_wrap(~test_set) + 
   coord_flip() + 
   theme(axis.title.y = element_blank()) + 
   labs(y = bquote(R^2))
@@ -575,77 +750,14 @@ skynet_models %>%
 ```
 
 
-```{r}
-best_models <- skynet_models %>% 
-  mutate(unfished_only = str_detect(data_subset,"unfished")) %>% 
-  group_by(test_sets, unfished_only) %>% 
-  filter(r2 == max(r2, na.rm = T))
-
-best_models %>%
-  group_by(test_sets) %>% 
-  mutate(max_r2 = max(r2)) %>% 
-  ungroup() %>% 
-  mutate(test_sets = fct_reorder(test_sets, max_r2)) %>% 
-  ggplot(aes(test_sets,r2)) + 
-  geom_line() +
-  geom_point(shape = 21, size = 4, aes(fill = unfished_only)) +
-  coord_flip()
-```
-
-
-
-
-### Fig.2 Upscaling/downscaling performance
-
-We see then that in nearly all circumstances the machine learning approaches outperform either structural approach. However, these results are at relatively fine spatial scales (~25km^2^ XX), and we might not expect something like a structural model to accurately predict densities at that scale. To address this, we conducted "downscaling" and "upscaling" analysis. For "downscaling", we fit the model to the finest resolution data, and then calculating the average densities at increasingly coarse resolutions. For example, if the model predicted densities of 10 tons/km^2^ in one 25km^2^ block, and 0 tons/km^2^ in the neighboring 25km^2^ block, we can downscale them together into on 50km^2^ block with an average density of 5 tons/km^2^. "Upscaling" works in the same manner, but applies to the data that the model is fit on. So, we start with the finest resolution data, upscale it to a resolution of say 100km^2 blocks, calculate the average density in that block, and fit the models to that now coarser resolution data. 
-
-As would be expected, the performance of the models increases at coarser resolutions, both for the downscaling and upscaling examples. However, even at the most extreme cases,the structural or linear models does not approach acceptable performance standards (Fig.\@ref(fig:resolution-plot)).
-
-
-```{r resolution-plot, fig.cap="Effect of downscaling (A) and upscaling (B) data on model performance. Downscaling refers to predicting on the raw data, and then aggregating predictions to increasingly coarse resolutions. Upscaling refers to aggregating the raw data to increasingly coarse resolutions and fitting the model"}
-
-downscale_plot <- downscaled_performance %>% 
-filter(test_sets == "random", data_subset == "skynet", dep_var == "log_density") %>% 
-  group_by(model) %>% 
-  mutate(meanr2 = mean(oob_r2, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(model = fct_reorder(model, -meanr2)) %>% 
-  ggplot(aes(resolution, oob_r2, color = model)) + 
-  geom_line(show.legend = F) + 
-  geom_point(size = 2, show.legend = F) + 
-  labs(y = bquote(R^2), x = bquote("Resolution"~(km^2)), title = "A)") + 
-  theme(axis.title.y = element_text(angle = 0))
-
-
-upscale_plot <- skynet_models %>% 
-  ungroup() %>% 
-  filter(test_sets == "random", str_detect(data_subset,"skynet"), dep_var == "log_density",!str_detect(data_subset,"delta")) %>% 
-  group_by(model) %>% 
-  mutate(meanr2 = mean(r2, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(model = fct_reorder(model, -meanr2)) %>% 
-  mutate(data_subset = fct_relevel(data_subset,c("skynet","skynet_25km","skynet_100km"))) %>% 
-  ggplot(aes(data_subset,r2, fill = model)) + 
-  geom_col(position = "dodge") #+ 
-  # scale_x_discrete(labels = c("Raw", bquote("25"~km^2), bquote("100"~km^2))) + 
-  labs(title = "B)") + 
-  theme(axis.title.y = element_blank(), axis.title.x = element_blank())
-
-upscale_plot + coord_flip() + 
-  scale_fill_viridis_d(option = "A")
-# downscale_plot + upscale_plot 
-
-```
-
 
 ## Predicting Spatial Abudance
 
-Due to the extremely poor performance of the structural and linear models, we focus solely on the machine learning models from now on, and specifically the GBM model as it slightly outperformed the random forest XX. 
 
 How well can the model predict abundance at locations that are not included in the model training but are in the same geographic region as the training data? To test this, we split the data into randomized training (75% of the data) and testing (25%) splits. We train each model (using v-fold cross validation of the training data where needed for tuning) on the training data, and then use the trained model to predicted the testing data. Since the data are spatial and temporal, we expect that the model should perform fairly well at this task; densities at one location and time are correlated with densities at a nearby location and time, and therefore a model fit on a subset of data should do a good job of predicting omitted neighbors, but this is a useful starting point for model assessment. 
 
 ```{r}
-spatial_performance <- best_models %>% 
+spatial_performance <- best_fits %>% 
   filter(test_set == "random", dep_var == "density")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
@@ -710,20 +822,20 @@ Our estimates of absolute density in the testing data (the west coast groundfish
 
 ```{r oor-plot, fig.cap = "Spatial residuals predicted by GBM model (log(density) is dependent variable). Negative residuals (red) indicate model underpredicted the true density, positive residuals (blue) indicate the model overpredicted. Data aggregated at 100km^2^ resolution"}
 
-train_performance <- skynet_models %>% 
-  filter(test_set == "random_alaska", dep_var == "log_density", data_subset == "skynet")  %>%
+train_performance <- best_fits %>% 
+  filter(test_set == "random_alaska", dep_var == "density", data_subset == "skynet")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
   } %>% 
-  mutate(resid = exp(pred) - exp(log_density)) %>% 
+  mutate(resid = pred - density) %>% 
   mutate(split = "Training")
 
-test_performance <- skynet_models %>% 
-  filter(test_set == "random_alaska", dep_var == "log_density", data_subset == "skynet")  %>%
+test_performance <- best_fits %>% 
+  filter(test_set == "random_alaska", dep_var == "density", data_subset == "skynet")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$test_data[[1]]
   } %>% 
-  mutate(resid = exp(pred) - exp(log_density)) %>% 
+  mutate(resid = pred - density) %>% 
   mutate(split = "Testing")
 
 spatial_performance <- train_performance %>% 
@@ -772,25 +884,25 @@ Re-scaling the densities substantially reduces the bias in the testing data, ind
 ```{r rel-plot, fig.cap = "Spatial residuals of relative (density divided by max density) density predicted by GBM model (log(density) is dependent variable). Negative residuals (red) indicate model underpredicted rank of the true density, positive residuals (blue) indicate the model overpredicted. Data aggregated at 100km^2^ resolution"}
 
 train_performance <- skynet_models %>% 
-  filter(test_set == "west_coast", dep_var == "log_density", data_subset == "skynet_100km")  %>%
+  filter(test_set == "west_coast", dep_var == "density", data_subset == "skynet_100km")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
   } %>% 
   ungroup() %>% 
   mutate(pred = pred / max(pred),
-         log_density = log_density / max(log_density)) %>% 
-  mutate(resid = pred - log_density) %>% 
+         density = density / max(density)) %>% 
+  mutate(resid = pred - density) %>% 
   mutate(split = "Training")
 
 test_performance <- skynet_models %>% 
-  filter(test_set == "west_coast", dep_var == "log_density", data_subset == "skynet_100km")  %>%
+  filter(test_set == "west_coast", dep_var == "density", data_subset == "skynet_100km")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$test_data[[1]]
   } %>% 
   ungroup() %>% 
   mutate(pred = pred / max(pred),
-         log_density = log_density / max(log_density)) %>% 
-  mutate(resid = pred - log_density) %>% 
+         density = density / max(density)) %>% 
+  mutate(resid = pred - density) %>% 
   mutate(split = "Testing")
 
 spatial_performance <- train_performance %>% 
@@ -842,27 +954,27 @@ We begin by examining the ability of the model to replicate trends observed in t
 
 ```{r random-time-plot, fig.cap = "Mean scaled observed and predicted trends in total abundance over time for the training and test splits (where splits are randomly sampled)"}
 
-train_performance <- skynet_models %>% 
-  filter(test_set == "random", dep_var == "log_density", data_subset == "skynet_25km")  %>%
+train_performance <- best_fits %>% 
+  filter(test_set == "random", dep_var == "density", data_subset == "skynet_25km")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
   } %>% 
-  mutate(resid = exp(pred) - exp(log_density)) %>% 
+  mutate(resid = pred - density) %>% 
   mutate(split = "Training")
 
 test_performance <- skynet_models %>% 
-  filter(test_set == "random", dep_var == "log_density", data_subset == "skynet_25km")  %>%
+  filter(test_set == "random", dep_var == "density", data_subset == "skynet_25km")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$test_data[[1]]
   } %>% 
-  mutate(resid = exp(pred) - exp(log_density)) %>% 
+  mutate(resid = pred - density) %>% 
   mutate(split = "Testing")
 
 performance <- train_performance %>% 
   bind_rows(test_performance) %>% 
   group_by(survey, year, split) %>% 
-  summarise(observed = sum(exp(log_density) * 100),
-            predicted= sum(exp(pred) * 100)) %>% 
+  summarise(observed = sum(density * 100),
+            predicted= sum(pred * 100)) %>% 
   gather(source, value, observed:predicted) %>% 
   ungroup() %>% 
   group_by(survey, split, source) %>% 
@@ -883,33 +995,36 @@ We have already considered the ability of the model to predict abundance in regi
 ```{r oot-plot, fig.cap="Observed and predicted abundance trends in each of the survey regions. Vertical red dashed line indicates break between training data (to the left) and testing data (at and to the right of the line)"}
 
 time_train_performance <- skynet_models %>% 
-  filter(test_set == "year_greq_than_2014", dep_var == "log_density",data_subset == "skynet_25km")  %>%  filter(r2 == max(r2, na.rm = T)) %>% {
+  filter(test_set == "year_greq_than_2014", dep_var == "density",data_subset == "skynet_25km")  %>%  filter(r2 == max(r2, na.rm = T)) %>% {
     .$training_data[[1]]
   } %>% 
-  mutate(resid = pred - log_density) %>% 
+  mutate(resid = pred - density) %>% 
   group_by(survey, year) %>% 
-  summarise(observed = sum(exp(log_density) * 100), 
-            predicted =  sum(exp(pred) * 100)) %>% 
+  summarise(observed = sum(density * 100), 
+            predicted =  sum(pred * 100)) %>% 
   gather(source,value, observed:predicted) %>% 
   ungroup() %>% 
   mutate(split = "training")
 
 time_test_performance <- skynet_models %>% 
-  filter(test_set == "year_greq_than_2014", dep_var == "log_density",data_subset == "skynet_25km")  %>%
+  filter(test_set == "year_greq_than_2014", dep_var == "density",data_subset == "skynet_25km")  %>%
   filter(r2 == max(r2, na.rm = T)) %>% {
     .$test_data[[1]]
   } %>% 
-  mutate(resid = pred - log_density) %>% 
+  mutate(resid = pred - density) %>% 
   group_by(survey, year) %>% 
-  summarise(observed = sum(exp(log_density) * 100), 
-            predicted =  sum(exp(pred) * 100)) %>% 
+  summarise(observed = sum(density * 100), 
+            predicted =  sum(pred * 100)) %>% 
   gather(source,value, observed:predicted) %>% 
   ungroup() %>% 
   mutate(split = "testing")
 
 time_test_performance %>% 
   bind_rows(time_train_performance) %>% 
-  ggplot(aes(year, value, color = source)) + 
+  ungroup() %>% 
+  group_by(survey, split, source) %>% 
+  mutate(cs_value = (value - mean(value))) %>% 
+  ggplot(aes(year, cs_value, color = source)) + 
   geom_vline(aes(xintercept = 2014), color = "red", linetype = 2, alpha = 0.75) +
   geom_line() + 
   geom_point() +
@@ -919,6 +1034,26 @@ time_test_performance %>%
 
 
 # Conclusions/Discussion
+
+## Diagnostics
+
+```{r unfished-better-plot}
+best_fits %>%
+  filter(data_subset %in% c("skynet", "unfished_skynet")) %>% 
+  group_by(test_sets, unfished_only) %>% 
+  summarise(max_r2 = max(r2_training)) %>% 
+  ungroup() %>% 
+  group_by(test_sets) %>% 
+  mutate(mean_max_r2 = mean(max_r2)) %>%
+  ungroup() %>% 
+  mutate(test_sets = fct_reorder(test_sets, mean_max_r2)) %>% 
+  ggplot(aes(test_sets,max_r2)) + 
+  geom_line() +
+  geom_point(shape = 21, size = 4, aes(fill = unfished_only)) +
+  coord_flip() 
+```
+
+
 
 
 ## Correlations
