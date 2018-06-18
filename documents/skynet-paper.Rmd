@@ -78,8 +78,8 @@ pacific_map <- global_map %>%
   sf::st_as_sf()
   
 map_theme <-   theme_get() +theme(legend.key.height = unit(1.5,"cm"),
-                     axis.text.x = element_text(size = 10),
-                     axis.text.y = element_text(size = 10),
+                     axis.text.x = element_blank(),
+                     axis.text.y = element_blank(),
                      plot.margin = unit(c(0,0,0,0),"cm"),
                      legend.box.margin =  ggplot2::margin(0,0,0,0))
 
@@ -552,10 +552,10 @@ skynet_models %>%
 
 tidyposterior selection of best machine learning model
 
-```{r}
+```{r, results = "hide"}
 
 
-    kfold_preds <- readRDS(file = here::here("results",run_name, "kfold_preds.RDS"))
+kfold_preds <- readRDS(file = here::here("results",run_name, "kfold_preds.RDS"))
 
 kfold_preds_summary <-  kfold_preds %>% 
   map_df(~., .id = "model") %>% 
@@ -591,7 +591,11 @@ best_ml_model <- rmse_mod$stan %>%
 best_ml_model <- best_ml_model$model[[1]]
 
 best_fits <- skynet_models %>% 
-  filter(model == best_ml_model)
+  filter(model == best_ml_model,
+         dep_var == "density",
+         gfw_only == FALSE) %>% 
+  filter(data_subset != "skynet") %>% 
+  mutate(data_subset = if_else(data_subset == "lag_1_skynet_data", "skynet", data_subset))
 ```
 
 
@@ -687,7 +691,7 @@ downscale_plot <- downscaled_performance %>%
 
 upscale_plot <- skynet_models %>% 
   ungroup() %>% 
-  filter(test_sets == "random", str_detect(data_subset,"skynet"), dep_var == "density",!str_detect(data_subset,"delta"),
+  filter(test_sets == "random", data_subset %in% c("skynet","skynet_25km","skynet_100km"), dep_var == "density",!str_detect(data_subset,"delta"),
          model %in% c("ranger","structural")) %>% 
   group_by(model) %>% 
   mutate(meanr2 = mean(r2, na.rm = T)) %>% 
@@ -696,13 +700,14 @@ upscale_plot <- skynet_models %>%
   mutate(data_subset = fct_relevel(data_subset,c("skynet","skynet_25km","skynet_100km"))) %>% 
   ggplot(aes(data_subset,r2, fill = model)) + 
   geom_col(position = "dodge") + 
-  # scale_x_discrete(labels = c("Raw", bquote("25"~km^2), bquote("100"~km^2))) +
+  scale_x_discrete(labels = c("Raw", bquote("25"~km^2), bquote("100"~km^2))) +
   labs(title = "B)") + 
   theme(axis.title.y = element_blank(), axis.title.x = element_blank()) + 
     coord_flip()
 
-upscale_plot + coord_flip() + 
+upscale_plot <-  upscale_plot + coord_flip() + 
   scale_fill_viridis_d(option = "A")
+
  downscale_plot + upscale_plot 
 
 ```
@@ -723,47 +728,80 @@ We explore the ability of our models to make accurate out-of-sample (OOS) predic
 
 All predicted results represent the models prediction of the net abundance of all fished species encountered by the fishery independent surveys. In other words, there is no way at the moment to isolate individual species from the indices. 
 
+
+## Which data transformation is best?
+
+Holding everything constant except for the test-training split. 
+
+```{r}
+
+best_data_subset <- best_fits %>% 
+  filter(dep_var == "density", unfished_only == FALSE) %>% 
+  group_by(data_subset) %>% 
+  mutate(median_r2 = median(r2_training, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(data_subset = fct_reorder(data_subset, median_r2)) %>% 
+  arrange(desc(median_r2))
+
+best_data_subset %>% 
+  ggplot() + 
+  geom_point(position = "dodge",aes(data_subset,r2_training), alpha = 0.5) + 
+  geom_point(aes(data_subset, median_r2), color = "red", size = 2) +
+  coord_flip()
+
+best_data_subset <- "skynet"
+
+
+best_fits <- best_fits %>% 
+  filter(data_subset == best_data_subset)
+```
+
+Given similar median/mean performance but more variables range of other data splits, sticking with skynet as your default. 
+
 ## Broad Model Performance
 
 How well do each of the models perform across the range of scenarios evaluated? We can judge this by examining the OOS R^2^ between the observed densities and the OOS predictions for those densities. As expected, the machine learning models perform vastly better on average than either the structural or linear models. However, even the machine learning models struggled in OOS performance in some instances, for example when the data were trained on the west coast and used to predict densities in Alaska (Fig.\@ref(fig:perf-plot))
 
 
+
 ```{r perf-plot, fig.cap = "Boxplots of R^2^ between observed and out-of-sample predicted densities for each model across all model configurations. Facet name reflects the testing split"}
 
 best_fits %>% 
-  filter(unfished_only == F) %>% 
-  group_by(model) %>% 
-  mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(model = fct_reorder(model, mean_r2)) %>% 
-  filter(model != "hours") %>% 
   group_by(test_set) %>% 
   mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
   ungroup() %>% 
-  mutate(test_set = fct_reorder(test_set, -mean_r2)) %>% 
-  ggplot(aes(test_set, r2, fill = model)) + 
-  geom_boxplot(show.legend = F) + 
+  mutate(test_set = fct_reorder(test_set, mean_r2)) %>% 
+  gather(r2_source, r2_value, r2, r2_training) %>% 
+  ggplot(aes(test_set, r2_value)) + 
+  geom_line() +
+  geom_point(aes( color = r2_source), size = 4) + 
   coord_flip() + 
   theme(axis.title.y = element_blank()) + 
-  labs(y = bquote(R^2))
+  labs(y = bquote(R^2)) + 
+  scale_color_manual(name = "Data Split",labels = c("Testing","Training"),values = wes_palette("Zissou1")) 
+
 
 ```
 
 
+Demonstrates that what you train on matters a lot... one question, what happens if you predict alaska with the model trained on the random west coast?
 
-## Predicting Spatial Abudance
+
+### Predicting Spatial Abudance
 
 
 How well can the model predict abundance at locations that are not included in the model training but are in the same geographic region as the training data? To test this, we split the data into randomized training (75% of the data) and testing (25%) splits. We train each model (using v-fold cross validation of the training data where needed for tuning) on the training data, and then use the trained model to predicted the testing data. Since the data are spatial and temporal, we expect that the model should perform fairly well at this task; densities at one location and time are correlated with densities at a nearby location and time, and therefore a model fit on a subset of data should do a good job of predicting omitted neighbors, but this is a useful starting point for model assessment. 
 
 ```{r}
 spatial_performance <- best_fits %>% 
-  filter(test_set == "random", dep_var == "density")  %>%
-  filter(r2 == max(r2, na.rm = T)) %>% {
-    .$training_data[[1]]
+  filter(test_set == "random")  %>% {
+    .$test_data[[1]]
   } %>% 
+  group_by(survey) %>% 
+  mutate(sd_density = sd(density, na.rm = T)) %>% 
   group_by(rounded_lat, rounded_lon, survey) %>% 
-  summarise(resid = mean(pred - density))
+  summarise(resid = mean(pred - density),
+            scaled_resid = pmax(-2,pmin(2,resid / mean(sd_density))))
 ```
 
 
@@ -785,9 +823,13 @@ spatial_performance_plot <- spatial_performance %>%
 
 bbox <- sf::st_bbox(spatial_performance_plot)
 
+alaska_bbox <- sf::st_bbox(spatial_performance_plot %>% filter(survey != "wcgbts"))
+
+wc_bbox <- sf::st_bbox(spatial_performance_plot %>% filter(survey == "wcgbts"))
+
 
 resid_hist <- spatial_performance %>% 
-  ggplot(aes(resid)) + 
+  ggplot(aes(scaled_resid)) + 
   geom_density(color = "black", fill = "grey", alpha = 0.5) + 
   labs(x = "Residuals", title = "A)") +
   theme(axis.title.y = element_blank(),
@@ -798,15 +840,36 @@ resid_hist <- spatial_performance %>%
 
 
 spatial_residual_plot <- ggplot() + 
-  geom_sf(data = spatial_performance_plot, aes(color = resid)) + 
+  geom_sf(data = spatial_performance_plot, aes(color = scaled_resid)) + 
   geom_sf(data = pacific_map, shape = 21) + 
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) + 
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals") + 
+  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "white", name = "Residuals") + 
 map_theme +
   labs(title = "B)")
+
+alaska_spatial_residual_plot <- ggplot() + 
+  geom_sf(data = spatial_performance_plot %>% filter(survey != "wcgbts"), aes(color = scaled_resid)) + 
+  geom_sf(data = pacific_map, shape = 21) + 
+  coord_sf(xlim = c(alaska_bbox['xmin'], alaska_bbox['xmax']),
+  ylim = c(alaska_bbox['ymin']*.95, alaska_bbox['ymax'] * 1.1), expand = F) + 
+  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals", guide = guide_colorbar(frame.colour = "black")) + 
+map_theme +
+  labs(title = "Alaska") + 
+  theme(legend.key.height = unit(1,"cm"))
   
-  resid_hist + spatial_residual_plot + plot_layout(ncol = 2, nrow = 1, widths = c(1,2),heights = c(1,2))
+
+wc_spatial_residual_plot <- ggplot() + 
+  geom_sf(data = spatial_performance_plot %>% filter(survey == "wcgbts"), aes(color = scaled_resid)) + 
+  geom_sf(data = pacific_map) + 
+  coord_sf(xlim = c(wc_bbox['xmin']*.98, wc_bbox['xmax']),
+  ylim = c(wc_bbox['ymin'], wc_bbox['ymax'] * 1.05), expand = F) + 
+  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals", guide = "none") + 
+map_theme +
+  labs(title = "West Coast")
+  
+
+(wc_spatial_residual_plot + alaska_spatial_residual_plot) / resid_hist  + plot_layout(nrow = 2, ncol = 1, widths = c(2,1),heights = c(2.5,1))
 ```
 
 ## Filling in the Gaps
@@ -823,16 +886,14 @@ Our estimates of absolute density in the testing data (the west coast groundfish
 ```{r oor-plot, fig.cap = "Spatial residuals predicted by GBM model (log(density) is dependent variable). Negative residuals (red) indicate model underpredicted the true density, positive residuals (blue) indicate the model overpredicted. Data aggregated at 100km^2^ resolution"}
 
 train_performance <- best_fits %>% 
-  filter(test_set == "random_alaska", dep_var == "density", data_subset == "skynet")  %>%
-  filter(r2 == max(r2, na.rm = T)) %>% {
+  filter(test_set == "random_alaska", data_subset == "skynet")  %>%{
     .$training_data[[1]]
   } %>% 
   mutate(resid = pred - density) %>% 
   mutate(split = "Training")
 
 test_performance <- best_fits %>% 
-  filter(test_set == "random_alaska", dep_var == "density", data_subset == "skynet")  %>%
-  filter(r2 == max(r2, na.rm = T)) %>% {
+  filter(test_set == "random_alaska", data_subset == "skynet")  %>% {
     .$test_data[[1]]
   } %>% 
   mutate(resid = pred - density) %>% 
@@ -883,9 +944,8 @@ Re-scaling the densities substantially reduces the bias in the testing data, ind
 
 ```{r rel-plot, fig.cap = "Spatial residuals of relative (density divided by max density) density predicted by GBM model (log(density) is dependent variable). Negative residuals (red) indicate model underpredicted rank of the true density, positive residuals (blue) indicate the model overpredicted. Data aggregated at 100km^2^ resolution"}
 
-train_performance <- skynet_models %>% 
-  filter(test_set == "west_coast", dep_var == "density", data_subset == "skynet_100km")  %>%
-  filter(r2 == max(r2, na.rm = T)) %>% {
+train_performance <- best_fits %>% 
+  filter(test_set == "west_coast")  %>% {
     .$training_data[[1]]
   } %>% 
   ungroup() %>% 
@@ -895,8 +955,7 @@ train_performance <- skynet_models %>%
   mutate(split = "Training")
 
 test_performance <- skynet_models %>% 
-  filter(test_set == "west_coast", dep_var == "density", data_subset == "skynet_100km")  %>%
-  filter(r2 == max(r2, na.rm = T)) %>% {
+  filter(test_set == "west_coast")  %>% {
     .$test_data[[1]]
   } %>% 
   ungroup() %>% 
@@ -955,16 +1014,14 @@ We begin by examining the ability of the model to replicate trends observed in t
 ```{r random-time-plot, fig.cap = "Mean scaled observed and predicted trends in total abundance over time for the training and test splits (where splits are randomly sampled)"}
 
 train_performance <- best_fits %>% 
-  filter(test_set == "random", dep_var == "density", data_subset == "skynet_25km")  %>%
-  filter(r2 == max(r2, na.rm = T)) %>% {
+  filter(test_set == "random")  %>% {
     .$training_data[[1]]
   } %>% 
   mutate(resid = pred - density) %>% 
   mutate(split = "Training")
 
 test_performance <- skynet_models %>% 
-  filter(test_set == "random", dep_var == "density", data_subset == "skynet_25km")  %>%
-  filter(r2 == max(r2, na.rm = T)) %>% {
+  filter(test_set == "random")  %>%{
     .$test_data[[1]]
   } %>% 
   mutate(resid = pred - density) %>% 
@@ -988,6 +1045,43 @@ performance %>%
 
 ```
 
+```{r random-time-plot, fig.cap = "Mean scaled observed and predicted trends in total abundance over time for the training and test splits (where splits are randomly sampled)"}
+
+train_performance <- best_fits %>% 
+  filter(test_set == "random")  %>% {
+    .$training_data[[1]]
+  } %>% 
+  mutate(resid = pred - density) %>% 
+  mutate(split = "Training") %>% 
+    mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska"))
+
+
+test_performance <- skynet_models %>% 
+  filter(test_set == "random")  %>% {
+    .$test_data[[1]]
+  } %>% 
+  mutate(resid = pred - density) %>% 
+  mutate(split = "Testing") %>% 
+      mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska"))
+
+performance <- train_performance %>% 
+  bind_rows(test_performance) %>% 
+  group_by(state, year, split) %>% 
+  summarise(observed = sum(density * 100),
+            predicted= sum(pred * 100)) %>% 
+  gather(source, value, observed:predicted) %>% 
+  ungroup() %>% 
+  group_by(state, split, source) %>% 
+  mutate(cs_value = (value - mean(value)))
+
+performance %>% 
+  ggplot(aes(year,cs_value, color = state, linetype = source)) + 
+  geom_line() + 
+  scale_color_discrete(guide = FALSE) +
+  facet_grid(state~split, scales = "free_y")
+
+```
+
 
 We have already considered the ability of the model to predict abundance in regions excluded from the training data (Fig.\@ref(fig:oor-plot)). How then does the model perform for time periods excluded from the training data? For this, we split the training data into the years 2012 and 2013, leaving 2014, 2015, and 2016 for the testing data. Our results show that the model performs relatively poorly at predicting trends in the time periods omitted from the model (Fig.\@ref(fig:oot-plot)). 
 
@@ -995,26 +1089,27 @@ We have already considered the ability of the model to predict abundance in regi
 ```{r oot-plot, fig.cap="Observed and predicted abundance trends in each of the survey regions. Vertical red dashed line indicates break between training data (to the left) and testing data (at and to the right of the line)"}
 
 time_train_performance <- skynet_models %>% 
-  filter(test_set == "year_greq_than_2014", dep_var == "density",data_subset == "skynet_25km")  %>%  filter(r2 == max(r2, na.rm = T)) %>% {
+  filter(test_set == "year_greq_than_2014")  %>% {
     .$training_data[[1]]
   } %>% 
   mutate(resid = pred - density) %>% 
-  group_by(survey, year) %>% 
-  summarise(observed = sum(density * 100), 
-            predicted =  sum(pred * 100)) %>% 
+      mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska")) %>% 
+  group_by(state, year) %>% 
+  summarise(observed = mean(density * 100), 
+            predicted =  mean(pred * 100)) %>% 
   gather(source,value, observed:predicted) %>% 
   ungroup() %>% 
   mutate(split = "training")
 
 time_test_performance <- skynet_models %>% 
-  filter(test_set == "year_greq_than_2014", dep_var == "density",data_subset == "skynet_25km")  %>%
-  filter(r2 == max(r2, na.rm = T)) %>% {
+  filter(test_set == "year_greq_than_2014")  %>% {
     .$test_data[[1]]
   } %>% 
   mutate(resid = pred - density) %>% 
-  group_by(survey, year) %>% 
-  summarise(observed = sum(density * 100), 
-            predicted =  sum(pred * 100)) %>% 
+      mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska")) %>% 
+  group_by(state, year) %>% 
+  summarise(observed = mean(density * 100), 
+            predicted =  mean(pred * 100)) %>% 
   gather(source,value, observed:predicted) %>% 
   ungroup() %>% 
   mutate(split = "testing")
@@ -1022,13 +1117,16 @@ time_test_performance <- skynet_models %>%
 time_test_performance %>% 
   bind_rows(time_train_performance) %>% 
   ungroup() %>% 
-  group_by(survey, split, source) %>% 
-  mutate(cs_value = (value - mean(value))) %>% 
+  group_by(state, source) %>% 
+  mutate(sd_value = sd(value),
+         mean_value  = mean(value)) %>%
+  ungroup() %>% 
+  mutate(cs_value = (value - mean_value) / sd_value) %>% 
   ggplot(aes(year, cs_value, color = source)) + 
   geom_vline(aes(xintercept = 2014), color = "red", linetype = 2, alpha = 0.75) +
   geom_line() + 
   geom_point() +
-  facet_wrap(~survey, scales = "free_y")
+  facet_wrap(~state, scales = "free_y")
 
 ```
 

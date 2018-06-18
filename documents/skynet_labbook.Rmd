@@ -2834,7 +2834,63 @@ ggplot(rmse_post) +
 
 ```
 
+Now, you also need to just pick one damn data subset. So after you pick the best model, you should pick the best data subset, across the range of test sets, holding variables constant (include all variables, not just GFW? or maybe just with GFW? check on that?). Acknowldege that different models might be best for different purposes, and this framework could be repurposed to deal with that, but for now goal is simply find the overall best model, in terms of mechanics, data transformations, GFW only, etc. 
 
+
+# breaking up the west coast
+
+For purely aesthetic reasons, could be interesting to break the west coast into regions a bit and see if that gives better resolution to the temporal trends 
+
+
+```{r}
+
+knots_per_survey <- tribble(washington)
+
+a = vast_fish %>% 
+  select(survey, vasterized_data) %>% 
+  mutate(vast_fish = map(vasterized_data, "spatial_densities")) %>% 
+  select(-vasterized_data) %>% 
+  unnest() %>% 
+  filter(survey == "wcgbts") %>% 
+  mutate(state = if_else(approx_lat > 46.25, "washington", if_else(approx_lat > 42, "oregon", "california")))
+
+a %>% 
+  group_by(state, year) %>% 
+  summarise(abundance = mean(density)) %>% 
+  ungroup() %>% 
+  ggplot(aes(year, abundance, color = state)) + 
+  geom_line() + 
+  facet_wrap(~state, scales = "free_y")
+
+```
+
+Interesting, lookg like it could be worthwhile, apparent doward trends in california and washington , upward in oregon
+
+
+# what is it about delta skynet?
+
+THere are like 2 scenarios where delta skynet is doing great out of sample... what is that?
+
+```{r}
+
+best_fits %>% 
+  filter(dep_var == "density", gfw_only == TRUE) %>% 
+  gather(r2_source, r2_value, r2, r2_training) %>% 
+  ggplot(aes(data_subset,r2_value, color = r2_source)) + 
+  geom_point(position = "dodge") + 
+  coord_flip()
+
+
+a = best_fits %>% 
+  filter(dep_var == "density", gfw_only == TRUE, data_subset == "delta_skynet") %>% 
+  select(-test_data, training_data) %>% 
+  arrange(desc(r2))
+
+a
+
+```
+
+Interesting, huge discrepency between the test and training. lag1 skynet is stupid; it's jsut skynet but with lagged engine power as a candidate variable. 
 
 
 
