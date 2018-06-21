@@ -27,29 +27,11 @@ create_skynet_data <-
     gfw_data$knot <- fish_knots$knot[nearest_knot$nn.idx]
 
     gfw_data$distance <- nearest_knot$nn.dists
-    # browser()
-    # knot_pairing_plot <- gfw_data %>%
-    #   filter(distance <= quantile(gfw_data$distance, 0.75)) %>%
-    #   select(rounded_lat, rounded_lon, knot) %>%
-    #   unique() %>%
-    #   ggplot() +
-    #   geom_text(
-    #     aes(
-    #       rounded_lon,
-    #       rounded_lat,
-    #       color = factor(knot),
-    #       label = knot
-    #     ),
-    #     show.legend = F,
-    #     alpha = 1,
-    #     size = 1.5
-    #   )
-
 
     # merge fishdata ----------------------------------------------------------
 
     skynet_data <- gfw_data %>%
-      left_join(fish_data %>% select(density, biomass, economic_density, year, knot, mean_knot_area), by = c('year', 'knot')) %>%
+      left_join(fish_data %>% select(density, biomass, economic_density, year, surveyed_year, knot, mean_knot_area), by = c('year', 'knot')) %>%
       mutate(log_density = log(density),
              log_biomass = log(biomass),
              log_economic_density = log(economic_density))# merge in fishdata

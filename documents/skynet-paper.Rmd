@@ -102,6 +102,7 @@ skynet_models <- skynet_models %>%
                                   train_region,
                                   data_set) {
     data %>%
+      filter(surveyed_year == T) %>% 
       ggplot(aes_(as.name(dep_var), ~ pred)) +
       geom_abline(aes(intercept = 0, slope = 1),
                   color = "red",
@@ -129,12 +130,12 @@ skynet_models <- skynet_models %>%
     select(-fitted_model) %>%
     mutate(
       var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
-      r2 = map2_dbl(test_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
-      rmse = map2_dbl(test_data, dep_var, ~ yardstick::rmse(.x, .y, "pred")),
-      ccc = map2_dbl(test_data, dep_var, ~ yardstick::ccc(.x, .y, "pred")),
-      r2_training = map2_dbl(training_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
-      rmse_training = map2_dbl(training_data, dep_var, ~ yardstick::rmse(.x, .y, "pred")),
-      ccc_training = map2_dbl(training_data, dep_var, ~ yardstick::ccc(.x, .y, "pred"))
+      r2 = map2_dbl(test_data, dep_var, ~ yardstick::rsq(.x %>% filter(surveyed_year == T), .y, "pred")),
+      rmse = map2_dbl(test_data, dep_var, ~ yardstick::rmse(.x %>% filter(surveyed_year == T), .y, "pred")),
+      ccc = map2_dbl(test_data, dep_var, ~ yardstick::ccc(.x %>% filter(surveyed_year == T), .y, "pred")),
+      r2_training = map2_dbl(training_data, dep_var, ~ yardstick::rsq(.x %>% filter(surveyed_year == T), .y, "pred")),
+      rmse_training = map2_dbl(training_data, dep_var, ~ yardstick::rmse(.x %>% filter(surveyed_year == T), .y, "pred")),
+      ccc_training = map2_dbl(training_data, dep_var, ~ yardstick::ccc(.x %>% filter(surveyed_year == T), .y, "pred"))
     ) %>%
     mutate(
       test_plot = pmap(
@@ -590,6 +591,9 @@ best_ml_model <- rmse_mod$stan %>%
 
 best_ml_model <- best_ml_model$model[[1]]
 
+
+best_ml_model <- "ranger"
+
 best_fits <- skynet_models %>% 
   filter(model == best_ml_model,
          dep_var == "density",
@@ -620,7 +624,8 @@ As would be expected, the performance of the models increases at coarser resolut
          dep_var == "density",
          data_subset == "skynet",
          test_set == "random",
-         gfw_only == FALSE)
+         gfw_only == FALSE) %>% 
+  mutate(training_data = map(training_data, ~.x %>% filter(surveyed_year == T)))
 
 
   downscaled_performance <-
@@ -787,7 +792,7 @@ best_fits %>%
 Demonstrates that what you train on matters a lot... one question, what happens if you predict alaska with the model trained on the random west coast?
 
 
-### Predicting Spatial Abudance
+## Predicting Spatial Abudance
 
 
 How well can the model predict abundance at locations that are not included in the model training but are in the same geographic region as the training data? To test this, we split the data into randomized training (75% of the data) and testing (25%) splits. We train each model (using v-fold cross validation of the training data where needed for tuning) on the training data, and then use the trained model to predicted the testing data. Since the data are spatial and temporal, we expect that the model should perform fairly well at this task; densities at one location and time are correlated with densities at a nearby location and time, and therefore a model fit on a subset of data should do a good job of predicting omitted neighbors, but this is a useful starting point for model assessment. 
@@ -797,6 +802,7 @@ spatial_performance <- best_fits %>%
   filter(test_set == "random")  %>% {
     .$test_data[[1]]
   } %>% 
+  filter(surveyed_year == T) %>% 
   group_by(survey) %>% 
   mutate(sd_density = sd(density, na.rm = T)) %>% 
   group_by(rounded_lat, rounded_lon, survey) %>% 
@@ -831,7 +837,7 @@ wc_bbox <- sf::st_bbox(spatial_performance_plot %>% filter(survey == "wcgbts"))
 resid_hist <- spatial_performance %>% 
   ggplot(aes(scaled_resid)) + 
   geom_density(color = "black", fill = "grey", alpha = 0.5) + 
-  labs(x = "Residuals", title = "A)") +
+  labs(x = "Scaled Residuals", caption = "Residuals divided by standard deviation of observed densities") +
   theme(axis.title.y = element_blank(),
         axis.text.y = element_blank(),
         plot.margin = unit(c(0,0,0,0),"cm"),
@@ -839,37 +845,30 @@ resid_hist <- spatial_performance %>%
 
 
 
-spatial_residual_plot <- ggplot() + 
-  geom_sf(data = spatial_performance_plot, aes(color = scaled_resid)) + 
-  geom_sf(data = pacific_map, shape = 21) + 
-  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
-  ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) + 
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "white", name = "Residuals") + 
-map_theme +
-  labs(title = "B)")
-
 alaska_spatial_residual_plot <- ggplot() + 
-  geom_sf(data = spatial_performance_plot %>% filter(survey != "wcgbts"), aes(color = scaled_resid)) + 
+  geom_sf(data = spatial_performance_plot %>% filter(survey != "wcgbts"), aes(color = scaled_resid),size = 0.5, alpha = 0.75) + 
   geom_sf(data = pacific_map, shape = 21) + 
   coord_sf(xlim = c(alaska_bbox['xmin'], alaska_bbox['xmax']),
   ylim = c(alaska_bbox['ymin']*.95, alaska_bbox['ymax'] * 1.1), expand = F) + 
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals", guide = guide_colorbar(frame.colour = "black")) + 
+  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Scaled Residuals", guide = guide_colorbar(frame.colour = "black")) + 
 map_theme +
-  labs(title = "Alaska") + 
+  labs(caption = "Alaska") + 
   theme(legend.key.height = unit(1,"cm"))
   
 
 wc_spatial_residual_plot <- ggplot() + 
-  geom_sf(data = spatial_performance_plot %>% filter(survey == "wcgbts"), aes(color = scaled_resid)) + 
+  geom_sf(data = spatial_performance_plot %>% filter(survey == "wcgbts"), aes(color = scaled_resid), size = 0.5, alpha = 0.75) + 
   geom_sf(data = pacific_map) + 
   coord_sf(xlim = c(wc_bbox['xmin']*.98, wc_bbox['xmax']),
   ylim = c(wc_bbox['ymin'], wc_bbox['ymax'] * 1.05), expand = F) + 
   scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals", guide = "none") + 
 map_theme +
-  labs(title = "West Coast")
+  labs(caption = "West Coast")
   
 
-(wc_spatial_residual_plot + alaska_spatial_residual_plot) / resid_hist  + plot_layout(nrow = 2, ncol = 1, widths = c(2,1),heights = c(2.5,1))
+(
+  wc_spatial_residual_plot + alaska_spatial_residual_plot
+  ) / resid_hist  + plot_layout(nrow = 2, ncol = 1, widths = c(2,1),heights = c(2.5,1)) & theme(plot.margin = unit(rep(0.01,4), "points"))
 ```
 
 ## Filling in the Gaps
@@ -883,24 +882,27 @@ In this case, we will now split the data into a training set comprised of all of
 Our estimates of absolute density in the testing data (the west coast groundfish bottom trawl survey) are positively biased. This is perhaps unsurprising: observed densities are higher in the Alaska region than they are in the west coast region, and therefore a model trained on Alaska can be expected to predict higher biomass than might be actually observed in a lower density ecosystem (Fig.\@ref(fig:oor-plot)). 
 
 
-```{r oor-plot, fig.cap = "Spatial residuals predicted by GBM model (log(density) is dependent variable). Negative residuals (red) indicate model underpredicted the true density, positive residuals (blue) indicate the model overpredicted. Data aggregated at 100km^2^ resolution"}
+```{r spatial-res-plot, fig.cap = "Scaled spatial resisduals from a model fit to a coarse grid, applied to a finer grid"}
 
 train_performance <- best_fits %>% 
-  filter(test_set == "random_alaska", data_subset == "skynet")  %>%{
+  filter(test_set == "spatial_alaska", data_subset == "skynet")  %>%{
     .$training_data[[1]]
   } %>% 
   mutate(resid = pred - density) %>% 
   mutate(split = "Training")
 
 test_performance <- best_fits %>% 
-  filter(test_set == "random_alaska", data_subset == "skynet")  %>% {
+  filter(test_set == "spatial_alaska", data_subset == "skynet")  %>% {
     .$test_data[[1]]
   } %>% 
   mutate(resid = pred - density) %>% 
   mutate(split = "Testing")
 
 spatial_performance <- train_performance %>% 
-  bind_rows(test_performance)
+  bind_rows(test_performance) %>% 
+    filter(surveyed_year == T) %>% 
+  group_by(survey) %>% 
+  mutate(scaled_resid = resid / sd(density))
 
 spatial_performance_plot <- spatial_performance %>% 
       mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
@@ -914,9 +916,9 @@ bbox <- sf::st_bbox(spatial_performance_plot)
 
 
 resid_hist <- spatial_performance %>% 
-  ggplot(aes(resid,fill = split)) + 
+  ggplot(aes(scaled_resid,fill = split)) + 
   geom_density(alpha = 0.75) + 
-  labs(x = "Residuals", title = "A)") +
+  labs(x = "Scaled Residuals", title = "A)") +
   theme(axis.title.y = element_blank(),
         axis.text.y = element_blank()) + 
   theme(legend.position = "right") + 
@@ -924,12 +926,12 @@ resid_hist <- spatial_performance %>%
 
 
 spatial_residual_plot <- ggplot() + 
-  geom_sf(data = spatial_performance_plot, aes(color = resid, shape = split)) + 
+  geom_sf(data = spatial_performance_plot %>% filter(split == "Testing"), aes(color = scaled_resid), size = 0.5, alpha = 0.75) + 
   geom_sf(data = pacific_map) + 
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) + 
   scale_shape(guide = FALSE) +
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals") + 
+  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "lightgrey", name = "Residuals") + 
 map_theme +
   labs(title = "B)")
   
@@ -942,63 +944,147 @@ Given this understandable bias, we can also consider to what extent the model is
 
 Re-scaling the densities substantially reduces the bias in the testing data, indicating that the model is much better at estimating the relative spatial density of fish within a region than the absolute value in regions that vary substantially in their mean density from the training region (Fig.\@ref(fig:rel-plot)). 
 
-```{r rel-plot, fig.cap = "Spatial residuals of relative (density divided by max density) density predicted by GBM model (log(density) is dependent variable). Negative residuals (red) indicate model underpredicted rank of the true density, positive residuals (blue) indicate the model overpredicted. Data aggregated at 100km^2^ resolution"}
+```{r aggregate}
 
-train_performance <- best_fits %>% 
-  filter(test_set == "west_coast")  %>% {
-    .$training_data[[1]]
-  } %>% 
-  ungroup() %>% 
-  mutate(pred = pred / max(pred),
-         density = density / max(density)) %>% 
-  mutate(resid = pred - density) %>% 
+
+resolution_km2 <- 100
+
+  sub_skynet_models <- skynet_models %>%
+    mutate(
+      run_name = glue::glue(
+        "{.$dep_var}--{.$model}--{.$weight_surveys}--{.$test_sets}--{.$data_subset}"
+      )
+    ) %>% 
+  filter(model %in% c(best_ml_model),
+         dep_var == "density",
+         data_subset == "skynet",
+         test_set %in% c("random","alaska", "random_west_coast", "west_coast","year_greq_than_2014"),
+         gfw_only == FALSE)  %>% 
+    mutate(test_data = map(test_data, ~.x %>% filter(surveyed_year == T)),
+           training_data = map(training_data, ~.x %>% filter(surveyed_year == T)))
+
+
+downscaled_results <-
+    cross_df(list(
+      run_name = sub_skynet_models$run_name,
+      resolution = resolution_km2
+    )) %>%
+    left_join(
+      sub_skynet_models %>% select(
+        run_name,
+        test_data,
+        training_data,
+        dep_var,
+        model,
+        weight_surveys,
+        train_set,
+        test_set,
+        data_subset
+      ),
+      by = "run_name"
+    ) %>%
+    arrange(run_name)
+
+  downscaled_results <-  downscaled_results %>%
+    mutate(
+      training_grid  = map2(
+        training_data,
+        resolution,
+        create_grid,
+        lon_name = rounded_lon,
+        lat_name = rounded_lat
+      )
+    ) %>% 
+    mutate(
+      training_data = map2(
+        training_data,
+        training_grid,
+        snap_to_grid,
+        old_lon_name = rounded_lon,
+        old_lat_name = rounded_lat,
+        new_lon_name = lon,
+        new_lat_name = lat,
+        dep_var = "density"
+      )
+    )
+  
+    downscaled_results <-  downscaled_results %>%
+    mutate(
+      testing_grid  = map2(
+        test_data,
+        resolution,
+        create_grid,
+        lon_name = rounded_lon,
+        lat_name = rounded_lat
+      )
+    ) %>% 
+    mutate(
+      test_data = map2(
+        test_data,
+        testing_grid,
+        snap_to_grid,
+        old_lon_name = rounded_lon,
+        old_lat_name = rounded_lat,
+        new_lon_name = lon,
+        new_lat_name = lat,
+        dep_var = "density"
+      )
+    )
+```
+
+
+```{r out-of-region-plot, fig.cap = "Relative out-of-region "}
+
+train_performance <- downscaled_results %>% 
+  select(test_set,train_set, training_data) %>% 
+  unnest() %>% 
+  group_by(train_set) %>% 
+  mutate(rel_pred = agg_pred / max(agg_pred),
+         rel_density = agg_mean_density / max(agg_mean_density)) %>% 
   mutate(split = "Training")
 
-test_performance <- skynet_models %>% 
-  filter(test_set == "west_coast")  %>% {
-    .$test_data[[1]]
-  } %>% 
-  ungroup() %>% 
-  mutate(pred = pred / max(pred),
-         density = density / max(density)) %>% 
-  mutate(resid = pred - density) %>% 
+test_performance <- downscaled_results %>% 
+  select(test_set,train_set, test_data) %>% 
+  unnest() %>% 
+  group_by(test_set) %>% 
+  mutate(rel_pred = agg_pred / max(agg_pred),
+         rel_density = agg_mean_density / max(agg_mean_density)) %>% 
   mutate(split = "Testing")
 
 spatial_performance <- train_performance %>% 
-  bind_rows(test_performance)
+  bind_rows(test_performance) %>% 
+  ungroup() %>% 
+    filter(!str_detect(test_set, "year_")) %>% 
+  mutate(set_order = as.numeric(factor(test_set))) %>% 
+  mutate(test_set = fct_reorder(test_set, set_order),
+         train_set = fct_reorder(train_set, set_order)) 
 
-spatial_performance_plot <- spatial_performance %>% 
-      mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
-  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
-  ungroup() %>%
-  mutate(geometry = sf::st_sfc(geometry, crs =
-                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
-  sf::st_sf()
-
-bbox <- sf::st_bbox(spatial_performance_plot)
-
-
-resid_hist <- spatial_performance %>% 
-  ggplot(aes(resid,fill = split)) + 
-  geom_density(alpha = 0.75) + 
-  labs(x = "Residuals", title = "A)") +
-  theme(axis.title.y = element_blank(),
-        axis.text.y = element_blank()) + 
-  theme(legend.position = "right") + 
-  scale_fill_discrete(name = '')
+trained_plot <- spatial_performance %>% 
+  filter(split == "Training") %>% 
+  ggplot(aes(rel_density, rel_pred)) + 
+  geom_point() + 
+  facet_wrap(~ train_set, strip.position = "left", nrow = n_distinct(spatial_performance$test_set), ncol = 1 ) + 
+  labs(title = "Trained on...", y = "Predicted")  +
+    theme(axis.title.x = element_blank())
 
 
-spatial_residual_plot <- ggplot() + 
-  geom_sf(data = spatial_performance_plot, aes(color = resid, shape = split)) + 
-  geom_sf(data = pacific_map) + 
-  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
-  ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) + 
-  scale_shape(guide = FALSE) +
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals") + 
-map_theme +
-  labs(title = "B)")
+tested_plot <- spatial_performance %>% 
+  filter(split == "Testing") %>% 
+  ggplot(aes(rel_density, rel_pred)) + 
+  geom_point() + 
+  facet_wrap(~ test_set, strip.position = "right", nrow = n_distinct(spatial_performance$test_set), ncol = 1 ) + 
+  labs(title = "Tested on...", x = "Observed") + 
+  theme(axis.title.y = element_blank())
+
+trained_plot + tested_plot &
+  theme(
+  panel.spacing = unit(10, "points"),
+  axis.text.x = element_blank(),
+  axis.text.y = element_blank(),
+  strip.text = element_text(size = 7),
+  plot.margin = unit(rep(.1, 4), "lines")
+  )
   
-  resid_hist + spatial_residual_plot + plot_layout(ncol = 2, nrow = 1, widths = c(1,2))
 
 ```
 
@@ -1011,74 +1097,43 @@ From the perspective understanding population dynamics though, it is also critic
 
 We begin by examining the ability of the model to replicate trends observed in the testing data, using the "random" data splitting scenario  (where the testing data and training data cover the same geographic and temporal ranges). Under these somewhat ideal circumstances, we see that the model is able to predict the trends in abundance for both the training and testing data (Fig.\@ref(fig:random-time-plot)). 
 
+
 ```{r random-time-plot, fig.cap = "Mean scaled observed and predicted trends in total abundance over time for the training and test splits (where splits are randomly sampled)"}
 
-train_performance <- best_fits %>% 
-  filter(test_set == "random")  %>% {
+
+train_performance <- downscaled_results %>%
+    filter(test_set == "random") %>% {
     .$training_data[[1]]
   } %>% 
-  mutate(resid = pred - density) %>% 
   mutate(split = "Training")
 
-test_performance <- skynet_models %>% 
-  filter(test_set == "random")  %>%{
+test_performance <- downscaled_results %>% 
+      filter(test_set == "random") %>% {
+
     .$test_data[[1]]
   } %>% 
-  mutate(resid = pred - density) %>% 
   mutate(split = "Testing")
 
 performance <- train_performance %>% 
   bind_rows(test_performance) %>% 
-  group_by(survey, year, split) %>% 
-  summarise(observed = sum(density * 100),
-            predicted= sum(pred * 100)) %>% 
+  group_by(approx_survey, year, split) %>% 
+  summarise(observed = sum(agg_mean_density * resolution_km2),
+            predicted= sum(agg_pred * resolution_km2)) %>% 
   gather(source, value, observed:predicted) %>% 
   ungroup() %>% 
-  group_by(survey, split, source) %>% 
+  group_by(approx_survey, split, source) %>% 
   mutate(cs_value = (value - mean(value)))
 
 performance %>% 
-  ggplot(aes(year,cs_value, color = survey, linetype = source)) + 
-  geom_line() + 
-  scale_color_discrete(guide = FALSE) +
-  facet_grid(survey~split, scales = "free_y")
-
-```
-
-```{r random-time-plot, fig.cap = "Mean scaled observed and predicted trends in total abundance over time for the training and test splits (where splits are randomly sampled)"}
-
-train_performance <- best_fits %>% 
-  filter(test_set == "random")  %>% {
-    .$training_data[[1]]
-  } %>% 
-  mutate(resid = pred - density) %>% 
-  mutate(split = "Training") %>% 
-    mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska"))
+  ggplot(aes(year,cs_value, color = approx_survey, linetype = source, shape = source)) + 
+  geom_point(size = 2) +
+  geom_line(size = 1) + 
+  scale_color_viridis_d(guide = FALSE) +
+  facet_grid(approx_survey~split, scales = "free_y") + 
+  theme(panel.spacing = unit(10,"points"),
+        axis.text.y = element_blank())
 
 
-test_performance <- skynet_models %>% 
-  filter(test_set == "random")  %>% {
-    .$test_data[[1]]
-  } %>% 
-  mutate(resid = pred - density) %>% 
-  mutate(split = "Testing") %>% 
-      mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska"))
-
-performance <- train_performance %>% 
-  bind_rows(test_performance) %>% 
-  group_by(state, year, split) %>% 
-  summarise(observed = sum(density * 100),
-            predicted= sum(pred * 100)) %>% 
-  gather(source, value, observed:predicted) %>% 
-  ungroup() %>% 
-  group_by(state, split, source) %>% 
-  mutate(cs_value = (value - mean(value)))
-
-performance %>% 
-  ggplot(aes(year,cs_value, color = state, linetype = source)) + 
-  geom_line() + 
-  scale_color_discrete(guide = FALSE) +
-  facet_grid(state~split, scales = "free_y")
 
 ```
 
@@ -1086,30 +1141,31 @@ performance %>%
 We have already considered the ability of the model to predict abundance in regions excluded from the training data (Fig.\@ref(fig:oor-plot)). How then does the model perform for time periods excluded from the training data? For this, we split the training data into the years 2012 and 2013, leaving 2014, 2015, and 2016 for the testing data. Our results show that the model performs relatively poorly at predicting trends in the time periods omitted from the model (Fig.\@ref(fig:oot-plot)). 
 
 
+XX the reason you were summing here before was becuase you were working at the 25km2 resolution, which made it kosher XX revisit this
+
+
 ```{r oot-plot, fig.cap="Observed and predicted abundance trends in each of the survey regions. Vertical red dashed line indicates break between training data (to the left) and testing data (at and to the right of the line)"}
 
-time_train_performance <- skynet_models %>% 
-  filter(test_set == "year_greq_than_2014")  %>% {
+time_train_performance <- downscaled_results %>% 
+  filter(test_set == "year_greq_than_2014") %>% {
     .$training_data[[1]]
   } %>% 
-  mutate(resid = pred - density) %>% 
-      mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska")) %>% 
+      mutate(state = ifelse(approx_survey == "wcgbts",if_else(lat > 46.25, "washington", if_else(lat > 42, "oregon", "california")),"Alaska")) %>% 
   group_by(state, year) %>% 
-  summarise(observed = mean(density * 100), 
-            predicted =  mean(pred * 100)) %>% 
+  summarise(observed = sum(agg_mean_density * 25), 
+            predicted =  sum(agg_pred * 25)) %>% 
   gather(source,value, observed:predicted) %>% 
   ungroup() %>% 
   mutate(split = "training")
 
-time_test_performance <- skynet_models %>% 
-  filter(test_set == "year_greq_than_2014")  %>% {
+time_test_performance <- downscaled_results %>% 
+    filter(test_set == "year_greq_than_2014") %>% {
     .$test_data[[1]]
   } %>% 
-  mutate(resid = pred - density) %>% 
-      mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska")) %>% 
+      mutate(state = ifelse(approx_survey == "wcgbts",if_else(lat > 46.25, "washington", if_else(lat > 42, "oregon", "california")),"Alaska")) %>% 
   group_by(state, year) %>% 
-  summarise(observed = mean(density * 100), 
-            predicted =  mean(pred * 100)) %>% 
+summarise(observed = sum(agg_mean_density * 25), 
+            predicted =  sum(agg_pred * 25)) %>% 
   gather(source,value, observed:predicted) %>% 
   ungroup() %>% 
   mutate(split = "testing")
@@ -1122,7 +1178,7 @@ time_test_performance %>%
          mean_value  = mean(value)) %>%
   ungroup() %>% 
   mutate(cs_value = (value - mean_value) / sd_value) %>% 
-  ggplot(aes(year, cs_value, color = source)) + 
+  ggplot(aes(year, value, color = source)) + 
   geom_vline(aes(xintercept = 2014), color = "red", linetype = 2, alpha = 0.75) +
   geom_line() + 
   geom_point() +

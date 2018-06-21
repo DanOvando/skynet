@@ -4,14 +4,18 @@ generate_test_training <-
            prop = 0.75,
            cut_year = 2014) {
 
-    if (test_set == "spatial_alaska"){
+     if (test_set == "spatial_alaska") {
       dat <- dat %>%
-        mutate(lat_dex = plyr::round_any(rounded_lat,0.25) %% 0.5 == 0,
-               lon_dex = plyr::round_any(rounded_lon,0.25) %% 0.5 == 0)
+        mutate(
+          lat_dex = plyr::round_any(rounded_lat, 0.25) %% 1 == 0,
+          lon_dex = plyr::round_any(rounded_lon, 0.25) %% 1 == 0
+        )
 
       train_dex <-
         dat$index[dat$lat_dex == TRUE &
-                    dat$lon_dex == TRUE & (!dat$survey %in% c('wcgbts', 'wcghl'))]
+                    dat$lon_dex == TRUE &
+                    (!dat$survey %in% c('wcgbts', 'wcghl')) &
+                    dat$surveyed_year == TRUE]
 
       test_dex <-
         dat$index[!(dat$index %in% train_dex) &
@@ -24,14 +28,17 @@ generate_test_training <-
         mutate(test_set = 'spatial_alaska')
     }
 
-    if (test_set == "spatial_west_coast"){
-
+    if (test_set == "spatial_west_coast") {
       dat <- dat %>%
-        mutate(lat_dex = plyr::round_any(rounded_lat,0.25) %% 0.5 == 0,
-               lon_dex = plyr::round_any(rounded_lon,0.25) %% 0.5 == 0)
+        mutate(
+          lat_dex = plyr::round_any(rounded_lat, 0.25) %% 1 == 0,
+          lon_dex = plyr::round_any(rounded_lon, 0.25) %% 1 == 0
+        )
       train_dex <-
         dat$index[dat$lat_dex == TRUE &
-                    dat$lon_dex == TRUE & (dat$survey %in% c('wcgbts', 'wcghl'))]
+                    dat$lon_dex == TRUE &
+                    (dat$survey %in% c('wcgbts', 'wcghl'))  &
+                    dat$surveyed_year == TRUE]
 
       test_dex <-
         dat$index[!(dat$index %in% train_dex) &
@@ -44,14 +51,18 @@ generate_test_training <-
         mutate(test_set = 'spatial_west_coast')
     }
 
-
-     if (test_set == 'random') {
-
-      splits <- rsample::initial_split(dat, prop = prop, strata = "survey")
+    if (test_set == 'random') {
+      splits <-
+        rsample::initial_split(dat, prop = prop, strata = "survey")
 
       train_dex <- dat$index[splits$in_id]
 
-      test_dex <- dat$index[!dat$index %in% train_dex]
+      surveyed_index <- dat$index[dat$surveyed_year == T]
+
+      train_dex <- train_dex[train_dex %in% surveyed_index]
+
+      test_dex <-
+        dat$index[!dat$index %in% train_dex]
 
       out <-
         data_frame(train = list(train_dex),
@@ -59,16 +70,21 @@ generate_test_training <-
         mutate(train_set = 'random') %>%
         mutate(test_set = 'random')
 
-     }
+    }
 
     if (test_set == 'random_alaska') {
-
       dat <- dat %>%
         filter(!dat$survey %in% c('wcgbts', 'wcghl'))
 
-      splits <- rsample::initial_split(dat, prop = prop, strata = "survey")
+      splits <-
+        rsample::initial_split(dat, prop = prop, strata = "survey")
 
-      train_dex <- dat$index[splits$in_id]
+      train_dex <-
+        dat$index[splits$in_id]
+
+      surveyed_index <- dat$index[dat$surveyed_year == T]
+
+      train_dex <- train_dex[train_dex %in% surveyed_index]
 
       test_dex <- dat$index[!dat$index %in% train_dex]
 
@@ -80,13 +96,18 @@ generate_test_training <-
 
     }
     if (test_set == 'random_west_coast') {
-
       dat <- dat %>%
         filter(dat$survey %in% c('wcgbts', 'wcghl'))
 
-      splits <- rsample::initial_split(dat, prop = prop, strata = "survey")
+      splits <-
+        rsample::initial_split(dat, prop = prop, strata = "survey")
 
-      train_dex <- dat$index[splits$in_id]
+      train_dex <-
+        dat$index[splits$in_id]
+
+      surveyed_index <- dat$index[dat$surveyed_year == T]
+
+      train_dex <- train_dex[train_dex %in% surveyed_index]
 
       test_dex <- dat$index[!dat$index %in% train_dex]
 
@@ -98,12 +119,53 @@ generate_test_training <-
 
     }
 
+    if (test_set == 'california') {
+
+      train <- dat %>%
+        filter(survey %in% c('wcgbts', 'wcghl'), surveyed_year == TRUE, rounded_lat >= 42)
+
+      test <- dat %>%
+        filter(survey %in% c('wcgbts', 'wcghl'), rounded_lat < 42)
+
+      train_dex <- train$index
+
+      test_dex <- test$index
+
+      out <-
+        data_frame(
+          train = list(train_dex),
+          test = list(test_dex),
+          test_set = 'california'
+        ) %>%
+        mutate(train_set = 'wa-or')
+    }
+
+    if (test_set == 'wa-or') {
+
+      train <- dat %>%
+        filter(survey %in% c('wcgbts', 'wcghl'), surveyed_year == TRUE, rounded_lat < 42)
+
+      test <- dat %>%
+        filter(survey %in% c('wcgbts', 'wcghl'), rounded_lat >= 42)
+
+      train_dex <- train$index
+
+      test_dex <- test$index
+
+      out <-
+        data_frame(
+          train = list(train_dex),
+          test = list(test_dex),
+          test_set = 'wa-or'
+        ) %>%
+        mutate(train_set = 'california')
+    }
+
 
     if (test_set == 'west_coast') {
 
       train <- dat %>%
-        filter(!survey %in% c('wcgbts', 'wcghl'))
-
+        filter(!survey %in% c('wcgbts', 'wcghl'), surveyed_year == TRUE)
 
       test <- dat %>%
         filter(survey %in% c('wcgbts', 'wcghl'))
@@ -123,7 +185,7 @@ generate_test_training <-
 
     if (test_set == 'alaska') {
       train <- dat %>%
-        filter(survey %in% c('wcgbts', 'wcghl'))
+        filter(survey %in% c('wcgbts', 'wcghl'), surveyed_year == TRUE)
 
       test <- dat %>%
         filter(!survey %in% c('wcgbts', 'wcghl'))
@@ -145,7 +207,7 @@ generate_test_training <-
     }
     if (test_set == 'historic') {
       train <- dat %>%
-        filter(year < cut_year)
+        filter(year < cut_year, surveyed_year == TRUE)
 
       test <- dat %>%
         filter(year >= cut_year)
@@ -168,7 +230,7 @@ generate_test_training <-
 
     if (test_set == 'ebs-ai') {
       train <- dat %>%
-        filter(survey %in% c('goabts'))
+        filter(survey %in% c('goabts'), surveyed_year == TRUE)
 
       test <- dat %>%
         filter(survey %in% c('ebsbts', 'aibts'))
@@ -190,7 +252,7 @@ generate_test_training <-
 
     if (test_set == 'goa-ai') {
       train <- dat %>%
-        filter(survey %in% c('ebsbts'))
+        filter(survey %in% c('ebsbts'), surveyed_year == TRUE)
 
       test <- dat %>%
         filter(survey %in% c('goabts', 'aibts'))
@@ -210,12 +272,13 @@ generate_test_training <-
 
     }
     if (test_set == 'historic_alaska') {
-
       train <- dat %>%
-        filter(year < cut_year, !survey %in% c('wcgbts', 'wcghl'))
+        filter(year < cut_year,
+               !survey %in% c('wcgbts', 'wcghl'),
+               surveyed_year == TRUE)
 
       test <- dat %>%
-        filter(year >= cut_year, !survey %in% c('wcgbts', 'wcghl'))
+        filter(year >= cut_year,!survey %in% c('wcgbts', 'wcghl'))
 
       train_dex <- train$index
 
@@ -233,9 +296,10 @@ generate_test_training <-
 
     }
     if (test_set == 'historic_west_coast') {
-
       train <- dat %>%
-        filter(year < cut_year, survey %in% c('wcgbts', 'wcghl'))
+        filter(year < cut_year,
+               survey %in% c('wcgbts', 'wcghl'),
+               surveyed_year == TRUE)
 
       test <- dat %>%
         filter(year >= cut_year, survey %in% c('wcgbts', 'wcghl'))

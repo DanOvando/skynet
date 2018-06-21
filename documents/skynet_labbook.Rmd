@@ -2892,5 +2892,42 @@ a
 
 Interesting, huge discrepency between the test and training. lag1 skynet is stupid; it's jsut skynet but with lagged engine power as a candidate variable. 
 
+```{r random-time-plot, fig.cap = "Mean scaled observed and predicted trends in total abundance over time for the training and test splits (where splits are randomly sampled)"}
+
+train_performance <- best_fits %>% 
+  filter(test_set == "random")  %>% {
+    .$training_data[[1]]
+  } %>% 
+  mutate(resid = pred - density) %>% 
+  mutate(split = "Training") %>% 
+    mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska"))
+
+
+test_performance <- skynet_models %>% 
+  filter(test_set == "random")  %>% {
+    .$test_data[[1]]
+  } %>% 
+  mutate(resid = pred - density) %>% 
+  mutate(split = "Testing") %>% 
+      mutate(state = ifelse(survey == "wcgbts",if_else(rounded_lat > 46.25, "washington", if_else(rounded_lat > 42, "oregon", "california")),"Alaska"))
+
+performance <- train_performance %>% 
+  bind_rows(test_performance) %>% 
+  group_by(state, year, split) %>% 
+  summarise(observed = sum(density * 100),
+            predicted= sum(pred * 100)) %>% 
+  gather(source, value, observed:predicted) %>% 
+  ungroup() %>% 
+  group_by(state, split, source) %>% 
+  mutate(cs_value = (value - mean(value)))
+
+performance %>% 
+  ggplot(aes(year,cs_value, color = state, linetype = source)) + 
+  geom_line() + 
+  scale_color_discrete(guide = FALSE) +
+  facet_grid(state~split, scales = "free_y")
+
+```
+
 
 

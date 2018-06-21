@@ -6,23 +6,31 @@ prepare_data <-
            raw_fish,
            no_wcghl = T,
            species_prices,
-           vars_to_drop = vars_to_drop) {
+           vars_to_drop = vars_to_drop,
+           survey_years) {
+    if (survey_months_only == T) {
+      survey_months <- tribble(
+        ~ survey,
+        ~ survey_months,
+        "wcgbts",
+        c(5:10),
+        "ebsbts",
+        c(7, 8),
+        "wcgbts",
+        c(7, 8),
+        "goabts",
+        c(7, 8),
+        "wcghl",
+        c(7, 8),
+        "aibts",
+        c(7, 8)
+      )
 
-    if (survey_months_only == T){
-    survey_months <- tribble(~survey,~survey_months,
-                             "wcgbts", c(5:10),
-                             "ebsbts",c(7,8),
-                             "wcgbts",c(7,8),
-                             "goabts", c(7,8),
-                             "wcghl", c(7,8),
-                             "aibts", c(7,8)
-    )
 
-
-    gfw_data <- gfw_data %>%
-      left_join(survey_months, by = "survey") %>%
-      mutate(data = map2(data,survey_months, ~filter(.x, month %in% .y))) %>%
-      select(-survey_months)
+      gfw_data <- gfw_data %>%
+        left_join(survey_months, by = "survey") %>%
+        mutate(data = map2(data, survey_months, ~ filter(.x, month %in% .y))) %>%
+        select(-survey_months)
     }
 
     skynet_data <- gfw_data %>%
@@ -164,13 +172,18 @@ prepare_data <-
       mean(total_fish_data$mean_exvessel_price, na.rm = T)
 
     total_fish_data <- total_fish_data %>%
+      left_join(survey_years, by = c("survey", "year")) %>%
+      mutate(surveyed_year = if_else(is.na(surveyed_year), FALSE, surveyed_year))
+
+    total_fish_data <- total_fish_data %>%
       group_by(survey, knot, year) %>%
       summarise(
         density = sum(density),
         mean_knot_area = mean(area),
         biomass = sum(biomass),
         economic_density = sum(density * (mean_exvessel_price * .001)),
-        economic_biomass = sum(biomass * (mean_exvessel_price * .001))
+        economic_biomass = sum(biomass * (mean_exvessel_price * .001)),
+        surveyed_year = unique(surveyed_year)
       ) %>%
       ungroup() %>%
       nest(-survey, .key = fish_data)
@@ -224,12 +237,12 @@ prepare_data <-
         dmap_at(impute_locations, fill_enviros, data = skynet_data)
     }
     missing_too_many <- skynet_data %>%
-      map_df(~ mean(is.na(.x))) %>%
+      map_df( ~ mean(is.na(.x))) %>%
       gather(variable, percent_missing) %>%
       arrange(desc(percent_missing)) %>%
       filter(
-        percent_missing > max_percent_missing,
-        !str_detect(variable, "lag"),!str_detect(variable, "density")
+        percent_missing > max_percent_missing,!str_detect(variable, "lag"),
+        !str_detect(variable, "density")
       ) %>%
       {
         .$variable
@@ -248,7 +261,7 @@ prepare_data <-
       select(-one_of(vars_to_drop))
 
 
-    if (no_wcghl == T){
+    if (no_wcghl == T) {
       skynet_data <-  skynet_data %>%
         filter(survey != "wcghl")
 

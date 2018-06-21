@@ -34,7 +34,7 @@ walk(functions, ~ here::here("functions", .x) %>% source()) # load local functio
 
 run_name <- "v4.2"
 
-run_description <- "Added in bagged_gbm and kfold training"
+run_description <- "more or less final set of dissertation level results"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -225,9 +225,14 @@ survey_bbox <- fish_data %>%
   ) %>%
   mutate(survey = tolower(survey))
 
-
 survey_names <- fish_data$survey %>% tolower() %>% unique()
 
+survey_years <- fish_data %>%
+  group_by(survey, Year) %>%
+  summarise() %>%
+  mutate(surveyed_year =TRUE) %>%
+  set_names(tolower) %>%
+  ungroup()
 
 
 # query_gfw ---------------------------------------------------------------
@@ -851,6 +856,7 @@ subset_fish_data <- fish_data %>%
   nest(-survey,-survey_region,-knots, -spp) # note that this breaks if it's a tibble, should make a bit more flexible
 
 
+
 # vasterize ---------------------------------------------------------------
 
 set.seed(42)
@@ -954,7 +960,8 @@ candidate_data <-
     prepare_data,
     vast_fish = vast_fish,
     species_prices = species_prices,
-    vars_to_drop = vars_to_drop
+    vars_to_drop = vars_to_drop,
+    survey_years = survey_years
   )) %>%
   mutate(
     total_fish_data = map(data, "total_fish_data"),
@@ -1126,7 +1133,8 @@ never_ind_vars <-
     "total_engine_hours",
     "aggregate_price.x",
     "aggregate_price.y",
-    "index"
+    "index",
+    "surveyed_year"
   )
 
 
@@ -1236,7 +1244,9 @@ test_train_data <- purrr::cross_df(list(
                 "spatial_alaska",
                 "spatial_west_coast",
                 "historic_alaska",
-                "historic_west_coast"),
+                "historic_west_coast",
+                "california",
+                "wa-or"),
   data_subset = data_sources$data_subset
 )) %>%
     left_join(data_sources, by = "data_subset")
