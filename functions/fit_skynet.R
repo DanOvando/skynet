@@ -394,10 +394,114 @@ fit_skynet <- function(data_subset,
 
   }
 
-  if (model_name == 'structural') {
-    compile(here::here('src', 'fit_structural_skynet.cpp'))
 
-    dyn.load(dynlib(here::here("src", "fit_structural_skynet")))
+
+  if (model_name == "bayesian_structural"){
+
+    training_data <- training %>%
+      as.data.frame() %>%
+      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      mutate(intercept = 1)
+
+    testing_frame <- testing %>%
+      as.data.frame() %>%
+      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      mutate(intercept = 1)
+
+    tests <- recipe(log_density ~ .,data = training_data) %>%
+      step_center(all_predictors(),-intercept,-aggregate_price) %>%
+      step_scale(all_predictors(),-intercept,-aggregate_price)
+
+    id <- prep(tests, data = training_data, retain = T)
+
+    training_data <- juice(id)
+
+    testing_data <- bake(id, newdata = testing_frame)
+
+    cost_vars <- c("dist_from_port",
+    "mean_vessel_length",
+    "total_engine_power",
+    "m_below_sea_level",
+    "dist_from_shore",
+    "intercept")
+
+    warmups <- 1000
+
+    total_iterations <- 2000
+
+    max_treedepth <-  10
+
+    adapt_delta <-  0.8
+
+    chains <- 3
+
+    struct_data <- list(
+      cost_data =
+        training_data %>%
+          select(
+            cost_vars
+      ),
+      log_d = as.numeric(training_data$log_density),
+      effort = training_data$total_hours,
+      price = training_data$aggregate_price,
+      mp = 0,
+      n = nrow(training_data),
+      test_n = nrow(testing_data),
+      max_q <- .8/max(training_data$total_hours),
+      test_cost_data = testing_frame %>%
+        select(cost_vars),
+      test_effort = testing_frame$total_hours,
+      test_price = testing_frame$aggregate_price
+
+        )
+
+    struct_data$n_betas <- ncol(struct_data$cost_data)
+
+    struct_data$n_test <- ncol(struct_data$cost_data)
+
+browser()
+    stan_fit <-
+      stan(
+        file = here::here("src", "fit_structural_model.stan"),
+        data = struct_data,
+        chains = chains,
+        warmup = warmups,
+        iter = total_iterations,
+        cores = 1,
+        refresh = 250,
+        control = list(max_treedepth = max_treedepth,
+                       adapt_delta = adapt_delta)
+      )
+
+
+    stan_summary <- broom::tidy(stan_fit)
+
+
+    stan_summary <- stan_summary %>%
+      mutate(term_group = str_remove_all(term,"(\\d)|(\\[)|(\\])"))
+
+    out_training <- training %>%
+      as_data_frame() %>%
+      mutate(pred = stan_summary$estimate[stan_summary$term_group == "d_hat"])
+
+    browser()
+
+    out_training %>%
+      ggplot(aes(density, pred)) +
+      geom_point()
+
+    out_testing <- testing %>%
+      as_data_frame() %>%
+      mutate(pred =stan_summary$estimate[stan_summary$term_group == "test_d_hat"])
+
+    out_testing %>%
+      ggplot(aes(density, pred)) +
+      geom_point()
+
+
+  }
+
+  if (model_name == 'structural') {
 
     independent_data <- training %>%
       as.data.frame() %>%
@@ -416,8 +520,6 @@ fit_skynet <- function(data_subset,
             dist_from_port,
             mean_vessel_length,
             total_engine_power,
-            no_take_mpa,
-            restricted_use_mpa,
             m_below_sea_level,
             intercept,
             dist_from_shore
@@ -425,21 +527,48 @@ fit_skynet <- function(data_subset,
       ),
       log_d = as.numeric(independent_data$log_density),
       effort = as.numeric(independent_data$total_hours),
-      price = as.numeric(independent_data$aggregate_price),
+      price = 10*as.numeric(independent_data$aggregate_price),
       mp = 0,
-      n = nrow(independent_data)
+      n = nrow(independent_data),
+      testing_frame =
     )
 
     struct_params <- list(
-      betas = rep(0, ncol(struct_data$data)),
+      betas = rep(20, ncol(struct_data$data)),
       log_sigma = log(sd(struct_data$log_d)),
-      logit_q = log(.001 / (1 - .001))
+      q = 1e-8
     )
+
+
+    browser()
+
+    compile(here::here('src', 'fit_structural_skynet.cpp'))
+
+    dyn.load(dynlib(here::here("src", "fit_structural_skynet")))
+
 
     model <-
       MakeADFun(data = struct_data,
                 parameters = struct_params,
                 DLL = "fit_structural_skynet")
+
+
+
+
+    mle_fit <- TMBhelper::Optimize(model,
+                                   lower = c(rep(-1, length(struct_params$betas)),
+                                               -12,.0000001),
+                                   upper = c(rep(40, length(struct_params$betas)),
+                                             100,max_q),
+                                   fn = model$fn,
+                                   gr = model$gr,
+                                   newtonsteps = 3)
+
+
+
+    a = tmbstan::tmbstan(obj = model)
+
+
 
     mle_fit <-
       nlminb(
@@ -454,6 +583,7 @@ fit_skynet <- function(data_subset,
     model <-  list(mle_fit = mle_fit,
                    mle_report = mle_fit_report)
 
+    browser()
     testing_prediction <-
       predict_structural_model(
         mle_fit = mle_fit,

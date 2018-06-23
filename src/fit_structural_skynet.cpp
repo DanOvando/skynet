@@ -39,7 +39,7 @@ Type objective_function<Type>::operator() ()
 
   PARAMETER(log_sigma);
 
-  PARAMETER(logit_q);
+  PARAMETER(q);
 
 
   // model block
@@ -48,20 +48,24 @@ Type objective_function<Type>::operator() ()
 
   Type sigma = exp(log_sigma);
 
-  Type q = invlogit(logit_q);
-
   matrix<Type> cost = data * betas;
 
   vector<Type> d_hat(n);
 
   vector<Type> log_d_hat(n);
 
-
   for (int i = 0; i<n; i++){
 
-  log_d_hat(i) = log(exp(cost(i)) + mp) - log(price(i) * exp(-q * effort(i)));
+  cost(i) = posfun(cost(i), Type(0.001), fpen);
 
-  d_hat(i) = exp(log_d_hat(i));
+
+  d_hat(i) = (exp(q * effort(i)) * (cost(i) + mp)) / (price(i));
+
+  std::cout << d_hat(i) << '\n';
+
+  //log((cost(i)) + mp) - log(price(i) * exp(-q * effort(i)));
+
+  log_d_hat(i) = log(d_hat(i));
 
   }
 
