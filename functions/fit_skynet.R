@@ -409,8 +409,8 @@ fit_skynet <- function(data_subset,
       mutate(intercept = 1)
 
     tests <- recipe(log_density ~ .,data = training_data) %>%
-      step_center(all_predictors(),-intercept,-aggregate_price) %>%
-      step_scale(all_predictors(),-intercept,-aggregate_price)
+      step_center(all_predictors(),-intercept) %>%
+      step_scale(all_predictors(),-intercept)
 
     id <- prep(tests, data = training_data, retain = T)
 
@@ -429,11 +429,11 @@ fit_skynet <- function(data_subset,
 
     total_iterations <- 2000
 
-    max_treedepth <-  10
+    max_treedepth <-  12
 
     adapt_delta <-  0.8
 
-    chains <- 3
+    chains <- 1
 
     struct_data <- list(
       cost_data =
@@ -447,7 +447,7 @@ fit_skynet <- function(data_subset,
       mp = 0,
       n = nrow(training_data),
       test_n = nrow(testing_data),
-      max_q <- .8/max(training_data$total_hours),
+      max_q = .8/max(training_data$total_hours),
       test_cost_data = testing_frame %>%
         select(cost_vars),
       test_effort = testing_frame$total_hours,
@@ -459,7 +459,9 @@ fit_skynet <- function(data_subset,
 
     struct_data$n_test <- ncol(struct_data$cost_data)
 
-browser()
+    inits <- list(list(betas = rep(10000, struct_data$n_betas)))
+
+
     stan_fit <-
       stan(
         file = here::here("src", "fit_structural_model.stan"),
@@ -469,10 +471,12 @@ browser()
         iter = total_iterations,
         cores = 1,
         refresh = 250,
+        init = inits,
         control = list(max_treedepth = max_treedepth,
                        adapt_delta = adapt_delta)
       )
 
+    browser()
 
     stan_summary <- broom::tidy(stan_fit)
 
@@ -503,44 +507,51 @@ browser()
 
   if (model_name == 'structural') {
 
-    independent_data <- training %>%
+    training_data <- training %>%
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|'))) %>%
       mutate(intercept = 1)
 
-    testing_frame <- testing %>%
+    testing_data <- testing %>%
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|'))) %>%
       mutate(intercept = 1)
+
+    tests <- recipe(log_density ~ .,data = training_data) %>%
+      step_center(all_predictors(),-intercept) %>%
+      step_scale(all_predictors(),-intercept)
+#
+#     id <- prep(tests, data = training_data, retain = T)
+#
+#     training_data <- juice(id)
+#
+#     testing_data <- bake(id, newdata = testing_frame)
 
     struct_data <- list(
       data = as.matrix(
-        independent_data %>%
+        training_data %>%
           select(
             dist_from_port,
             mean_vessel_length,
             total_engine_power,
             m_below_sea_level,
-            intercept,
             dist_from_shore
           )
       ),
-      log_d = as.numeric(independent_data$log_density),
-      effort = as.numeric(independent_data$total_hours),
-      price = 10*as.numeric(independent_data$aggregate_price),
+      log_d = as.numeric(training_data$log_density),
+      effort = as.numeric(training_data$total_hours),
+      price = as.numeric(training_data$aggregate_price),
       mp = 0,
-      n = nrow(independent_data),
-      testing_frame =
-    )
+      n = nrow(training_data))
+
+
+    max_q = .8/max(training_data$total_hours)
 
     struct_params <- list(
-      betas = rep(20, ncol(struct_data$data)),
+      betas = rep(10000, ncol(struct_data$data)),
       log_sigma = log(sd(struct_data$log_d)),
-      q = 1e-8
+      log_q = log(0.25 * max_q)
     )
-
-
-    browser()
 
     compile(here::here('src', 'fit_structural_skynet.cpp'))
 
@@ -553,55 +564,47 @@ browser()
                 DLL = "fit_structural_skynet")
 
 
+# mle_fit <-
+#   nlminb(
+#     model$par,
+#     objective = model$fn,
+#     gradient = model$gr,
+#     control = list("trace" = 100)
+#   )
+
 
 
     mle_fit <- TMBhelper::Optimize(model,
-                                   lower = c(rep(-1, length(struct_params$betas)),
-                                               -12,.0000001),
-                                   upper = c(rep(40, length(struct_params$betas)),
-                                             100,max_q),
+                                   lower = c(rep(-Inf, length(struct_params$betas)),
+                                             -12,log(.01*max_q)),
+                                   upper = c(rep(Inf, length(struct_params$betas)),
+                                             10,log(max_q)),
                                    fn = model$fn,
                                    gr = model$gr,
-                                   newtonsteps = 3)
+                                   newtonsteps = 10)
 
-
-
-    a = tmbstan::tmbstan(obj = model)
-
-
-
-    mle_fit <-
-      nlminb(
-        model$par,
-        objective = model$fn,
-        gradient = model$gr,
-        control = list("trace" = 100)
-      )
 
     mle_fit_report <- model$report()
 
     model <-  list(mle_fit = mle_fit,
                    mle_report = mle_fit_report)
 
-    browser()
     testing_prediction <-
       predict_structural_model(
         mle_fit = mle_fit,
-        data = testing_frame,
+        data = testing_data,
         mle_vars = colnames(struct_data$data),
         mp = 0
       )
 
-
     out_training <- training %>%
       as_data_frame() %>%
-      mutate(pred = exp(mle_fit_report$log_d_hat + mle_fit_report$sigma ^
-                          2 / 2))
+      mutate(pred = mle_fit_report$d_hat)
 
     out_testing <- testing %>%
       as_data_frame() %>%
-      mutate(pred = exp(testing_prediction + mle_fit_report$sigma ^ 2 /
-                          2))
+      mutate(pred = testing_prediction)
+
 
   } #close structural
 

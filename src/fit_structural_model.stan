@@ -32,7 +32,7 @@ parameters{
 
   real<lower = 0> sigma; //standard deviation
 
-  real<lower = 1e-8,upper = max_q> q;
+  real<lower = .01*max_q,upper = max_q> q;
 
 }
 
@@ -46,17 +46,24 @@ vector[n] cost;
 
 cost = cost_data * betas;
 
-d_hat = ((exp(q * effort) .* (cost + mp)) ./ (price));
+for (i in 1:n){
 
-print(max(d_hat))
+  d_hat[i] = ((exp(q * effort[i]) .* (cost[i] + mp)) ./ (price[i]));
+
+  if (d_hat[i] <= 1e-3){
+
+    d_hat[i] =  1e-3/(2.0- d_hat[i] / 1e-3);
+
+
+  }
+
+}
 
 log_d_hat = log(d_hat);
 
 }
 
 model{
-
-
 
 log_d ~ normal(log_d_hat, sigma);
 
@@ -78,9 +85,11 @@ vector[test_n] test_cost;
 
 test_cost = test_cost_data * betas;
 
-mean_test_d_hat = ((exp(q * test_effort) .* (test_cost + mp)) ./ (test_price));
+
 
 for (i in 1:test_n){
+
+  mean_test_d_hat[i] = fmax(1e-6,((exp(q * test_effort[i]) .* (test_cost[i] + mp)) ./ (test_price[i])));
 
     test_d_hat[i] = exp(normal_rng(log(mean_test_d_hat[i]), sigma)); // pp for testing
 }

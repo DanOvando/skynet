@@ -63,6 +63,7 @@ models <-
     "bagged_mars",
     "mars",
     "gbm",
+    "structural",
     "bayesian_structural",
     "engine_power",
     "hours")
