@@ -8,11 +8,13 @@ predict_structural_model <- function(mle_fit, data,
 
   betas <- mle_fit$par[str_detect(names(mle_fit$par),'beta')]
 
-  costs <-  exp(cost_data %*% betas)
+  costs <-  cost_data %*% betas
 
-  q <- boot::inv.logit( mle_fit$par[str_detect(names(mle_fit$par),'logit_q')])
+  q <- exp(mle_fit$par[str_detect(names(mle_fit$par),'log_q')])
 
-  log_d_hat <- log(costs + mp) - log(data$aggregate_price * exp(-q * data$total_hours));
+  d_hat = (exp(q * data$total_hours) * (costs + mp)) / data$aggregate_price;
 
-return(as.numeric(log_d_hat))
+  d_hat[d_hat <= 1e-3] <- 1e-3 / (2.0 - d_hat[d_hat <= 1e-3] /1e-3);
+
+return(as.numeric(d_hat))
 }

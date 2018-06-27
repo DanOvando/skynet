@@ -2929,5 +2929,61 @@ performance %>%
 
 ```
 
+# what's up with structural?
+
+Seems like it got a lot worse, worth checking to make sure it still works at all
+
+Ok one point of confusion that I had before is what the hell that second q is doing inside the miller and deacon paper , qsB*exp(-qE), where S is selectivity or really proportion of the biomass vulnerable to gear and q is the catchability coefficient of those vulnerable individuals. qsB is aproximated by CPUE in the last time period. THe key here is that they aren't modeling the population, they'r emodeling the trawl vulnerable population, which is what they base fishermen's expectations on, which seems reasonable. 
+
+oh right, miller inverts things that's where that negative dissapeared to. 
+
+```{r}
+q = 1e-3
+
+mp = 0
+
+vc = 10
+
+a = 100
+
+p = 10
+
+c = 0
+
+-1/q * log((mp + vc) / (a * (p - c)))
+
+1/q * log((a * (p - c))/(mp + vc))
+
+
+```
+
+
+```{r}
+
+a <- skynet_models %>% 
+  filter(model == "structural",
+         gfw_only == TRUE,
+         dep_var == "density",
+         test_sets == "random",
+         data_subset == "skynet") %>% 
+  select(training_data) %>% 
+  unnest()
+
+a %>% 
+  ggplot(aes(log_density, log(pred))) + 
+  geom_point() 
+
+```
+
+# fuck. 
+
+So this valus of information thing is really really really not good on any level. 
+
+Looking at the ranger results, it seems like adding the GFW data to the mix is actually making things worse somehow, which I wouldn't think should be possible! If the GFW variables don't matter, they just shouldn't get selected. Part of the issue there seems to have been model tuning, in that the same tuning does not apply to each subset of variables, so you need to fix that. But, in the test-tuning script, you used the best tuning for each variable set, and still got that result with ranger... 
+
+but not with GBM it seems... at least there adding in GFW provides some marginal benefits, but seriously marginal. So if that holds up, suggests that something is actually breaking in ranger, which is a bit scary from a model selection point of view. How do you justify which model to use around "because it doesn't makes sense for it to get worse"?
+
+
+
 
 

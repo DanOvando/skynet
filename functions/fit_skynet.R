@@ -40,7 +40,8 @@ fit_skynet <- function(data_subset,
                        fitcontrol_repeats = 1,
                        tune_model = T,
                        cores = 4,
-                       data_sources) {
+                       data_sources,
+                       variable) {
   # model_formula <-
   #   paste(dep_var, '~', ind_vars) %>% as.formula() # construct model forumla
   #
@@ -124,7 +125,13 @@ fit_skynet <- function(data_subset,
     #fit random forest
 
     tuned_pars <- tuned_pars %>%
-      pluck(model_name)
+      filter(model == model_name,
+             variables == variable) %>% {
+      map_df(.$tuned_pars, ~ .x)
+      }
+
+    # tuned_pars <- tuned_pars %>%
+    #   pluck(model_name)
 
     prepped_recipe <-
       recipes::prep(train_recipe, training, retain = T)
@@ -215,7 +222,10 @@ fit_skynet <- function(data_subset,
     # on.exit(detach('package:plyr'))
 
     tuned_pars <- tuned_pars %>%
-      pluck(model_name)
+      filter(model == model_name,
+             variables == variable) %>% {
+               map_df(.$tuned_pars, ~ .x)
+             }
 
     prepped_recipe <-
       recipes::prep(train_recipe, training, retain = T)
@@ -315,7 +325,10 @@ fit_skynet <- function(data_subset,
   if (model_name == "bagged_mars") {
 
     tuned_pars <- tuned_pars %>%
-      pluck(model_name)
+      filter(model == model_name,
+             variables == variable) %>% {
+               map_df(.$tuned_pars, ~ .x)
+             }
 
     fit_control <- trainControl(
       method = "none",
@@ -355,8 +368,12 @@ fit_skynet <- function(data_subset,
   }
 
   if (model_name == "mars") {
+
     tuned_pars <- tuned_pars %>%
-      pluck(model_name)
+      filter(model == model_name,
+             variables == variable) %>% {
+               map_df(.$tuned_pars, ~ .x)
+             }
 
     prepped_recipe <-
       recipes::prep(train_recipe, training, retain = T)
@@ -394,12 +411,11 @@ fit_skynet <- function(data_subset,
 
   }
 
-  if (model_name == 'structural') {
-    compile(here::here('src', 'fit_structural_skynet.cpp'))
 
-    dyn.load(dynlib(here::here("src", "fit_structural_skynet")))
 
-    independent_data <- training %>%
+  if (model_name == "bayesian_structural"){
+
+    training_data <- training %>%
       as.data.frame() %>%
       select(matches(paste0(structural_vars, collapse = '|'))) %>%
       mutate(intercept = 1)
@@ -409,45 +425,171 @@ fit_skynet <- function(data_subset,
       select(matches(paste0(structural_vars, collapse = '|'))) %>%
       mutate(intercept = 1)
 
+    tests <- recipe(log_density ~ .,data = training_data) %>%
+      step_center(all_predictors(),-intercept) %>%
+      step_scale(all_predictors(),-intercept)
+
+    id <- prep(tests, data = training_data, retain = T)
+
+    training_data <- juice(id)
+
+    testing_data <- bake(id, newdata = testing_frame)
+
+    cost_vars <- c("dist_from_port",
+    "mean_vessel_length",
+    "total_engine_power",
+    "m_below_sea_level",
+    "dist_from_shore",
+    "intercept")
+
+    warmups <- 1000
+
+    total_iterations <- 2000
+
+    max_treedepth <-  12
+
+    adapt_delta <-  0.8
+
+    chains <- 1
+
+    struct_data <- list(
+      cost_data =
+        training_data %>%
+          select(
+            cost_vars
+      ),
+      log_d = as.numeric(training_data$log_density),
+      effort = training_data$total_hours,
+      price = training_data$aggregate_price,
+      mp = 0,
+      n = nrow(training_data),
+      test_n = nrow(testing_data),
+      max_q = .8/max(training_data$total_hours),
+      test_cost_data = testing_frame %>%
+        select(cost_vars),
+      test_effort = testing_frame$total_hours,
+      test_price = testing_frame$aggregate_price
+
+        )
+
+    struct_data$n_betas <- ncol(struct_data$cost_data)
+
+    struct_data$n_test <- ncol(struct_data$cost_data)
+
+    inits <- list(list(betas = rep(10000, struct_data$n_betas)))
+
+
+    stan_fit <-
+      stan(
+        file = here::here("src", "fit_structural_model.stan"),
+        data = struct_data,
+        chains = chains,
+        warmup = warmups,
+        iter = total_iterations,
+        cores = 1,
+        refresh = 250,
+        init = inits,
+        control = list(max_treedepth = max_treedepth,
+                       adapt_delta = adapt_delta)
+      )
+
+    browser()
+
+    stan_summary <- broom::tidy(stan_fit)
+
+
+    stan_summary <- stan_summary %>%
+      mutate(term_group = str_remove_all(term,"(\\d)|(\\[)|(\\])"))
+
+    out_training <- training %>%
+      as_data_frame() %>%
+      mutate(pred = stan_summary$estimate[stan_summary$term_group == "d_hat"])
+
+    browser()
+
+    out_training %>%
+      ggplot(aes(density, pred)) +
+      geom_point()
+
+    out_testing <- testing %>%
+      as_data_frame() %>%
+      mutate(pred =stan_summary$estimate[stan_summary$term_group == "test_d_hat"])
+
+    out_testing %>%
+      ggplot(aes(density, pred)) +
+      geom_point()
+
+
+  }
+
+  if (model_name == 'structural') {
+
+    training_data <- training %>%
+      as.data.frame() %>%
+      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      mutate(intercept = 1)
+
+    testing_data <- testing %>%
+      as.data.frame() %>%
+      select(matches(paste0(structural_vars, collapse = '|'))) %>%
+      mutate(intercept = 1)
+
+    tests <- recipe(log_density ~ .,data = training_data) %>%
+      step_center(all_predictors(),-intercept) %>%
+      step_scale(all_predictors(),-intercept)
+#
+#     id <- prep(tests, data = training_data, retain = T)
+#
+#     training_data <- juice(id)
+#
+#     testing_data <- bake(id, newdata = testing_frame)
+
     struct_data <- list(
       data = as.matrix(
-        independent_data %>%
+        training_data %>%
           select(
             dist_from_port,
             mean_vessel_length,
             total_engine_power,
-            no_take_mpa,
-            restricted_use_mpa,
             m_below_sea_level,
-            intercept,
             dist_from_shore
           )
       ),
-      log_d = as.numeric(independent_data$log_density),
-      effort = as.numeric(independent_data$total_hours),
-      price = as.numeric(independent_data$aggregate_price),
-      mp = 0,
-      n = nrow(independent_data)
-    )
+      log_d = as.numeric(training_data$log_density),
+      effort = as.numeric(training_data$total_hours),
+      price = as.numeric(training_data$aggregate_price),
+      mp = 100,
+      n = nrow(training_data))
+
+
+    max_q = .8/max(training_data$total_hours)
 
     struct_params <- list(
-      betas = rep(0, ncol(struct_data$data)),
+      betas = rep(10000, ncol(struct_data$data)),
       log_sigma = log(sd(struct_data$log_d)),
-      logit_q = log(.001 / (1 - .001))
+      log_q = log(0.25 * max_q)
     )
+
+    compile(here::here('src', 'fit_structural_skynet.cpp'))
+
+    dyn.load(dynlib(here::here("src", "fit_structural_skynet")))
+
 
     model <-
       MakeADFun(data = struct_data,
                 parameters = struct_params,
                 DLL = "fit_structural_skynet")
 
-    mle_fit <-
-      nlminb(
-        model$par,
-        objective = model$fn,
-        gradient = model$gr,
-        control = list("trace" = 100)
-      )
+
+    mle_fit <- TMBhelper::Optimize(model,
+                                   lower = c(rep(-Inf, length(struct_params$betas)),
+                                             -12,log(.01*max_q)),
+                                   upper = c(rep(Inf, length(struct_params$betas)),
+                                             10,log(max_q)),
+                                   fn = model$fn,
+                                   gr = model$gr,
+                                   newtonsteps = 10)
+
 
     mle_fit_report <- model$report()
 
@@ -457,21 +599,19 @@ fit_skynet <- function(data_subset,
     testing_prediction <-
       predict_structural_model(
         mle_fit = mle_fit,
-        data = testing_frame,
+        data = testing_data,
         mle_vars = colnames(struct_data$data),
         mp = 0
       )
 
-
     out_training <- training %>%
       as_data_frame() %>%
-      mutate(pred = exp(mle_fit_report$log_d_hat + mle_fit_report$sigma ^
-                          2 / 2))
+      mutate(pred = mle_fit_report$d_hat)
+
 
     out_testing <- testing %>%
       as_data_frame() %>%
-      mutate(pred = exp(testing_prediction + mle_fit_report$sigma ^ 2 /
-                          2))
+      mutate(pred = testing_prediction)
 
   } #close structural
 

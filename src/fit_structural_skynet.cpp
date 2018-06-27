@@ -2,12 +2,11 @@
 
 
 template<class Type>
-Type posfun(Type x, Type eps, Type &pen)
+Type posfun(Type x, Type eps)
 {
   if ( x >= eps ){
     return x;
   } else {
-    pen += Type(0.01) * pow(x-eps,2);
     return eps/(Type(2.0)-x/eps);
   }
 }
@@ -39,16 +38,15 @@ Type objective_function<Type>::operator() ()
 
   PARAMETER(log_sigma);
 
-  PARAMETER(logit_q);
-
+  PARAMETER(log_q);
 
   // model block
 
-  Type fpen = 0.;
+  // Type fpen = 0.;
+
+  Type q = exp(log_q);
 
   Type sigma = exp(log_sigma);
-
-  Type q = invlogit(logit_q);
 
   matrix<Type> cost = data * betas;
 
@@ -56,22 +54,35 @@ Type objective_function<Type>::operator() ()
 
   vector<Type> log_d_hat(n);
 
-
   for (int i = 0; i<n; i++){
 
-  log_d_hat(i) = log(exp(cost(i)) + mp) - log(price(i) * exp(-q * effort(i)));
+  // cost(i) = posfun(cost(i), Type(0.00001), fpen);
 
-  d_hat(i) = exp(log_d_hat(i));
+  // d_hat(i) = posfun((exp(q * effort(i)) * (cost(i) + mp)) / price(i),
+  //       Type(0.001));
+
+    d_hat(i) = (exp(q * effort(i)) * (cost(i) + mp)) / price(i);
+
+    if (d_hat(i) <= 1e-3){
+
+      d_hat(i) = 1e-3 / (Type(2.0) - d_hat(i) /1e-3);
+
+      std::cout << "WTF" << '\n';
+
+    }
+
+  log_d_hat(i) = log(d_hat(i));
 
   }
 
   nll -= sum(dnorm(log_d, log_d_hat, sigma, true));
 
+
   // report block
 
-  ADREPORT(log_d_hat);
+  // ADREPORT(log_d_hat);
 
-  ADREPORT(d_hat);
+  // ADREPORT(d_hat);
 
   REPORT(log_d_hat);
 

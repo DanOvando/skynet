@@ -24,7 +24,11 @@ library(taxize)
 library(gbm)
 library(recipes)
 library(sf)
+library(rstan)
 library(tidyverse)
+
+
+rstan::rstan_options(auto_write = TRUE)
 
 filter <- dplyr::filter
 
@@ -34,7 +38,8 @@ walk(functions, ~ here::here("functions", .x) %>% source()) # load local functio
 
 run_name <- "v4.2"
 
-run_description <- "more or less final set of dissertation level results"
+run_description <-
+  "more or less final set of dissertation level results"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -53,7 +58,14 @@ run_models <- TRUE # fit gfw models to fishdata
 
 tune_pars <- TRUE # pre-tune machine learning models
 
-models <- c("ranger","bagged_mars","mars","gbm", "structural", "engine_power", "hours")
+models <-
+  c("ranger",
+    "bagged_mars",
+    "mars",
+    "gbm",
+    "structural",
+    "engine_power",
+    "hours")
 
 # models <- c("mars")
 
@@ -84,11 +96,12 @@ round_environmentals <- T
 
 raw_fish <- F
 
-dep_vars <- c("density","economic_density")
+dep_vars <- c("density", "economic_density")
 
 gfw_vars_only <- T
 
-fished_only <- T # only include fished species in predictive model fitting
+fished_only <-
+  T # only include fished species in predictive model fitting
 
 unfished_only <- F # trial option fitting to unfished only
 
@@ -120,7 +133,7 @@ res <- 1 / lat_lon_res
 
 min_times_seen <- 9
 
-min_dist_from_shore <- 1000
+min_dist_from_shore <- 500
 
 min_speed <- 0.01
 
@@ -136,19 +149,19 @@ species_list <-
 # survey_list <- c('ebsbts', 'goabts', 'aibts', 'wcgbts', 'wcghl')
 survey_list <- c("ebsbts", "goabts", "aibts", "wcgbts", "wcghl")
 
-knots_per_survey <- tribble(~ survey,
-                            ~ knots,
-                            # --/--
-                            "ebsbts",
-                            300,
-                            "goabts",
-                            400,
-                            "aibts",
-                            200,
-                            "wcgbts",
-                            1000,
-                            "wcghl",
-                            100)
+knots_per_survey <- tribble( ~ survey,
+                             ~ knots,
+                             # --/--
+                             "ebsbts",
+                             300,
+                             "goabts",
+                             400,
+                             "aibts",
+                             200,
+                             "wcgbts",
+                             1000,
+                             "wcghl",
+                             100)
 
 # get fishdata ------------------------------------------------------------
 
@@ -230,7 +243,7 @@ survey_names <- fish_data$survey %>% tolower() %>% unique()
 survey_years <- fish_data %>%
   group_by(survey, Year) %>%
   summarise() %>%
-  mutate(surveyed_year =TRUE) %>%
+  mutate(surveyed_year = TRUE) %>%
   set_names(tolower) %>%
   ungroup()
 
@@ -278,13 +291,13 @@ if (query_gfw == T) {
       [world-fishing-827:gfw_research.nn]
       WHERE
       (distance_from_shore > ({min_dist_from_shore})
-      OR (implied_speed > ({min_speed}) AND implied_speed < ({max_speed})))
+      AND (implied_speed > ({min_speed}) AND implied_speed < ({max_speed})))
       AND lat >= ({bbox[1]})
       AND lat <= ({bbox[2]})
       AND lon > ({bbox[3]})
       AND lon <= ({bbox[4]})
       AND _PARTITIONTIME BETWEEN TIMESTAMP('2010-01-01')
-      AND TIMESTAMP('2016-12-31')
+      AND TIMESTAMP('2017-12-31')
       AND seg_id IN (
       SELECT
       seg_id
@@ -338,7 +351,7 @@ if (query_gfw == T) {
   gfw_data <- data_frame(survey = survey_bbox$survey) %>%
     mutate(gfw_data = temp_gfw_data) %>%
     unnest() %>%
-    select(-b_mmsi,-b_year) %>%
+    select(-b_mmsi, -b_year) %>%
     set_names(str_replace_all(colnames(.), "(a_)|(b_)", "")) %>%
     nest(-survey)
 
@@ -425,7 +438,7 @@ if (query_environmentals == T) {
       color = log(mean_chlorophyll)
     ) +
       scale_color_viridis(guide = F) +
-      facet_wrap( ~ year) +
+      facet_wrap(~ year) +
       theme_classic() +
       labs(caption = "SST(c)")
   }
@@ -467,7 +480,7 @@ if (query_environmentals == T) {
       color = log(mean_analysed_sst)
     ) +
       scale_color_viridis(guide = F) +
-      facet_wrap( ~ year) +
+      facet_wrap(~ year) +
       theme_classic() +
       labs(caption = "SST(c)")
   }
@@ -544,7 +557,7 @@ if (query_environmentals == T) {
           wind_speed = map_dbl(wind_vector, "wind_speed"),
           wind_angle = map_dbl(wind_vector, "wind_angle")
         ) %>%
-        select(-wind_vector,-x_wind,-y_wind)
+        select(-wind_vector, -x_wind, -y_wind)
     )) %>%
     select(-wind_speed)
 
@@ -794,7 +807,7 @@ if (hack_zeros == T) {
   }
 
   fish_data <- fish_data %>%
-    nest(-survey,-Sci,-Year) %>%
+    nest(-survey, -Sci, -Year) %>%
     mutate(hackdat = map(data, hack_foo)) %>%
     select(-data) %>%
     unnest()
@@ -850,10 +863,10 @@ subset_fish_data <- fish_data %>%
   group_by(survey, spp) %>%
   mutate(seen_every_year = all(times_seen > min_times_seen)) %>%
   filter(seen_every_year == T) %>%
-  select(-times_seen,-seen_every_year) %>%
+  select(-times_seen, -seen_every_year) %>%
   ungroup() %>%
   as.data.frame() %>%
-  nest(-survey,-survey_region,-knots, -spp) # note that this breaks if it's a tibble, should make a bit more flexible
+  nest(-survey, -survey_region, -knots,-spp) # note that this breaks if it's a tibble, should make a bit more flexible
 
 
 
@@ -919,7 +932,7 @@ if (vasterize == T) {
 
 vast_worked <- !map_lgl(vast_fish$vasterized_data, is.null)
 
-vast_fish <- vast_fish[vast_worked,]
+vast_fish <- vast_fish[vast_worked, ]
 
 knots <- vast_fish %>%
   select(survey, vasterized_data) %>%
@@ -950,19 +963,21 @@ candidate_data <-
     T,
     F
   ) %>%
-  mutate(data = pmap(
-    list(
-      fished_only = fished_only,
-      unfished_only = unfished_only,
-      survey_months_only = survey_months_only,
-      raw_fish = raw_fish
-    ),
-    prepare_data,
-    vast_fish = vast_fish,
-    species_prices = species_prices,
-    vars_to_drop = vars_to_drop,
-    survey_years = survey_years
-  )) %>%
+  mutate(
+    data = pmap(
+      list(
+        fished_only = fished_only,
+        unfished_only = unfished_only,
+        survey_months_only = survey_months_only,
+        raw_fish = raw_fish
+      ),
+      prepare_data,
+      vast_fish = vast_fish,
+      species_prices = species_prices,
+      vars_to_drop = vars_to_drop,
+      survey_years = survey_years
+    )
+  ) %>%
   mutate(
     total_fish_data = map(data, "total_fish_data"),
     skynet_data = map(data, "skynet_data")
@@ -971,8 +986,7 @@ candidate_data <-
 
 
 save(file = here::here("results", run_name, "skynet_data.Rdata"),
-     candidate_data
-)
+     candidate_data)
 
 # plot data -----------------------------------------------------
 
@@ -981,7 +995,7 @@ save(file = here::here("results", run_name, "skynet_data.Rdata"),
 
 if (plot_data == T) {
   plot_vars <- candidate_data$skynet_data[[1]] %>%
-    select(-survey,-year,-rounded_lat,-rounded_lon) %>%
+    select(-survey, -year, -rounded_lat, -rounded_lon) %>%
     colnames()
 
   plot_covariates <- function(dat, variable, run_dir) {
@@ -993,7 +1007,7 @@ if (plot_data == T) {
         group = ~ year,
         fill = ~ survey
       )) +
-      facet_wrap( ~ survey, scales = "free_x") +
+      facet_wrap(~ survey, scales = "free_x") +
       scale_fill_viridis_d(guide = F) +
       labs(title = variable)
 
@@ -1005,15 +1019,17 @@ if (plot_data == T) {
     )
   }
 
-  walk(plot_vars,
-       ~ plot_covariates(
-         dat = candidate_data$skynet_data[[1]],
-         variable = .x,
-         run_dir = run_dir
-       ))
+  walk(
+    plot_vars,
+    ~ plot_covariates(
+      dat = candidate_data$skynet_data[[1]],
+      variable = .x,
+      run_dir = run_dir
+    )
+  )
 
 
- temp_maps <- candidate_data$skynet_data[[1]] %>%
+  temp_maps <- candidate_data$skynet_data[[1]] %>%
     nest(-survey)
 
   map_plot_foo <-
@@ -1093,23 +1109,6 @@ if (plot_data == T) {
 
 # prepare models ----------------------------------------------------------
 
-do_not_scale <-
-  c(
-    "year",
-    "rounded_lat",
-    "rounded_lon",
-    "no_take_mpa",
-    "restricted_use_mpa",
-    "knot",
-    "distance",
-    "any_fishing",
-    'log_density',
-    'cs_log_density',
-    'cs_density',
-    'density',
-    "survey",
-    "aggregate_price"
-  ) # variables that should not be centered and scaled
 
 never_ind_vars <-
   c(
@@ -1134,17 +1133,17 @@ never_ind_vars <-
     "aggregate_price.x",
     "aggregate_price.y",
     "index",
-    "surveyed_year"
+    "surveyed_year",
+    "relative_density",
+    "log_economic_density"
   )
 
 
 skynet_names <- colnames(candidate_data$skynet_data[[1]])
 
 gfw_vars <-
-  skynet_names[str_detect(
-    skynet_names,
-    "(vessel)|(distance)|(length)|(hours)|(engine)|(port)|(shore)|(mpa)"
-  )]
+  skynet_names[str_detect(skynet_names,
+                          "(vessel)|(length)|(hours)|(engine)|(fishing)|(numbers)")]
 
 tree_candidate_vars <- skynet_names[!skynet_names %in% c(dep_vars,
                                                          never_ind_vars) &
@@ -1152,7 +1151,12 @@ tree_candidate_vars <- skynet_names[!skynet_names %in% c(dep_vars,
                                     == F &
                                       str_detect(skynet_names, "lag") == F]
 
-gfw_only_tree_candidate_vars <- c(tree_candidate_vars[tree_candidate_vars %in% gfw_vars], "random_var")
+gfw_only_tree_candidate_vars <-
+  c(tree_candidate_vars[tree_candidate_vars %in% gfw_vars], "random_var")
+
+enviro_only_tree_candidate_vars <-
+  c(tree_candidate_vars[!tree_candidate_vars %in% gfw_only_tree_candidate_vars &
+                          !tree_candidate_vars %in% (never_ind_vars)], "random_var")
 
 lm_candidate_vars <- skynet_names[!skynet_names %in% c(dep_vars,
                                                        never_ind_vars)]
@@ -1182,21 +1186,34 @@ delta_skynet <- basic_skynet_data %>%
   select(-contains("lag")) %>%
   gather(
     variable,
-    value,
-    -survey,-year,-rounded_lat,-rounded_lon,-dist_from_port,-dist_from_shore,-no_take_mpa,-restricted_use_mpa,-any_fishing,-m_below_sea_level,-random_var,-knot,-distance,-aggregate_price
+    value,-survey,
+    -year,
+    -rounded_lat,
+    -rounded_lon,
+    -dist_from_port,
+    -dist_from_shore,
+    -no_take_mpa,
+    -restricted_use_mpa,
+    -any_fishing,
+    -m_below_sea_level,
+    -random_var,
+    -knot,
+    -distance,
+    -aggregate_price
   )
 
 delta_vars <- unique(delta_skynet$variable)
 
-delta_candidate_vars <- c(tree_candidate_vars[tree_candidate_vars %in% delta_vars],
-                          "random_var")
+delta_candidate_vars <-
+  c(tree_candidate_vars[tree_candidate_vars %in% delta_vars],
+    "random_var")
 
 delta_skynet <- delta_skynet %>%
   group_by(survey, variable, rounded_lat, rounded_lon) %>%
   arrange(year) %>%
   mutate(lag_value = lag(value, 1)) %>%
   mutate(delta_value = value - lag_value) %>%
-  select(-value,-lag_value) %>%
+  select(-value, -lag_value) %>%
   spread(variable, delta_value) %>%
   na.omit() %>%
   ungroup()
@@ -1208,15 +1225,17 @@ data_sources <- tibble(
                   select(-contains("lag")) %>%
                   na.omit()),
   unfished_skynet = list(unfished_skynet_data %>%
-                  select(-contains("lag")) %>%
-                  na.omit()),
+                           select(-contains("lag")) %>%
+                           na.omit()),
 
-  all_months_skynet_data  = list(basic_all_months_skynet_data %>%
-                                   select(-contains("lag")) %>%
-                                   na.omit()),
+  all_months_skynet_data  = list(
+    basic_all_months_skynet_data %>%
+      select(-contains("lag")) %>%
+      na.omit()
+  ),
   lag_1_skynet_data = list(
     basic_skynet_data %>%
-      select(-total_engine_hours_lag2,-total_engine_hours_lag3) %>%
+      select(-total_engine_hours_lag2, -total_engine_hours_lag3) %>%
       na.omit()
   ),
   delta_skynet = list(delta_skynet),
@@ -1235,76 +1254,82 @@ data_sources <- tibble(
 
 
 test_train_data <- purrr::cross_df(list(
-  test_sets = c("random",
-                "alaska",
-                "west_coast",
-                "historic",
-                "random_alaska",
-                "random_west_coast",
-                "spatial_alaska",
-                "spatial_west_coast",
-                "historic_alaska",
-                "historic_west_coast",
-                "california",
-                "wa-or"),
+  test_sets = c(
+    "random",
+    "alaska",
+    "west_coast",
+    "historic",
+    "random_alaska",
+    "random_west_coast",
+    "spatial_alaska",
+    "spatial_west_coast",
+    "historic_alaska",
+    "historic_west_coast",
+    "california",
+    "wa-or"
+  ),
   data_subset = data_sources$data_subset
 )) %>%
-    left_join(data_sources, by = "data_subset")
+  left_join(data_sources, by = "data_subset")
 
 
-  test_train_data <- test_train_data %>%
-    mutate(resampled = map2(data, test_sets, ~ generate_test_training(dat = .x, test_set = .y))) %>%
-    select(-data) %>%
-    unnest()
+test_train_data <- test_train_data %>%
+  mutate(resampled = map2(data, test_sets, ~ generate_test_training(dat = .x, test_set = .y))) %>%
+  select(-data) %>%
+  unnest()
 
 
-  # test_train_data <- modelr::crossv_kfold(lag_0_skynet_data, k = 1)
+# test_train_data <- modelr::crossv_kfold(lag_0_skynet_data, k = 1)
 
 
-  skynet_models <- purrr::cross_df(list(
-    dep_var = (dep_vars),
-    temp = list(test_train_data),
-    model = models,
-    weight_surveys = c(F),
-    gfw_only = c(TRUE, FALSE)
+skynet_models <- purrr::cross_df(list(
+  dep_var = (dep_vars),
+  temp = list(test_train_data),
+  model = models,
+  weight_surveys = c(F),
+  variables = c("gfw_only", "enviro_only", "gfw_and_enviro")
+)) %>%
+  unnest(temp, .drop = F) %>%
+  filter(!(data_subset == 'delta_skynet' &
+             model == 'structural')) %>%
+  # filter(!(model == 'structural' & data_subset != 'uncentered_skynet')) %>%
+  filter(!(
+    model %in% c('ranger', 'gbm') &
+      data_subset == 'uncentered_skynet'
   )) %>%
-    unnest(temp, .drop = F) %>%
-    filter(!(data_subset == 'delta_skynet' &
-               model == 'structural')) %>%
-    # filter(!(model == 'structural' & data_subset != 'uncentered_skynet')) %>%
-    filter(!(
-      model %in% c('ranger', 'gbm') &
-        data_subset == 'uncentered_skynet'
-    )) %>%
-    filter(!(model == 'structural' &
-               dep_var != dep_vars[1]),
-           !(weight_surveys == T &
-               !(test_sets %in% c(
-                 "random", "historic"
-               ))))
+  filter(!(model == 'structural' &
+             dep_var != dep_vars[1]),!(weight_surveys == T &
+                                         !(test_sets %in% c(
+                                           "random", "historic"
+                                         ))))
 
-  # run models --------------------------------------------------------------
+# run models --------------------------------------------------------------
 
-
-  if (run_models == T) {
-
-    if (tune_pars == T){
-
+if (run_models == T) {
+  if (tune_pars == T) {
     prepped_train <- skynet_models %>%
-      filter(data_subset == "skynet",
-             test_sets == "random",
-             model %in% c("ranger","gbm","mars","bagged_mars"),
-             gfw_only == FALSE)  %>%
-      group_by(model) %>%
+      filter(
+        data_subset == "skynet",
+        test_sets == "random",
+        model %in% c("ranger", "gbm", "mars", "bagged_mars"),
+        dep_var == "density"
+      )  %>%
+      group_by(model, variables) %>%
       slice(1) %>%
       ungroup() %>%
       mutate(candidate_vars = ifelse(
         str_detect(.$data_subset, "delta"),
         list(delta_candidate_vars),
-        ifelse(gfw_only == T,
-               list(gfw_only_tree_candidate_vars),
-               list(tree_candidate_vars)
-        ))) %>%
+        ifelse(
+          variables == "gfw_only",
+          list(gfw_only_tree_candidate_vars),
+          ifelse(
+            variables == "enviro_only",
+            list(enviro_only_tree_candidate_vars),
+            list(tree_candidate_vars)
+          )
+        )
+      )) %>%
       mutate(
         fitted_model = pmap(
           list(
@@ -1325,225 +1350,161 @@ test_train_data <- purrr::cross_df(list(
         )
       )
 
-    tuned_pars <- map(prepped_train$fitted_model,"tuned_pars") %>%
-      set_names(prepped_train$model)
+    tuned_pars <- prepped_train %>%
+      ungroup() %>%
+      select(model, variables,fitted_model) %>%
+      mutate(tuned_pars = map(fitted_model, "tuned_pars"))
 
-    kfold_preds <- map(prepped_train$fitted_model,"kfold_preds") %>%
-      set_names(prepped_train$model)
+
+    kfold_preds <- prepped_train %>%
+      ungroup() %>%
+      select(model, variables,fitted_model) %>%
+      mutate(kfold_preds = map(fitted_model, "kfold_preds"))
+
+    # kfold_preds <- map(prepped_train$fitted_model, "kfold_preds") %>%
+    #   set_names(prepped_train$model)
 
     saveRDS(file = paste0(run_dir, "tuned_pars.RDS"),
-         tuned_pars)
+            tuned_pars)
 
     saveRDS(file = paste0(run_dir, "kfold_preds.RDS"),
             kfold_preds)
 
-    } else {
-
-      tuned_pars <- readRDS(file = paste0(run_dir, "tuned_pars.RDS"))
-
-    }
-
-
-    sfm <- safely(fit_skynet)
-
-    skynet_models <- skynet_models %>%
-      ungroup() %>%
-     mutate(candidate_vars = ifelse(
-      str_detect(.$data_subset, "delta"),
-      list(delta_candidate_vars),
-      ifelse(gfw_only == T,
-      list(gfw_only_tree_candidate_vars),
-      list(tree_candidate_vars)
-    ))) %>%
-      mutate(
-        fitted_model = pmap(
-          list(
-            data_subset = data_subset,
-            dep_var = dep_var,
-            model_name = model,
-            training = train,
-            testing = test,
-            tree_candidate_vars = candidate_vars
-          ),
-          sfm,
-          fitcontrol_number = 1,
-          fitcontrol_repeats = 1,
-          never_ind_vars = never_ind_vars,
-          tune_model = T,
-          cores = num_cores,
-          data_sources = data_sources,
-          tuned_pars = tuned_pars
-        )
-      )
-
-    print('ran models')
-
-    save(file = paste0(run_dir, "skynet_models.Rdata"),
-         skynet_models)
-
-    print('saved models')
-
   } else {
-    load(file = paste0(run_dir, "skynet_models.Rdata"))
+    tuned_pars <- readRDS(file = paste0(run_dir, "tuned_pars.RDS"))
+
   }
 
-  # diagnose models ---------------------------------------------------------
-
-
+library(rstan)
+  sfm <- safely(fit_skynet)
 
   skynet_models <- skynet_models %>%
-    mutate(index = 1:nrow(.)) %>%
-    mutate(error = map(fitted_model, "error")) %>%
-    mutate(no_error = map_lgl(error, is.null)) %>%
-    filter(no_error)
-
-
-
-  diagnostic_plot_foo <- function(data,
-                                  r2,
-                                  dep_var,
-                                  test_region,
-                                  train_region,
-                                  data_set) {
-    data %>%
-      ggplot(aes_(as.name(dep_var), ~ pred)) +
-      geom_abline(aes(intercept = 0, slope = 1),
-                  color = "red",
-                  linetype = 2) +
-      geom_point(alpha = 0.75) +
-      labs(
-        title = paste0(
-          "tested on ",
-          test_region,
-          "- trained on ",
-          train_region,
-          "; R2 = ",
-          r2
-        ),
-        subtitle = paste0("data subset is: ", data_set)
+    ungroup() %>%
+    mutate(candidate_vars = ifelse(
+      str_detect(.$data_subset, "delta"),
+      list(delta_candidate_vars),
+      ifelse(
+        variables == "gfw_only",
+        list(gfw_only_tree_candidate_vars),
+        ifelse(
+          variables == "enviro_only",
+          list(enviro_only_tree_candidate_vars),
+          list(tree_candidate_vars)
+        )
       )
-  } # close diagnostic functions
-
-
-  skynet_models <- skynet_models %>%
+    )) %>%
     mutate(
-      test_data = map(fitted_model, c("result", "test_predictions")),
-      training_data = map(fitted_model, c("result", "training_predictions"))
-    ) %>%
-    select(-fitted_model) %>%
-    mutate(
-      var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
-      r2 = map2_dbl(test_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
-      rmse = map2_dbl(test_data, dep_var, ~ yardstick::rmse(.x, .y, "pred")),
-      ccc = map2_dbl(test_data, dep_var, ~ yardstick::ccc(.x, .y, "pred")),
-      r2_training = map2_dbl(training_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
-      rmse_training = map2_dbl(training_data, dep_var, ~ yardstick::rmse(.x, .y, "pred")),
-      ccc_training = map2_dbl(training_data, dep_var, ~ yardstick::ccc(.x, .y, "pred"))
-    ) %>%
-    mutate(
-      test_plot = pmap(
+      fitted_model = pmap(
         list(
-          data = test_data,
-          r2 = r2,
-          test_region = test_sets,
-          train_region = train_set,
-          data_set = data_subset,
-          dep_var = dep_var
+          data_subset = data_subset,
+          dep_var = dep_var,
+          model_name = model,
+          training = train,
+          testing = test,
+          tree_candidate_vars = candidate_vars,
+          variable = variables
         ),
-        diagnostic_plot_foo
-      ),
-      training_plot = pmap(
-        list(
-          data = training_data,
-          r2 = r2_training,
-          test_region = paste0(test_sets),
-          train_region = paste0(train_set, "- training plot"),
-          data_set = data_subset,
-          dep_var = dep_var
-        ),
-        diagnostic_plot_foo
+        sfm,
+        fitcontrol_number = 1,
+        fitcontrol_repeats = 1,
+        never_ind_vars = never_ind_vars,
+        tune_model = T,
+        cores = num_cores,
+        data_sources = data_sources,
+        tuned_pars = tuned_pars
       )
     )
 
+  print('ran models')
 
-  print('processed models')
+  save(file = paste0(run_dir, "skynet_models.Rdata"),
+       skynet_models)
 
+  print('saved models')
 
-  # run downscaling analysis ------------------------------------------------
+} else {
+  load(file = paste0(run_dir, "skynet_models.Rdata"))
+}
 
-  # skynet_models <- skynet_models %>%
-  #   mutate(
-  #     run_name = glue::glue(
-  #       "{.$dep_var}--{.$model}--{.$weight_surveys}--{.$test_sets}--{.$data_subset}"
-  #     )
-  #   )
-  #
-  #
-  # downscaled_performance <-
-  #   cross_df(list(
-  #     run_name = skynet_models$run_name,
-  #     resolution =  seq(25, 200, by = 50)
-  #   )) %>%
-  #   left_join(skynet_models %>% select(run_name, test_data), by = "run_name") %>%
-  #   left_join(
-  #     skynet_models %>% select(
-  #       run_name,
-  #       dep_var,
-  #       model,
-  #       weight_surveys,
-  #       test_sets,
-  #       data_subset
-  #     ),
-  #     by = "run_name"
-  #   ) %>%
-  #   arrange(run_name)
-  #
-  # downscaled_performance <-  downscaled_performance %>%
-  #   mutate(
-  #     new_grid  = map2(
-  #       test_data,
-  #       resolution,
-  #       safely(create_grid),
-  #       lon_name = rounded_lon,
-  #       lat_name = rounded_lat
-  #     )
-  #   )
-  #
-  # downscaled_performance <-  downscaled_performance %>%
-  #   mutate(
-  #     new_data = map2(
-  #       test_data,
-  #       new_grid,
-  #       snap_to_grid,
-  #       old_lon_name = rounded_lon,
-  #       old_lat_name = rounded_lat,
-  #       new_lon_name = lon,
-  #       new_lat_name = lat
-  #     )
-  #   )
-  #
-  # r2foo <- function(x) {
-  #   r2 <-
-  #     yardstick::rsq(x, truth = agg_mean_log_density, estimate = agg_pred)
-  #
-  # }
-  #
-  #
-  # downscaled_performance <- downscaled_performance %>%
-  #   mutate(oob_r2 = map_dbl(new_data, r2foo))
-  #
-  #
-  # downscaled_performance %>%
-  #   ggplot(aes(resolution, oob_r2, color = run_name)) +
-  #   geom_line(show.legend = F)
+# diagnose models ---------------------------------------------------------
 
 
-  # save outputs ------------------------------------------------------------
 
-  # save(
-  #   file = here::here("results", run_name, "processed_skynet_models.Rdata"),
-  #   skynet_models
-  # )
+skynet_models <- skynet_models %>%
+  mutate(index = 1:nrow(.)) %>%
+  mutate(error = map(fitted_model, "error")) %>%
+  mutate(no_error = map_lgl(error, is.null)) %>%
+  filter(no_error)
 
 
-  print('saved processed models')
+
+diagnostic_plot_foo <- function(data,
+                                r2,
+                                dep_var,
+                                test_region,
+                                train_region,
+                                data_set) {
+  data %>%
+    ggplot(aes_(as.name(dep_var), ~ pred)) +
+    geom_abline(aes(intercept = 0, slope = 1),
+                color = "red",
+                linetype = 2) +
+    geom_point(alpha = 0.75) +
+    labs(
+      title = paste0(
+        "tested on ",
+        test_region,
+        "- trained on ",
+        train_region,
+        "; R2 = ",
+        r2
+      ),
+      subtitle = paste0("data subset is: ", data_set)
+    )
+} # close diagnostic functions
+
+
+skynet_models <- skynet_models %>%
+  mutate(
+    test_data = map(fitted_model, c("result", "test_predictions")),
+    training_data = map(fitted_model, c("result", "training_predictions"))
+  ) %>%
+  select(-fitted_model) %>%
+  mutate(
+    var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
+    r2 = map2_dbl(test_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
+    rmse = map2_dbl(test_data, dep_var, ~ yardstick::rmse(.x, .y, "pred")),
+    ccc = map2_dbl(test_data, dep_var, ~ yardstick::ccc(.x, .y, "pred")),
+    r2_training = map2_dbl(training_data, dep_var, ~ yardstick::rsq(.x, .y, "pred")),
+    rmse_training = map2_dbl(training_data, dep_var, ~ yardstick::rmse(.x, .y, "pred")),
+    ccc_training = map2_dbl(training_data, dep_var, ~ yardstick::ccc(.x, .y, "pred"))
+  ) %>%
+  mutate(
+    test_plot = pmap(
+      list(
+        data = test_data,
+        r2 = r2,
+        test_region = test_sets,
+        train_region = train_set,
+        data_set = data_subset,
+        dep_var = dep_var
+      ),
+      diagnostic_plot_foo
+    ),
+    training_plot = pmap(
+      list(
+        data = training_data,
+        r2 = r2_training,
+        test_region = paste0(test_sets),
+        train_region = paste0(train_set, "- training plot"),
+        data_set = data_subset,
+        dep_var = dep_var
+      ),
+      diagnostic_plot_foo
+    )
+  )
+
+
+print('processed models')
+
+
