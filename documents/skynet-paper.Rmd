@@ -559,8 +559,11 @@ tidyposterior selection of best machine learning model
 kfold_preds <- readRDS(file = here::here("results",run_name, "kfold_preds.RDS"))
 
 kfold_preds_summary <-  kfold_preds %>% 
-  map_df(~., .id = "model") %>% 
-  select(Resample, model, obs, pred,) %>% 
+  select(-fitted_model) %>% 
+  unnest() %>% 
+  select(Resample, model, variables, obs, pred,) %>% 
+  mutate(model = glue::glue("{model}-{variables}")) %>% 
+  select(-variables) %>% 
   group_by(Resample, model) %>% 
   summarise(model_rmse = sqrt(mean((obs - pred)^2))) %>% 
   rename(id = Resample) %>% 
@@ -579,7 +582,8 @@ ggplot(rmse_post) +
     data = stacked_summary, 
     aes(x = model, y = model_rmse), 
     alpha = .5, col = "blue"
-  )
+  ) + 
+  coord_flip()
 
 
 best_ml_model <- rmse_mod$stan %>% 
@@ -592,12 +596,12 @@ best_ml_model <- rmse_mod$stan %>%
 best_ml_model <- best_ml_model$model[[1]]
 
 
-best_ml_model <- "ranger"
+best_ml_model <- "gbm"
 
 best_fits <- skynet_models %>% 
   filter(model == best_ml_model,
          dep_var == "density",
-         gfw_only == FALSE) %>% 
+         variables == "gfw_and_enviro") %>% 
   filter(data_subset != "skynet") %>% 
   mutate(data_subset = if_else(data_subset == "lag_1_skynet_data", "skynet", data_subset))
 ```
@@ -624,7 +628,7 @@ As would be expected, the performance of the models increases at coarser resolut
          dep_var == "density",
          data_subset == "skynet",
          test_set == "random",
-         gfw_only == FALSE) %>% 
+         variables == "gfw_and_enviro") %>% 
   mutate(training_data = map(training_data, ~.x %>% filter(surveyed_year == T)))
 
 
@@ -697,22 +701,21 @@ downscale_plot <- downscaled_performance %>%
 upscale_plot <- skynet_models %>% 
   ungroup() %>% 
   filter(test_sets == "random", data_subset %in% c("skynet","skynet_25km","skynet_100km"), dep_var == "density",!str_detect(data_subset,"delta"),
-         model %in% c("ranger","structural")) %>% 
+         model %in% c(best_ml_model,"structural"),
+         variables == "gfw_and_enviro") %>% 
   group_by(model) %>% 
-  mutate(meanr2 = mean(r2, na.rm = T)) %>% 
+  mutate(meanr2 = mean(r2_training, na.rm = T)) %>% 
   ungroup() %>% 
   mutate(model = fct_reorder(model, -meanr2)) %>% 
   mutate(data_subset = fct_relevel(data_subset,c("skynet","skynet_25km","skynet_100km"))) %>% 
-  ggplot(aes(data_subset,r2, fill = model)) + 
+  ggplot(aes(data_subset,r2_training, fill = model)) + 
   geom_col(position = "dodge") + 
   scale_x_discrete(labels = c("Raw", bquote("25"~km^2), bquote("100"~km^2))) +
   labs(title = "B)") + 
   theme(axis.title.y = element_blank(), axis.title.x = element_blank()) + 
     coord_flip()
 
-upscale_plot <-  upscale_plot + coord_flip() + 
-  scale_fill_viridis_d(option = "A")
-
+upscale_plot <-  upscale_plot + coord_flip() 
  downscale_plot + upscale_plot 
 
 ```
@@ -959,7 +962,7 @@ resolution_km2 <- 100
          dep_var == "density",
          data_subset == "skynet",
          test_set %in% c("random","alaska", "random_west_coast", "west_coast","year_greq_than_2014"),
-         gfw_only == FALSE)  %>% 
+         variables == "gfw_and_enviro")  %>% 
     mutate(test_data = map(test_data, ~.x %>% filter(surveyed_year == T)),
            training_data = map(training_data, ~.x %>% filter(surveyed_year == T)))
 
@@ -1183,6 +1186,32 @@ time_test_performance %>%
   geom_line() + 
   geom_point() +
   facet_wrap(~state, scales = "free_y")
+
+```
+
+
+## Value of Information
+
+```{r}
+
+skynet_models %>% 
+  filter(data_subset == "skynet", model == best_ml_model,
+         test_set == "random_west_coast", dep_var == "density") %>% 
+  select(variables, r2, r2_training) %>% 
+  gather(r2_source, r2_value, -variables) %>% 
+  ggplot(aes(variables, r2_value, fill = r2_source)) + 
+  geom_col(position = "dodge")
+
+skynet_models %>% 
+  filter(data_subset == "skynet", model == best_ml_model,
+         test_set == "random_west_coast", dep_var == "density") %>% 
+  select(variables, rmse, rmse_training) %>% 
+  gather(rmse_source, rmse_value, -variables) %>% 
+  ggplot(aes(variables, rmse_value, fill = rmse_source)) + 
+  geom_col(position = "dodge")
+
+
+
 
 ```
 

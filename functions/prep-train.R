@@ -41,6 +41,8 @@ prep_train <- function(data_subset,
                        cores = 4,
                        data_sources) {
 
+  tree_candidate_vars <- tree_candidate_vars[tree_candidate_vars != "random_var"]
+
   doMC::registerDoMC(cores = cores)
 
   fit_control <- trainControl(
@@ -120,8 +122,8 @@ prep_train <- function(data_subset,
     rf_grid <-
       expand.grid(
         mtry = c(2, default, ncol(independent_data) - 2),
-        splitrule = c("variance", "extratrees", "maxstat"),
-        min.node.size = c(5,10,20)
+        splitrule = c("variance", "extratrees"),
+        min.node.size = c(5,10,20,50)
       )
 
     set.seed(42)
@@ -130,7 +132,8 @@ prep_train <- function(data_subset,
       reg_data,
       method = "ranger",
       trControl = fit_control,
-      tuneGrid = rf_grid
+      tuneGrid = rf_grid,
+      importance = "impurity"
     )
 
   } # close ranger rf
@@ -149,7 +152,7 @@ prep_train <- function(data_subset,
       interaction.depth = c(2,5,8),
       n.trees = c(5000,10000),
       shrinkage = c(0.001),
-      n.minobsinnode = c(5,10,20)
+      n.minobsinnode = c(5,10)
     )
 
     set.seed(42)
@@ -217,7 +220,7 @@ prep_train <- function(data_subset,
 
 
   out <- list(tuned_pars = model$bestTune %>% mutate(model = model_name),
-              kfold_preds = model$pred)
+              kfold_preds = model$pred, model = model)
 
   return(out)
 

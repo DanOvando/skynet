@@ -52,11 +52,11 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 # set section options (what to run) ---------------------------------------------------------
 
-num_cores <- 1
+num_cores <- 3
 
 run_models <- TRUE # fit gfw models to fishdata
 
-tune_pars <- FALSE # pre-tune machine learning models
+tune_pars <- TRUE # pre-tune machine learning models
 
 models <-
   c("ranger",
@@ -64,7 +64,6 @@ models <-
     "mars",
     "gbm",
     "structural",
-    "bayesian_structural",
     "engine_power",
     "hours")
 
@@ -134,7 +133,7 @@ res <- 1 / lat_lon_res
 
 min_times_seen <- 9
 
-min_dist_from_shore <- 1000
+min_dist_from_shore <- 500
 
 min_speed <- 0.01
 
@@ -292,13 +291,13 @@ if (query_gfw == T) {
       [world-fishing-827:gfw_research.nn]
       WHERE
       (distance_from_shore > ({min_dist_from_shore})
-      OR (implied_speed > ({min_speed}) AND implied_speed < ({max_speed})))
+      AND (implied_speed > ({min_speed}) AND implied_speed < ({max_speed})))
       AND lat >= ({bbox[1]})
       AND lat <= ({bbox[2]})
       AND lon > ({bbox[3]})
       AND lon <= ({bbox[4]})
       AND _PARTITIONTIME BETWEEN TIMESTAMP('2010-01-01')
-      AND TIMESTAMP('2016-12-31')
+      AND TIMESTAMP('2017-12-31')
       AND seg_id IN (
       SELECT
       seg_id
@@ -1306,7 +1305,6 @@ skynet_models <- purrr::cross_df(list(
 
 # run models --------------------------------------------------------------
 
-
 if (run_models == T) {
   if (tune_pars == T) {
     prepped_train <- skynet_models %>%
@@ -1314,12 +1312,24 @@ if (run_models == T) {
         data_subset == "skynet",
         test_sets == "random",
         model %in% c("ranger", "gbm", "mars", "bagged_mars"),
-        variables == "gfw_and_enviro"
+        dep_var == "density"
       )  %>%
-      group_by(model) %>%
+      group_by(model, variables) %>%
       slice(1) %>%
       ungroup() %>%
-      mutate(candidate_vars = tree_candidate_vars) %>%
+      mutate(candidate_vars = ifelse(
+        str_detect(.$data_subset, "delta"),
+        list(delta_candidate_vars),
+        ifelse(
+          variables == "gfw_only",
+          list(gfw_only_tree_candidate_vars),
+          ifelse(
+            variables == "enviro_only",
+            list(enviro_only_tree_candidate_vars),
+            list(tree_candidate_vars)
+          )
+        )
+      )) %>%
       mutate(
         fitted_model = pmap(
           list(
@@ -1340,11 +1350,19 @@ if (run_models == T) {
         )
       )
 
-    tuned_pars <- map(prepped_train$fitted_model, "tuned_pars") %>%
-      set_names(prepped_train$model)
+    tuned_pars <- prepped_train %>%
+      ungroup() %>%
+      select(model, variables,fitted_model) %>%
+      mutate(tuned_pars = map(fitted_model, "tuned_pars"))
 
-    kfold_preds <- map(prepped_train$fitted_model, "kfold_preds") %>%
-      set_names(prepped_train$model)
+
+    kfold_preds <- prepped_train %>%
+      ungroup() %>%
+      select(model, variables,fitted_model) %>%
+      mutate(kfold_preds = map(fitted_model, "kfold_preds"))
+
+    # kfold_preds <- map(prepped_train$fitted_model, "kfold_preds") %>%
+    #   set_names(prepped_train$model)
 
     saveRDS(file = paste0(run_dir, "tuned_pars.RDS"),
             tuned_pars)
@@ -1362,7 +1380,6 @@ library(rstan)
 
   skynet_models <- skynet_models %>%
     ungroup() %>%
-    filter(model == "bayesian_structural") %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
@@ -1384,7 +1401,8 @@ library(rstan)
           model_name = model,
           training = train,
           testing = test,
-          tree_candidate_vars = candidate_vars
+          tree_candidate_vars = candidate_vars,
+          variable = variables
         ),
         sfm,
         fitcontrol_number = 1,

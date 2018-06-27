@@ -40,7 +40,8 @@ fit_skynet <- function(data_subset,
                        fitcontrol_repeats = 1,
                        tune_model = T,
                        cores = 4,
-                       data_sources) {
+                       data_sources,
+                       variable) {
   # model_formula <-
   #   paste(dep_var, '~', ind_vars) %>% as.formula() # construct model forumla
   #
@@ -124,7 +125,13 @@ fit_skynet <- function(data_subset,
     #fit random forest
 
     tuned_pars <- tuned_pars %>%
-      pluck(model_name)
+      filter(model == model_name,
+             variables == variable) %>% {
+      map_df(.$tuned_pars, ~ .x)
+      }
+
+    # tuned_pars <- tuned_pars %>%
+    #   pluck(model_name)
 
     prepped_recipe <-
       recipes::prep(train_recipe, training, retain = T)
@@ -215,7 +222,10 @@ fit_skynet <- function(data_subset,
     # on.exit(detach('package:plyr'))
 
     tuned_pars <- tuned_pars %>%
-      pluck(model_name)
+      filter(model == model_name,
+             variables == variable) %>% {
+               map_df(.$tuned_pars, ~ .x)
+             }
 
     prepped_recipe <-
       recipes::prep(train_recipe, training, retain = T)
@@ -315,7 +325,10 @@ fit_skynet <- function(data_subset,
   if (model_name == "bagged_mars") {
 
     tuned_pars <- tuned_pars %>%
-      pluck(model_name)
+      filter(model == model_name,
+             variables == variable) %>% {
+               map_df(.$tuned_pars, ~ .x)
+             }
 
     fit_control <- trainControl(
       method = "none",
@@ -355,8 +368,12 @@ fit_skynet <- function(data_subset,
   }
 
   if (model_name == "mars") {
+
     tuned_pars <- tuned_pars %>%
-      pluck(model_name)
+      filter(model == model_name,
+             variables == variable) %>% {
+               map_df(.$tuned_pars, ~ .x)
+             }
 
     prepped_recipe <-
       recipes::prep(train_recipe, training, retain = T)
@@ -541,7 +558,7 @@ fit_skynet <- function(data_subset,
       log_d = as.numeric(training_data$log_density),
       effort = as.numeric(training_data$total_hours),
       price = as.numeric(training_data$aggregate_price),
-      mp = 0,
+      mp = 100,
       n = nrow(training_data))
 
 
@@ -562,16 +579,6 @@ fit_skynet <- function(data_subset,
       MakeADFun(data = struct_data,
                 parameters = struct_params,
                 DLL = "fit_structural_skynet")
-
-
-# mle_fit <-
-#   nlminb(
-#     model$par,
-#     objective = model$fn,
-#     gradient = model$gr,
-#     control = list("trace" = 100)
-#   )
-
 
 
     mle_fit <- TMBhelper::Optimize(model,
@@ -601,10 +608,10 @@ fit_skynet <- function(data_subset,
       as_data_frame() %>%
       mutate(pred = mle_fit_report$d_hat)
 
+
     out_testing <- testing %>%
       as_data_frame() %>%
       mutate(pred = testing_prediction)
-
 
   } #close structural
 
