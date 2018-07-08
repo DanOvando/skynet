@@ -19,3 +19,5 @@ VAST_output/
 *.gif
 *.mp4
 *.RDS
+*.DBF
+*.xml

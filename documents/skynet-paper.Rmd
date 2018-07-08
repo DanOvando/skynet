@@ -42,7 +42,7 @@ walk(functions, ~ here::here("functions", .x) %>% source()) # load local functio
 
 # run options -------------------------------------------------------------
 
-run_name <- 'v4.2'
+run_name <- 'd1.0'
 
 run_dir <- here::here('results',run_name)
 
@@ -166,6 +166,15 @@ skynet_models <- skynet_models %>%
     mutate(unfished_only = str_detect(data_subset, "unfished"))
 
 
+  skynet_models %>%
+    filter(data_subset == "skynet",
+           test_sets == "random",
+           model == "ranger") %>% 
+  ggplot(aes(variables, r2_training, color = dep_var)) +
+  geom_point() +
+  coord_flip()
+
+  
 ```
 
 ```{r filter}
@@ -593,16 +602,17 @@ best_ml_model <- rmse_mod$stan %>%
   arrange((estimate))
   
 
-best_ml_model <- best_ml_model$model[[1]]
+best_ml_model <- str_extract(best_ml_model$model[[1]]
+,".*(?=-)")
 
 
-best_ml_model <- "gbm"
+
+# best_ml_model <- "gbm"
 
 best_fits <- skynet_models %>% 
   filter(model == best_ml_model,
          dep_var == "density",
          variables == "gfw_and_enviro") %>% 
-  filter(data_subset != "skynet") %>% 
   mutate(data_subset = if_else(data_subset == "lag_1_skynet_data", "skynet", data_subset))
 ```
 

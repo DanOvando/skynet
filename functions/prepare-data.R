@@ -60,9 +60,9 @@ prepare_data <-
       mutate(
         cumulative_hours = cumsum(total_engine_hours),
         cumulative_numbers = cumsum(total_hours),
-        total_engine_hours_lag1 = lag(total_engine_hours, 1),
-        total_engine_hours_lag2 = lag(total_engine_hours, 2),
-        total_engine_hours_lag3 = lag(total_engine_hours, 3),
+        # total_engine_hours_lag1 = lag(total_engine_hours, 1),
+        # total_engine_hours_lag2 = lag(total_engine_hours, 2),
+        # total_engine_hours_lag3 = lag(total_engine_hours, 3),
         port_engine_hours_interaction = dist_from_port * total_engine_hours,
         port_hours_interaction = dist_from_port * total_hours,
         port_numbers_interaction = dist_from_port * num_vessels,
@@ -173,27 +173,34 @@ prepare_data <-
 
     total_fish_data <- total_fish_data %>%
       left_join(survey_years, by = c("survey", "year")) %>%
-      mutate(surveyed_year = if_else(is.na(surveyed_year), FALSE, surveyed_year))
+      mutate(surveyed_year = if_else(is.na(surveyed_year), FALSE, surveyed_year)) %>%
+      filter(surveyed_year == T)
 
     total_fish_data <- total_fish_data %>%
+      group_by(survey, knot) %>%
+      mutate(temp_lag_density = lag(density, 1)) %>%
       group_by(survey, knot, year) %>%
+      rename(temp_density = density,
+             temp_biomass = biomass) %>%
       summarise(
-        density = sum(density),
+        density = sum(temp_density),
+        lag_density = sum(temp_lag_density),
+        log_lag_density = log(sum(temp_lag_density)),
         mean_knot_area = mean(area),
-        biomass = sum(biomass),
-        economic_density = sum(density * (mean_exvessel_price * .001)),
-        economic_biomass = sum(biomass * (mean_exvessel_price * .001)),
+        biomass = sum(temp_biomass),
+        economic_density = sum(temp_density * (mean_exvessel_price * .001)),
+        lag_economic_density = sum(temp_lag_density * (mean_exvessel_price * .001)),
+        log_lag_economic_density = log(sum(temp_lag_density * (mean_exvessel_price * .001))),
+        economic_biomass = sum(temp_biomass * (mean_exvessel_price * .001)),
         surveyed_year = unique(surveyed_year)
       ) %>%
       ungroup() %>%
       nest(-survey, .key = fish_data)
 
-
     skynet_data <- skynet_data %>%
       nest(-survey, .key = gfw_data) %>%
       left_join(total_fish_data, by = "survey") %>%
       left_join(knots, by = "survey")
-
 
     if (clip_gfw == T) {
       skynet_data <- skynet_data %>%

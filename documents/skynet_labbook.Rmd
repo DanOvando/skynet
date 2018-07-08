@@ -2984,6 +2984,355 @@ Looking at the ranger results, it seems like adding the GFW data to the mix is a
 but not with GBM it seems... at least there adding in GFW provides some marginal benefits, but seriously marginal. So if that holds up, suggests that something is actually breaking in ranger, which is a bit scary from a model selection point of view. How do you justify which model to use around "because it doesn't makes sense for it to get worse"?
 
 
+# comparing effort
 
 
+```{r}
+
+ps <-
+  foreign::read.dbf(here::here("data","purse_seine_4","PURSE_SEINE.DBF")) %>%
+  set_names(tolower(colnames(.))) %>%
+  as_data_frame() %>%
+  rename(year = yy, month = mm) %>% 
+  mutate(
+    north_south = str_sub(lat5, start = -1, end = -1),
+    east_west = str_sub(lon5, start = -1, end = -1),
+    ns_index = ifelse(north_south == 'N', 1,-1),
+    ew_index = ifelse(east_west == 'E', 1,-1),
+    lat = ns_index * as.numeric(gsub('.{1}$', '', lat5)),
+    lon = ew_index * as.numeric(gsub('.{1}$', '', lon5))
+  ) 
+
+
+ps_days <- ps %>% 
+  group_by(year) %>% 
+  summarise(total_days = sum(days)) %>% 
+  mutate(source = "wcpfc")
+
+ps_bbox <- c(min(ps$lat), max(ps$lat), min(ps$lon), max(ps$lon))
+
+gfw_project <- "ucsb-gfw"
+
+gfw_dataset <- "skynet"
+
+fishing_connection <- DBI::dbConnect(
+  bigrquery::dbi_driver(),
+  project = gfw_project,
+  dataset = gfw_dataset,
+  allowLargeResults = T
+)
+
+lat_lon_res <-
+  0.5 # round data to intervels of 0.25 degrees lat lon, as in 56.25
+
+res <- 1 / lat_lon_res
+
+
+gfw_query <- glue::glue_sql(
+  "SELECT
+  *
+  FROM (
+  SELECT
+  YEAR(timestamp) year,
+  MONTH(timestamp) month,
+  DAY(timestamp) day,
+  mmsi,
+  FLOOR(lat*{res})/{res} rounded_lat,
+  FLOOR(lon*{res})/{res} rounded_lon,
+  SUM(IF( nnet_score == 1, hours, 0)) AS total_hours,
+  FROM
+  [world-fishing-827:gfw_research.nn]
+  WHERE
+  (distance_from_shore > ({min_dist_from_shore})
+  AND (implied_speed > ({min_speed}) AND implied_speed < ({max_speed})))
+  AND lat >= ({bbox[1]})
+  AND lat <= ({bbox[2]})
+  AND lon > ({bbox[3]})
+  AND lon <= ({bbox[4]})
+  AND _PARTITIONTIME BETWEEN TIMESTAMP('2014-01-01')
+  AND TIMESTAMP('2017-12-31')
+  AND seg_id IN (
+  SELECT
+  seg_id
+  FROM
+  [world-fishing-827:gfw_research.good_segments])
+  GROUP BY
+  mmsi,
+  year,
+  month,
+  day,
+  rounded_lat,
+  rounded_lon
+  ) a
+  LEFT JOIN (
+  SELECT
+  year,
+  mmsi,
+  shipname,
+  inferred_engine_power,
+  inferred_length,
+  inferred_tonnage,
+  known_engine_power,
+  known_length,
+  known_tonnage,
+  best_label,
+  known_label,
+  inferred_label_allyears,
+  inferred_sublabel_allyears,
+  good_shiptype_msg,
+  on_fishing_list_nn
+  FROM
+  [world-fishing-827:gfw_research.vessel_info]
+  WHERE
+  (on_fishing_list_nn IS TRUE OR on_fishing_list IS TRUE)
+  AND spoofing_factor < 1.01
+  AND offsetting IS NULL) b
+  ON
+  a.mmsi = b.mmsi
+  AND a.year = b.year",
+  bbox = ps_bbox,
+  min_dist_from_shore = 500,
+  min_speed = 0.01,
+  max_speed = 20,
+  .con = fishing_connection,
+  allowLargeResults = TRUE
+  )
+
+gfw_wcpfc <-
+  bigrquery::query_exec(gfw_query, project = "ucsb-gfw", max_pages = Inf, destination_table = "skynet.wcpfc") 
+
+
+gfw_project <- "ucsb-gfw"
+
+gfw_dataset <- "skynet"
+
+fishing_connection <- DBI::dbConnect(
+  bigrquery::dbi_driver(),
+  project = gfw_project,
+  dataset = gfw_dataset,
+  allowLargeResults = T
+)
+
+
+dbListTables(fishing_connection)
+
+gfw_wcpfc <- tbl(fishing_connection, "wcpfc")
+
+
+test <- gfw_wcpfc %>% 
+  filter(a_total_hours > 0 & is.na(a_total_hours) == FALSE) %>% 
+  select(-b_mmsi, -b_year) %>%
+  select(a_mmsi, a_year,a_month,a_day, b_inferred_label_allyears,
+         b_known_label) %>% 
+  group_by(a_mmsi, a_year, a_month, a_day) %>% 
+  summarise(
+    inferred_label_allyears = unique(b_inferred_label_allyears)) %>% 
+  collect()
+
+
+woop <- test %>% 
+  filter(is.na(inferred_label_allyears) == F) %>% 
+  mutate(date = lubridate::ymd(glue::glue("{a_year}-{a_month}-{a_day}"))) %>%
+  filter(inferred_label_allyears == "purse_seines"
+         ) %>% 
+  group_by(a_year, a_mmsi) %>% 
+  summarise(mmsi_days = n_distinct(date)) %>% 
+  group_by(a_year) %>% 
+  summarise(total_days = sum(mmsi_days)) %>% 
+  mutate(source = "gfw")
+
+
+ps_days %>% 
+  filter(year > 2000) %>% 
+  bind_rows(woop %>% rename(year = a_year)) %>% 
+  ggplot(aes(year, total_days, color = source)) + 
+  geom_point()
+
+
+
+
+```
+
+
+# drivers of fishing location
+
+Idea: using each vessel as input, put together a decision tree model that estimates whether or not to fish at a given location. 
+
+Could also do a logit model to that effect, and a RUM model if you wanted? Explore the easy options first. Or just a GLM model predicting effort conditional on choosing to fish somewhere. 
+
+# comparing to FishData
+
+Rather than doing a bunch of diagnostics on VASt, let's compare your estimates for a few species and see if the maps and trends look more or less the same! smart. 
+
+```{r}
+
+compare <- vast_fish %>% 
+  filter(survey == "wcgbts",
+         spp == "Squalus_suckleyi")
+
+compare$vasterized_data[[1]]$spatial_densities %>% 
+  group_by(year) %>% 
+  summarise(total_biomass = sum(biomass)) %>% 
+  ggplot(aes(year, total_biomass)) + 
+  geom_line() +
+  geom_point()
+
+```
+
+temporal trends match fishdata perfectly. 
+
+What about maps?
+
+```{r}
+
+load(file = here::here("data","global_map.Rdata"))
+
+
+a = compare$vasterized_data[[1]]$spatial_densities %>% 
+  filter(year == 2010)
+
+
+pacific_map <- global_map %>%
+  as("Spatial") %>%
+  maptools::nowrapRecenter() %>%
+  sf::st_as_sf()
+  
+map_theme <-   theme_get() +theme(legend.key.height = unit(1.5,"cm"),
+                     axis.text.x = element_blank(),
+                     axis.text.y = element_blank(),
+                     plot.margin = unit(c(0,0,0,0),"cm"),
+                     legend.box.margin =  ggplot2::margin(0,0,0,0))
+
+spatial_performance_plot <- a %>% 
+      mutate(recenter_lon = ifelse(approx_long < 0, 180 + (180 - abs(approx_long)), approx_long)) %>% 
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, approx_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+
+bbox <- sf::st_bbox(spatial_performance_plot)
+
+alaska_bbox <- sf::st_bbox(spatial_performance_plot)
+
+
+
+alaska_spatial_residual_plot <- ggplot() +
+  geom_sf(data = spatial_performance_plot,
+  aes(color = log(density)), size = 1) +
+  geom_sf(data = pacific_map, shape = 21) +
+  coord_sf(
+  xlim = c(alaska_bbox['xmin'], alaska_bbox['xmax']),
+  ylim = c(alaska_bbox['ymin'] * .95, alaska_bbox['ymax'] * 1.1),
+  expand = F
+  ) +
+  scale_color_gradient2(
+  low = "green",
+  high = "red",
+  mid = "yellow",
+  name = "Log Density",
+  guide = guide_colorbar(frame.colour = "black")
+  ) +
+  labs(caption = "Alaska") +
+  map_theme +
+  theme(legend.key.height = unit(1, "cm"))
+
+
+alaska_spatial_residual_plot
+
+
+
+```
+
+OK, can thoroughly confirm that your results match up perfectly with fishdata. So there may be a vast problem, but it's not related to how you're choosing to run it. 
+
+# predicting effort
+
+```{r}
+
+a = candidate_data$skynet_data[[1]] 
+
+data <- a %>% 
+  select(any_fishing, dist_from_port,dist_from_shore,
+         no_take_mpa,restricted_use_mpa, density, mean_analysed_sst,
+        mean_chlorophyll ) 
+
+fish_recipe <- recipe(any_fishing ~ . , data = data) %>%
+  step_center(all_predictors(), -no_take_mpa,-restricted_use_mpa) %>%
+  step_scale(all_predictors(), -no_take_mpa,-restricted_use_mpa)   
+prepped_data <- prep(fish_recipe, data = data, retain = T)
+
+prepped_data <- prepped_data %>% juice()
+
+test <- stan_glm(any_fishing ~ dist_from_port + dist_from_shore +no_take_mpa + restricted_use_mpa + density +  mean_analysed_sst +  mean_chlorophyll, data = a, family = binomial)
+
+summary(test)
+
+
+```
+
+```{r}
+a = candidate_data$skynet_data[[1]] 
+
+data <- a %>% 
+    filter(survey == "wcgbts", year == 2015, any_fishing == T) %>% 
+  select(total_hours, dist_from_port,dist_from_shore,
+         no_take_mpa,restricted_use_mpa, density, mean_analysed_sst,
+        mean_chlorophyll ) 
+
+fish_recipe <- recipe(total_hours ~ . , data = data) %>%
+  step_center(all_predictors(),-no_take_mpa, -restricted_use_mpa) %>%
+  step_scale(all_predictors(),-no_take_mpa, -restricted_use_mpa) %>% 
+  step_log(all_outcomes())
+
+prepped_data <- prep(fish_recipe, data = data, retain = T)
+
+prepped_data <- prepped_data %>% juice()
+
+test <- stan_glm(total_hours ~ ., data = prepped_data, family = gaussian)
+
+summary(test)
+
+
+```
+
+
+woah, there's a LOT of fishing going on in no take mpas...
+
+that doesn't seem right at all. 
+
+
+```{r}
+
+a %>% 
+  filter(survey == "wcgbts", year == 2015) %>% 
+  group_by(no_take_mpa) %>% 
+  summarise(prop_fishing = mean(any_fishing),
+            total_hours = sum(total_hours))
+
+a %>% 
+  filter(year == max())
+  group_by(any_fishing) %>% 
+  summarise(total_hours = sum(total_hours))
+
+
+```
+
+```{r}
+
+b <- a  %>% 
+  filter(year == 2013)
+
+qmplot(x = rounded_lon, y = rounded_lat, color = no_take_mpa, data = b %>% filter(rounded_lon > -175)) + 
+  theme_minimal() + 
+  facet_wrap(~year)
+
+```
+
+
+
+
+
+
+can confirm that dep var doesn't affect tuning parameters. 
 

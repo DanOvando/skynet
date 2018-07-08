@@ -626,9 +626,8 @@ fit_skynet <- function(data_subset,
       select(dep_var, structural_vars) %>%
       filter(total_hours > 0)
 
-
     model <-
-      lm(as.formula(glue::glue("log_{dep_var} ~ log(total_hours)")), data = independent_data %>% filter(total_hours > 0))
+      lm(as.formula(glue::glue("log({dep_var}) ~ log(total_hours)")), data = independent_data %>% filter(total_hours > 0))
 
     se_estimate <- sd(model$residuals)
 
@@ -657,7 +656,7 @@ fit_skynet <- function(data_subset,
 
     model <-
       lm(as.formula(glue::glue(
-        "log_{dep_var} ~ log(total_engine_power)"
+        "log({dep_var}) ~ log(total_engine_power)"
       )), data = independent_data)
 
     se_estimate <- sd(model$residuals)

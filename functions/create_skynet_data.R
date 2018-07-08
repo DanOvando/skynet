@@ -29,14 +29,30 @@ create_skynet_data <-
     gfw_data$distance <- nearest_knot$nn.dists
 
     # merge fishdata ----------------------------------------------------------
-
     skynet_data <- gfw_data %>%
-      left_join(fish_data %>% select(density, biomass, economic_density, year, surveyed_year, knot, mean_knot_area), by = c('year', 'knot')) %>%
-      mutate(log_density = log(density),
-             log_biomass = log(biomass),
-             log_economic_density = log(economic_density))# merge in fishdata
+      left_join(
+        fish_data %>% select(
+          density,
+          lag_density,
+          biomass,
+          lag_economic_density,
+          economic_density,
+          year,
+          surveyed_year,
+          knot,
+          mean_knot_area
+        ),
+        by = c('year', 'knot')
+      ) %>%
+      mutate(
+        log_lag_density = log(lag_density),
+        log_lag_economic_density = log(lag_economic_density),
+        log_density = log(density),
+        log_biomass = log(biomass),
+        log_economic_density = log(economic_density)
+      )# merge in fishdata
 
-    # merge additional sata
+    # merge additional data
 
     covars <-
       list(...) #capture all additional data passed to the function

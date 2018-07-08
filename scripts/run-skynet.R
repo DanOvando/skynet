@@ -25,6 +25,7 @@ library(gbm)
 library(recipes)
 library(sf)
 library(rstan)
+library(furrr)
 library(tidyverse)
 
 
@@ -36,10 +37,10 @@ functions <- list.files(here::here("functions"))
 
 walk(functions, ~ here::here("functions", .x) %>% source()) # load local functions
 
-run_name <- "v4.2"
+run_name <- "d1.0"
 
 run_description <-
-  "more or less final set of dissertation level results"
+  "dissertation default results"
 
 run_dir <- file.path("results", run_name, "")
 
@@ -96,7 +97,7 @@ round_environmentals <- T
 
 raw_fish <- F
 
-dep_vars <- c("density", "economic_density")
+dep_vars <- c("density","lag_density", "lag_economic_density","lag_economic_density")
 
 gfw_vars_only <- T
 
@@ -127,7 +128,7 @@ gfw_dataset <- "skynet"
 max_percent_missing <- 0.2
 
 lat_lon_res <-
-  0.25 # round data to intervels of 0.25 degrees lat lon, as in 56.25
+  0.1 # round data to intervels of 0.25 degrees lat lon, as in 56.25
 
 res <- 1 / lat_lon_res
 
@@ -875,13 +876,6 @@ subset_fish_data <- fish_data %>%
 set.seed(42)
 
 if (vasterize == T) {
-  # a = subset_fish_data$data[[1]] %>%
-  #   group_by(year, spp) %>%
-  #   summarise(ps = mean(catch_kg > 0)) %>%
-  #   ggplot(aes(spp, ps)) +
-  #   geom_col() +
-  #   facet_wrap(~year) +
-  #   coord_flip()
 
   vast_fish <- subset_fish_data %>%
     mutate(
@@ -925,7 +919,6 @@ if (vasterize == T) {
   load(file = here::here("data", "vast_fish.Rdata"))
 }
 
-# save(file = here::here("results", run_name, "gfw_data.Rdata"), gfw_data)
 # build database ----------------------------------------------------------
 
 # pre process fishdata
@@ -991,7 +984,6 @@ save(file = here::here("results", run_name, "skynet_data.Rdata"),
 # plot data -----------------------------------------------------
 
 # plot distributions of data by year and survey
-
 
 if (plot_data == T) {
   plot_vars <- candidate_data$skynet_data[[1]] %>%
@@ -1117,6 +1109,10 @@ never_ind_vars <-
     "mean_knot_area",
     "log_density",
     "density",
+    "lag_density",
+    "log_lag_density",
+    "lag_economic_density",
+    "log_lag_economic_density",
     "cs_log_density",
     "cs_density",
     "survey",
@@ -1135,7 +1131,8 @@ never_ind_vars <-
     "index",
     "surveyed_year",
     "relative_density",
-    "log_economic_density"
+    "log_economic_density",
+    "economic_density"
   )
 
 
@@ -1149,7 +1146,8 @@ tree_candidate_vars <- skynet_names[!skynet_names %in% c(dep_vars,
                                                          never_ind_vars) &
                                       str_detect(skynet_names, "_interaction")
                                     == F &
-                                      str_detect(skynet_names, "lag") == F]
+                                      str_detect(skynet_names, "lag") == F &
+                                      !str_detect(skynet_names, "any_fishing")]
 
 gfw_only_tree_candidate_vars <-
   c(tree_candidate_vars[tree_candidate_vars %in% gfw_vars], "random_var")
@@ -1222,31 +1220,20 @@ delta_skynet <- delta_skynet %>%
 # merge candidate data sources
 data_sources <- tibble(
   skynet = list(basic_skynet_data %>%
-                  select(-contains("lag")) %>%
                   na.omit()),
   unfished_skynet = list(unfished_skynet_data %>%
-                           select(-contains("lag")) %>%
                            na.omit()),
-
   all_months_skynet_data  = list(
     basic_all_months_skynet_data %>%
-      select(-contains("lag")) %>%
-      na.omit()
-  ),
-  lag_1_skynet_data = list(
-    basic_skynet_data %>%
-      select(-total_engine_hours_lag2, -total_engine_hours_lag3) %>%
-      na.omit()
+    na.omit()
   ),
   delta_skynet = list(delta_skynet),
   skynet_25km = list(
     rescale_data(basic_skynet_data, resolution = 25) %>%
-      select(-contains("lag")) %>%
       na.omit()
   ),
   skynet_100km = list(
     rescale_data(basic_skynet_data, resolution = 100) %>%
-      select(-contains("lag")) %>%
       na.omit()
   )
 ) %>%
@@ -1297,16 +1284,16 @@ skynet_models <- purrr::cross_df(list(
     model %in% c('ranger', 'gbm') &
       data_subset == 'uncentered_skynet'
   )) %>%
-  filter(!(model == 'structural' &
-             dep_var != dep_vars[1]),!(weight_surveys == T &
-                                         !(test_sets %in% c(
-                                           "random", "historic"
-                                         ))))
+  filter(!(weight_surveys == T &
+             !(test_sets %in% c(
+               "random", "historic"
+             ))))
 
 # run models --------------------------------------------------------------
 
 if (run_models == T) {
   if (tune_pars == T) {
+
     prepped_train <- skynet_models %>%
       filter(
         data_subset == "skynet",
@@ -1372,13 +1359,18 @@ if (run_models == T) {
 
   } else {
     tuned_pars <- readRDS(file = paste0(run_dir, "tuned_pars.RDS"))
-
   }
 
-library(rstan)
   sfm <- safely(fit_skynet)
 
+  # future::plan(future::multiprocess, workers = num_cores)
+
+
   skynet_models <- skynet_models %>%
+    # filter(data_subset == "skynet",
+    #        test_sets == "random") %>%
+    # group_by(model, dep_var) %>%
+    # slice(1) %>%
     ungroup() %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
@@ -1504,6 +1496,11 @@ skynet_models <- skynet_models %>%
     )
   )
 
+
+skynet_models %>%
+  ggplot(aes(model, r2_training, color = dep_var)) +
+  geom_point() +
+  coord_flip()
 
 print('processed models')
 
