@@ -937,6 +937,15 @@ knots <- vast_fish %>%
 
 # prepare candidate data streams
 
+gfw_data <- gfw_data %>%
+  unnest() %>%
+  filter(inferred_sublabel_allyears == "trawlers") %>%
+  nest(-survey)
+
+vast_fish <- vast_fish %>%
+  filter(spp %in% c("Gadus_chalcogrammus", "Gadus_macrocephalus","Actiniaria"
+                    ))
+
 candidate_data <-
   tribble(
     ~ fished_only,
@@ -1240,20 +1249,27 @@ data_sources <- tibble(
   gather(data_subset, data)
 
 
+# test_sets = c(
+#   "random",
+#   "alaska",
+#   "west_coast",
+#   "historic",
+#   "random_alaska",
+#   "random_west_coast",
+#   "spatial_alaska",
+#   "spatial_west_coast",
+#   "historic_alaska",
+#   "historic_west_coast",
+#   "california",
+#   "wa-or"
+# )
+
 test_train_data <- purrr::cross_df(list(
   test_sets = c(
     "random",
-    "alaska",
-    "west_coast",
-    "historic",
     "random_alaska",
-    "random_west_coast",
     "spatial_alaska",
-    "spatial_west_coast",
-    "historic_alaska",
-    "historic_west_coast",
-    "california",
-    "wa-or"
+    "historic_alaska"
   ),
   data_subset = data_sources$data_subset
 )) %>%
@@ -1294,11 +1310,13 @@ skynet_models <- purrr::cross_df(list(
 if (run_models == T) {
   if (tune_pars == T) {
 
+    # model %in% c("ranger", "gbm", "mars", "bagged_mars"),
+
     prepped_train <- skynet_models %>%
       filter(
         data_subset == "skynet",
         test_sets == "random",
-        model %in% c("ranger", "gbm", "mars", "bagged_mars"),
+        model %in% c("ranger", "gbm"),
         dep_var == "density"
       )  %>%
       group_by(model, variables) %>%
@@ -1328,8 +1346,8 @@ if (run_models == T) {
             tree_candidate_vars = candidate_vars
           ),
           prep_train,
-          fitcontrol_number = 10,
-          fitcontrol_repeats = 2,
+          fitcontrol_number = 5,
+          fitcontrol_repeats = 1,
           never_ind_vars = never_ind_vars,
           tune_model = T,
           cores = num_cores,

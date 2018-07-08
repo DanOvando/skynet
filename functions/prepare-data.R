@@ -3,6 +3,7 @@ prepare_data <-
            fished_only,
            unfished_only,
            survey_months_only,
+           groundfish_only,
            raw_fish,
            no_wcghl = T,
            species_prices,
@@ -72,7 +73,6 @@ prepare_data <-
         large_vessels_interaction = num_vessels * mean_vessel_length
       ) %>%
       ungroup()
-
 
     if (fished_only == T) {
       # include only fished species
@@ -200,7 +200,8 @@ prepare_data <-
     skynet_data <- skynet_data %>%
       nest(-survey, .key = gfw_data) %>%
       left_join(total_fish_data, by = "survey") %>%
-      left_join(knots, by = "survey")
+      left_join(knots, by = "survey") %>%
+      filter(!map_lgl(.$fish_data, is.null))
 
     if (clip_gfw == T) {
       skynet_data <- skynet_data %>%
