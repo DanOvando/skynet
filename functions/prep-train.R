@@ -123,7 +123,7 @@ prep_train <- function(data_subset,
       expand.grid(
         mtry = c(2, default, ncol(independent_data) - 2),
         splitrule = c("variance", "extratrees"),
-        min.node.size = c(5,10,20,50)
+        min.node.size = c(5,10,20)
       )
 
     set.seed(42)
@@ -148,8 +148,10 @@ prep_train <- function(data_subset,
     #   n.minobsinnode = c(10,20)
     # )
 
+    # interaction.depth = c(2,5,8),
+
     gbm_grid <-  expand.grid(
-      interaction.depth = c(2,5,8),
+      interaction.depth = c(2,5),
       n.trees = c(5000,10000),
       shrinkage = c(0.001),
       n.minobsinnode = c(5,10)

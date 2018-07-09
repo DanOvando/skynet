@@ -128,7 +128,7 @@ gfw_dataset <- "skynet"
 max_percent_missing <- 0.2
 
 lat_lon_res <-
-  0.1 # round data to intervels of 0.25 degrees lat lon, as in 56.25
+  0.25 # round data to intervels of 0.25 degrees lat lon, as in 56.25
 
 res <- 1 / lat_lon_res
 
@@ -1297,11 +1297,11 @@ if (run_models == T) {
     prepped_train <- skynet_models %>%
       filter(
         data_subset == "skynet",
-        test_sets == "random",
+        test_sets %in% c("california"),
         model %in% c("ranger", "gbm", "mars", "bagged_mars"),
         dep_var == "density"
       )  %>%
-      group_by(model, variables) %>%
+      group_by(model, variables,test_sets) %>%
       slice(1) %>%
       ungroup() %>%
       mutate(candidate_vars = ifelse(
@@ -1339,7 +1339,7 @@ if (run_models == T) {
 
     tuned_pars <- prepped_train %>%
       ungroup() %>%
-      select(model, variables,fitted_model) %>%
+      select(model, test_sets, variables,fitted_model) %>%
       mutate(tuned_pars = map(fitted_model, "tuned_pars"))
 
 
