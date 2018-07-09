@@ -220,6 +220,7 @@ fit_skynet <- function(data_subset,
 
   if (model_name == 'gbm') {
     # on.exit(detach('package:plyr'))
+    #
 
     tuned_pars <- tuned_pars %>%
       filter(model == model_name,
@@ -589,7 +590,6 @@ fit_skynet <- function(data_subset,
                                    fn = model$fn,
                                    gr = model$gr,
                                    newtonsteps = 10)
-
 
     mle_fit_report <- model$report()
 

@@ -87,11 +87,11 @@ vast_fish <- vast_fish[!map_lgl(vast_fish$vasterized_data, is.null), ]
 
 
 
-skynet_models <- skynet_models %>%
+a <- skynet_models %>%
   mutate(index = 1:nrow(.)) %>%
   mutate(error = map(fitted_model, "error")) %>%
   mutate(no_error = map_lgl(error, is.null)) %>%
-  filter(no_error)
+  filter(!no_error)
 
 
 

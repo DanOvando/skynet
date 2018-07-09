@@ -60,7 +60,7 @@ rescale_data <- function(data, resolution = 25, lon_name = rounded_lon, lat_name
       select(-lat, -lon, -recenter_lon, -new_knot)
 
     long_data <- data %>%
-      gather(variable, value, -survey, -year, -rounded_lat, -rounded_lon,-knot)
+      gather(variable, value, -survey, -surveyed_year,-year, -rounded_lat, -rounded_lon,-knot)
 
 
     variables <- unique(long_data$variable)
@@ -75,7 +75,7 @@ rescale_data <- function(data, resolution = 25, lon_name = rounded_lon, lat_name
     vars_to_sum <- variables[!variables %in% vars_to_average]
 
     rescaled_data <- long_data %>%
-      group_by(survey, year, rounded_lat, rounded_lon, knot, variable) %>%
+      group_by(survey, year,surveyed_year, rounded_lat, rounded_lon, knot, variable) %>%
       summarise(rescaled_value = rescale_foo(value, variable, vars_to_average, vars_to_sum))
 
     rescaled_data <- rescaled_data %>%

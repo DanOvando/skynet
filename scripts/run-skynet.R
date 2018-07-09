@@ -1181,10 +1181,12 @@ unfished_skynet_data <- candidate_data %>%
          }
 
 delta_skynet <- basic_skynet_data %>%
-  select(-contains("lag")) %>%
   gather(
     variable,
-    value,-survey,
+    value,
+    -index,
+    -survey,
+    -surveyed_year,
     -year,
     -rounded_lat,
     -rounded_lon,
@@ -1291,6 +1293,8 @@ skynet_models <- purrr::cross_df(list(
 
 # run models --------------------------------------------------------------
 
+
+
 if (run_models == T) {
   if (tune_pars == T) {
 
@@ -1367,6 +1371,8 @@ if (run_models == T) {
 
 
   skynet_models <- skynet_models %>%
+    mutate(index = 1:nrow(.)) %>%
+    filter(data_subset %in% "delta_skynet", dep_var == "lag_density") %>%
     # filter(data_subset == "skynet",
     #        test_sets == "random") %>%
     # group_by(model, dep_var) %>%

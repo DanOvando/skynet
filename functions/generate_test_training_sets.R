@@ -29,6 +29,7 @@ generate_test_training <-
     }
 
     if (test_set == "spatial_west_coast") {
+
       dat <- dat %>%
         mutate(
           lat_dex = plyr::round_any(rounded_lat, 0.25) %% 1 == 0,
@@ -52,6 +53,7 @@ generate_test_training <-
     }
 
     if (test_set == 'random') {
+
       splits <-
         rsample::initial_split(dat, prop = prop, strata = "survey")
 
@@ -184,6 +186,7 @@ generate_test_training <-
     }
 
     if (test_set == 'alaska') {
+
       train <- dat %>%
         filter(survey %in% c('wcgbts', 'wcghl'), surveyed_year == TRUE)
 
