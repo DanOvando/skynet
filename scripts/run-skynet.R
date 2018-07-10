@@ -57,7 +57,7 @@ num_cores <- 3
 
 run_models <- TRUE # fit gfw models to fishdata
 
-tune_pars <- TRUE # pre-tune machine learning models
+tune_pars <- FALSE # pre-tune machine learning models
 
 models <-
   c("ranger",
@@ -1294,7 +1294,6 @@ skynet_models <- purrr::cross_df(list(
 # run models --------------------------------------------------------------
 
 
-
 if (run_models == T) {
   if (tune_pars == T) {
 
@@ -1371,13 +1370,10 @@ if (run_models == T) {
 
 
   skynet_models <- skynet_models %>%
-    mutate(index = 1:nrow(.)) %>%
-    filter(data_subset %in% "delta_skynet", dep_var == "lag_density") %>%
-    # filter(data_subset == "skynet",
-    #        test_sets == "random") %>%
-    # group_by(model, dep_var) %>%
-    # slice(1) %>%
+    # mutate(index = 1:nrow(.)) %>%
+    # filter(data_subset %in% "delta_skynet", dep_var == "lag_density") %>%
     ungroup() %>%
+    # sample(10) %>%
     mutate(candidate_vars = ifelse(
       str_detect(.$data_subset, "delta"),
       list(delta_candidate_vars),
