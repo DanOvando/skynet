@@ -57,7 +57,7 @@ num_cores <- 3
 
 run_models <- TRUE # fit gfw models to fishdata
 
-tune_pars <- FALSE # pre-tune machine learning models
+tune_pars <- TRUE # pre-tune machine learning models
 
 models <-
   c("ranger",
@@ -72,7 +72,7 @@ models <-
 
 vasterize <- F # run vast or load saved object
 
-impute_missing <- F
+impute_missing <- T
 
 plot_data <- F # plot covariates and maps
 
@@ -128,7 +128,7 @@ gfw_dataset <- "skynet"
 max_percent_missing <- 0.2
 
 lat_lon_res <-
-  0.25 # round data to intervels of 0.25 degrees lat lon, as in 56.25
+  0.1 # round data to intervels of 0.25 degrees lat lon, as in 56.25
 
 res <- 1 / lat_lon_res
 
@@ -427,7 +427,7 @@ if (query_environmentals == T) {
         desired_data = "chl-a",
         date_interval = 1,
         space_interval = 1,
-        runit = 0.25
+        runit = lat_lon_res
       )
     )
 
@@ -469,7 +469,7 @@ if (query_environmentals == T) {
         desired_data = "sst",
         date_interval = 14,
         space_interval = 25,
-        runit = 0.25
+        runit = lat_lon_res
       )
     )
 
@@ -507,7 +507,7 @@ if (query_environmentals == T) {
         date_interval = 24 * 14,
         # 1 hour interval
         space_interval = 0.5,
-        runit = 0.25
+        runit = lat_lon_res
       )
     )
 
@@ -543,7 +543,7 @@ if (query_environmentals == T) {
         date_interval = 1,
         # 1 hour interval
         space_interval = 1,
-        runit = 0.25
+        runit = lat_lon_res
       )
     )
 
@@ -594,7 +594,7 @@ if (query_environmentals == T) {
         date_interval = 1,
         # 1 hour interval
         space_interval = 1,
-        runit = 0.25
+        runit = lat_lon_res
       )
     )
 
@@ -958,7 +958,9 @@ candidate_data <-
       vast_fish = vast_fish,
       species_prices = species_prices,
       vars_to_drop = vars_to_drop,
-      survey_years = survey_years
+      survey_years = survey_years,
+      gfw_data = gfw_data,
+      impute_missing = impute_missing
     )
   ) %>%
   mutate(
@@ -1255,6 +1257,7 @@ test_train_data <- purrr::cross_df(list(
     "historic",
     "random_alaska",
     "random_west_coast",
+    "spatial",
     "spatial_alaska",
     "spatial_west_coast",
     "historic_alaska",
@@ -1304,8 +1307,8 @@ if (run_models == T) {
 
     prepped_train <- skynet_models %>%
       filter(
-        data_subset == "skynet",
-        test_sets %in% c("california"),
+        data_subset %in% c("skynet"),
+        test_sets %in% c("spatial","random"),
         model %in% c("ranger", "gbm", "mars", "bagged_mars"),
         dep_var == "density"
       )  %>%
@@ -1336,7 +1339,7 @@ if (run_models == T) {
             tree_candidate_vars = candidate_vars
           ),
           prep_train,
-          fitcontrol_number = 10,
+          fitcontrol_number = 5,
           fitcontrol_repeats = 2,
           never_ind_vars = never_ind_vars,
           tune_model = T,
@@ -1375,7 +1378,7 @@ if (run_models == T) {
 
 
   skynet_models <- skynet_models %>%
-    filter(data_subset %in% "trawl_only") %>%
+    # filter(data_subset %in% "trawl_only") %>%
     ungroup() %>%
     # sample(10) %>%
     mutate(candidate_vars = ifelse(

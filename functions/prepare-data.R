@@ -1,5 +1,6 @@
 prepare_data <-
   function(vast_fish,
+           gfw_data,
            fished_only,
            unfished_only,
            survey_months_only,
@@ -8,7 +9,8 @@ prepare_data <-
            no_wcghl = T,
            species_prices,
            vars_to_drop = vars_to_drop,
-           survey_years) {
+           survey_years,
+           impute_missing = TRUE) {
 
     if (trawl_only == T){
 
@@ -53,6 +55,7 @@ prepare_data <-
         total_hours = sum(te),
         total_engine_power = sum(inferred_engine_power),
         total_engine_hours = sum(te * inferred_engine_power),
+        proportion_fishing = mean(te > 0),
         positive_hours = sum(te > 0),
         median_hours = median(te),
         median_engine_power = median(inferred_engine_power),
@@ -274,7 +277,8 @@ prepare_data <-
           str_detect(colnames(skynet_data), 'lag') == F &
             map_lgl(skynet_data, is.numeric)
           == T &
-            !colnames(skynet_data) %in% c("year", "rounded_lat", "rounded_lon") &
+            !colnames(skynet_data) %in% c("year", "rounded_lat", "rounded_lon",
+                                          "mean_thgt", "wind_angle", "wind_speed") &
             missing_some
         )
 

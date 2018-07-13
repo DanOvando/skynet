@@ -74,10 +74,11 @@ query_erddap <- function(desired_data = 'sst',
       paste0('[(', min_lon, '):', space_interval, ':(', max_lon, ')]')
 
     query <- paste0(year_query, lat_query, lon_query)
+
     dat <-
       jsonlite::fromJSON(
         paste0(
-          'http://upwell.pfeg.noaa.gov/erddap/griddap/erdMH1chlamday.json?chlorophyll',
+          'https://coastwatch.pfeg.noaa.gov/erddap/griddap/erdVH3chlamday.json?chla',
           query
         )
 
@@ -231,9 +232,17 @@ query_erddap <- function(desired_data = 'sst',
     mutate(
       year = lubridate::year(time),
       month = lubridate::month(time),
-      rlat = round(latitude * (1 / runit)) / (1 / runit),
-      rlon = round(longitude * (1 / runit)) / (1 / runit)
+      rlat = plyr::round_any(latitude, runit),
+      rlon = plyr::round_any(longitude, runit)
     )
+  #
+  # tidy_dat <- tidy_dat %>%
+  #   mutate(
+  #     year = lubridate::year(time),
+  #     month = lubridate::month(time),
+  #     rlat = round(latitude * (1 / runit)) / (1 / runit),
+  #     rlon = round(longitude * (1 / runit)) / (1 / runit)
+  #   )
 
   var <- last(dat$table$columnNames)
 

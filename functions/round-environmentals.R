@@ -6,11 +6,16 @@ round_enviro <- function(tidy_dat,
 
   agg_foo <- function(tidy_dat, desired_data, runit){
 
-tidy_dat <- tidy_dat %>%
-  mutate(
-    rlat = round(rlat * (1 / runit)) / (1 / runit),
-    rlon = round(rlon * (1 / runit)) / (1 / runit)
-  )
+
+    tidy_dat <- tidy_dat %>%
+      mutate(rlat = plyr::round_any(rlat, runit),
+             rlon = plyr::round_any(rlon, runit))
+
+# tidy_dat <- tidy_dat %>%
+#   mutate(
+#     rlat = round(rlat * (1 / runit)) / (1 / runit),
+#     rlon = round(rlon * (1 / runit)) / (1 / runit)
+#   )
 
 # var <- last(dat$table$columnNames)
 

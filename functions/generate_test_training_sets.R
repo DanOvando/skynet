@@ -2,24 +2,22 @@ generate_test_training <-
   function(dat,
            test_set,
            prop = 0.75,
-           cut_year = 2014) {
+           cut_year = 2014,
+           keep_every = 25) {
 
      if (test_set == "spatial_alaska") {
-      dat <- dat %>%
-        mutate(
-          lat_dex = plyr::round_any(rounded_lat, 0.25) %% 1 == 0,
-          lon_dex = plyr::round_any(rounded_lon, 0.25) %% 1 == 0
-        )
 
-      train_dex <-
-        dat$index[dat$lat_dex == TRUE &
-                    dat$lon_dex == TRUE &
-                    (!dat$survey %in% c('wcgbts', 'wcghl')) &
-                    dat$surveyed_year == TRUE]
+       temp_dat <- dat %>%
+         filter(!(dat$survey %in% c('wcgbts', 'wcghl'))) %>%
+         arrange(rounded_lon, rounded_lat) %>%
+         mutate(marker = 1:nrow(.)) %>%
+         mutate(keepers = (marker %% keep_every) == 0) %>%
+         filter(keepers)
 
-      test_dex <-
-        dat$index[!(dat$index %in% train_dex) &
-                    !(dat$survey %in% c('wcgbts', 'wcghl'))]
+       train_dex <- temp_dat$index
+
+       test_dex <- dat$index[!(dat$index %in% train_dex) & (!dat$survey %in% c('wcgbts', 'wcghl')) &
+                               dat$surveyed_year == TRUE]
 
       out <-
         data_frame(train = list(train_dex),
@@ -30,26 +28,50 @@ generate_test_training <-
 
     if (test_set == "spatial_west_coast") {
 
-      dat <- dat %>%
-        mutate(
-          lat_dex = plyr::round_any(rounded_lat, 0.25) %% 1 == 0,
-          lon_dex = plyr::round_any(rounded_lon, 0.25) %% 1 == 0
-        )
-      train_dex <-
-        dat$index[dat$lat_dex == TRUE &
-                    dat$lon_dex == TRUE &
-                    (dat$survey %in% c('wcgbts', 'wcghl'))  &
-                    dat$surveyed_year == TRUE]
 
-      test_dex <-
-        dat$index[!(dat$index %in% train_dex) &
-                    (dat$survey %in% c('wcgbts', 'wcghl'))]
+      temp_dat <- dat %>%
+        filter((dat$survey %in% c('wcgbts', 'wcghl'))) %>%
+        arrange(rounded_lon, rounded_lat) %>%
+        mutate(marker = 1:nrow(.)) %>%
+        mutate(keepers = (marker %% keep_every) == 0) %>%
+        filter(keepers)
+
+      train_dex <- temp_dat$index
+
+      test_dex <- dat$index[!(dat$index %in% train_dex) & (dat$survey %in% c('wcgbts', 'wcghl')) &
+                              dat$surveyed_year == TRUE]
 
       out <-
         data_frame(train = list(train_dex),
                    test = list(test_dex)) %>%
         mutate(train_set = 'spatial_west_coast') %>%
         mutate(test_set = 'spatial_west_coast')
+    }
+
+    if (test_set == "spatial") {
+
+      temp_dat <- dat %>%
+        arrange(rounded_lat, rounded_lon) %>%
+        mutate(marker = 1:nrow(.)) %>%
+        mutate(keepers = (marker %% keep_every) == 0) %>%
+        filter(keepers)
+# browser()
+# coordinates(temp_dat) = ~rounded_lon + rounded_lat
+#
+#       test <- variogram(density ~ rounded_lon + rounded_lat, temp_dat)
+#
+#
+#       plot(test)
+      train_dex <- temp_dat$index
+
+      test_dex <- dat$index[!(dat$index %in% train_dex) &
+                              dat$surveyed_year == TRUE]
+
+      out <-
+        data_frame(train = list(train_dex),
+                   test = list(test_dex)) %>%
+        mutate(train_set = 'spatial') %>%
+        mutate(test_set = 'spatial')
     }
 
     if (test_set == 'random') {

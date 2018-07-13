@@ -3893,4 +3893,60 @@ So what then. If all results hold that simply not a useful predictor... what doe
 - e-catch data to pair with GFW style information?
 
 
+# what's up with the knots?
+
+```{r}
+
+basic_skynet_data %>% 
+  group_by(survey) %>% 
+  summarise(nk = n_distinct(knot))
+
+knots_per_survey
+
+wtf <- vast_fish %>% 
+  filter(survey == "ebsbts") %>% 
+  slice(1)
+
+head(wtf)
+
+wtf$vasterized_data[[1]]$spatial_densities -> a
+
+basic_skynet_data %>% 
+  filter(survey == "ebsbts") %>% 
+  ggplot(aes(rounded_lon, rounded_lat, label = knot)) + 
+  geom_text(show.legend = F, size = 2) + 
+  coord_cartesian(ylim = c(45,50), xlim = c(-126, -123))
+
+
+knots %>% 
+  filter(survey == "wcgbts") %>% 
+  unnest() %>% 
+  ggplot(aes(approx_long, approx_lat, label = knot)) + 
+  geom_text(show.legend = F, size = 2) + 
+  coord_cartesian(ylim = c(45,50), xlim = c(-126, -123))
+
+basic_skynet_data %>% 
+  group_by(survey) %>% 
+  select(survey, rounded_lat, rounded_lon) %>% 
+  unique() %>% 
+  group_by(survey) %>% 
+  count()
+
+basic_skynet_data %>% 
+  group_by(survey) %>% 
+  count()
+
+a = gfw_data %>% 
+  unnest() %>% 
+  filter(survey == "wcgbts") %>% 
+  group_by(survey, rounded_lat, rounded_lon) %>% 
+  summarise(te = sum(total_hours))
+  
+  select(survey, rounded_lat, rounded_lon) %>% 
+  unique() %>% 
+  group_by(survey) %>% 
+  count()
+```
+
+
 
