@@ -939,22 +939,11 @@ knots <- vast_fish %>%
 
 candidate_data <-
   tribble(
-    ~ fished_only,
-    ~ unfished_only,
-    ~ survey_months_only,
-    ~ raw_fish,
-    T,
-    F,
-    F,
-    F,
-    T,
-    F,
-    T,
-    F,
-    F,
-    T,
-    T,
-    F
+    ~ fished_only,~ unfished_only,~ survey_months_only,~ raw_fish,~ trawl_only,
+    T,F,F,F,F,
+    T,F,T,F,F,
+    F,T,T,F,F,
+    T,F,T,F,T
   ) %>%
   mutate(
     data = pmap(
@@ -962,7 +951,8 @@ candidate_data <-
         fished_only = fished_only,
         unfished_only = unfished_only,
         survey_months_only = survey_months_only,
-        raw_fish = raw_fish
+        raw_fish = raw_fish,
+        trawl_only = trawl_only
       ),
       prepare_data,
       vast_fish = vast_fish,
@@ -1160,23 +1150,36 @@ lm_candidate_vars <- skynet_names[!skynet_names %in% c(dep_vars,
                                                        never_ind_vars)]
 
 basic_skynet_data <- candidate_data %>%
-  filter(fished_only == T,
+  filter(fished_only == TRUE,
          unfished_only == FALSE,
-         survey_months_only == T) %>% {
+         survey_months_only == TRUE,
+         trawl_only == FALSE) %>% {
            .$skynet_data[[1]]
          }
+
+
+trawl_only <- candidate_data %>%
+  filter(fished_only == TRUE,
+         unfished_only == FALSE,
+         survey_months_only == TRUE,
+         trawl_only == TRUE) %>% {
+           .$skynet_data[[1]]
+         }
+
 
 basic_all_months_skynet_data <- candidate_data %>%
   filter(fished_only == T,
          unfished_only == FALSE,
-         survey_months_only == F) %>% {
+         survey_months_only == F,
+         trawl_only == FALSE) %>% {
            .$skynet_data[[1]]
          }
 
 unfished_skynet_data <- candidate_data %>%
   filter(fished_only == FALSE,
          unfished_only == TRUE,
-         survey_months_only == TRUE) %>% {
+         survey_months_only == TRUE,
+         trawl_only == FALSE) %>% {
            .$skynet_data[[1]]
          }
 
@@ -1237,7 +1240,9 @@ data_sources <- tibble(
   skynet_100km = list(
     rescale_data(basic_skynet_data, resolution = 100) %>%
       na.omit()
-  )
+  ),
+  trawl_only = list(trawl_only %>%
+                      na.omit())
 ) %>%
   gather(data_subset, data)
 
@@ -1370,8 +1375,7 @@ if (run_models == T) {
 
 
   skynet_models <- skynet_models %>%
-    # mutate(index = 1:nrow(.)) %>%
-    # filter(data_subset %in% "delta_skynet", dep_var == "lag_density") %>%
+    filter(data_subset %in% "trawl_only") %>%
     ungroup() %>%
     # sample(10) %>%
     mutate(candidate_vars = ifelse(

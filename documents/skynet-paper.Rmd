@@ -220,12 +220,28 @@ The model can predict absolute and relative spatial abundance with some accuracy
 
 <!-- Is the paper about global status? At this point, no it's not. It's about linking behavior to abundance, so lead with that. Once it works, then you can start thinking about global applications.  -->
 
-Fishing is a massive activity, spanning the globe and ranging from small-scale subsistence practices up to massive industrial operations. Across these scales though, the fisheries share a common underlying incentive structure: fishermen desire some utility derived from capturing fish (e.g. some combination of food, income, and cultural activity) and tune their fishing activities in order to try and maximize that utility, subject to the constraints of the world. As time goes on, these fishing actions affect fish stocks, causing the behavior of the fishermen to be updated. In short then, fishing and fish are part of a dynamic system, in which the behavior of each affects the behavior the other. 
+Fishing is a massive activity, spanning the globe and ranging from small-scale subsistence practices up to massive industrial operations. Across these scales though, the fisheries share a common underlying incentive structure: fishermen desire some utility derived from capturing fish (e.g. some combination of food, income, and cultural activity) and tune their fishing activities in order to try and maximize that utility, subject to the constraints of the world. As time goes on, these fishing actions affect fish stocks, for example through reductions in abundance or mean length, causing the behavior of the fishermen to be updated. In short then, fishing and fish are part of a dynamic system, in which the behavior of each affects the behavior the other. 
+
+
+These dynamic links between fishing fleets and fish populations are a critical part of fisheries management. @Gordon1954 predicted that in the absence of property rights or access restrictions, these bio-economic dynamics would result in the fishery reaching an open-access equilibrium at which net profits in the fishery are driven to zero, often resulting biological overfishing of the stock. This thinking was central to the bleak predictions of the "tragedy of the commons" [@Hardon1968]. While @Ostrom1990 demonstrated that the evolution of natrual resource systems such as fisheries are driven by a more complete and complex set of drivers than pure profitability, the critical link between the dynamics of fish populations and fishing communities remains in the form of social-ecological systems [@Ostrom2009]. 
+
+Understanding the dynamics of these social-ecological systems is critical to effective fisheries management. Bio-economic theory and empirical evidence helps us design and implement policies that best achieve societal objectives, by allowing us to model what the potential impacts of policy choices may be. This process has underpinned the recent expansion in the use of rights-based fisheries management [e.g. @Costello2008; @Costello2017; @Deacon2007; @Grainger2016; @Kaffine2008; @Wilen2012; @Cancino2007; @Grafton1996; @Squires2016], and increasingly is used in the management-strategy-evaluation [MSE, @Butterworh2007; @Punt2016a] process. @Nielsen2017 provides a thorough review of models currently utilizing bio-economic modeling to model and guide the policy implementation process. 
+
+These works demonstrate a rich history of thinking about how fishing fleets respond to incentives and population dynamics. However, the vast majority of the literature in this field is focused on predicting fishing effort as a function of fish populations; very little research has reversed this question and asked, what do the dynamics of fishing effort suggest about the state of fish populations? If fisheries are indeed a coupled bio-economic system, then just as we believe the dynamics of fishing effort should be predictable from fish abundance, fish abundance should be predictible from fishing effort [@Sugihara2012]. The reason for this omission is likely driven by the realities of fisheries management. Bio-economic modeling is almost exclusively used in the MSE phase of fisheries management, rarely in the stock assessment phase itself. This is partly due simply to the history of stock assessment as a biological science [@Smith1994], and partly due to data realities. Historically, most fisheries with say accurate and complete records of fishing effort would also have records of more directly useful (from the perspective of traditional stock assessment) indicies such as catches and catch-per-unit-effort. 
+
+
+
+
+<!-- Many fisheries management policies are based around first achieving a biological objective (e.g. not overfishing the stock), and policies are then evaluated in terms of alternative strategies for achieving that objective.  -->
+
+Where we have enough data to comprehensively track effort, we often also have catch data, and the catch data, combined with catch-per-unit-effort (CPUE) data can provide a clearer signal of the state of a fish stock (with the catch data providing information on the scale of abundance and CPUE data on trends) [citation]. 
+
+
+manifold... 
 
 Based on this then, it is reasonable to believe that given sufficient data, it should be possible to infer something about the state of the fish population as a function of the behavior of fishing fleets. This idea is in many ways analogous to earlier research linking the behavior of sea birds and the location of their prey [citation]. While this idea makes intuitive sense, the actual form of link between fishing effort and fish abundance is far from clear. High levels of fishing effort could reflect high abundance of fish in the earlier years of a fishing ground, or could reflect an overfished but easily accessible region. We hypothesize that all else equal fishermen would like to maximize their utility from fishing, but the varied and complex nature of these individual utility functions, combined with the shifting and uncertain nature of the natural world, make the structure of the link between fishing behavior and fish abundance a complicated question. 
 
-It is therefore far from obvious what simply observing the effort of fishing tells us about the abundance of fish. This uncertainty is in part why raw effort trends are rarely integrated  into the models we use to estimate the status of fish stocks [citations]. Where we have enough data to comprehensively track effort, we often also have catch data, and the catch data, combined with catch-per-unit-effort (CPUE) data can provide a clearer signal of the state of a fish stock (with the catch data providing information on the scale of abundance and CPUE data on trends) [citation]. 
-
+It is therefore far from obvious what simply observing the effort of fishing tells us about the abundance of fish. This uncertainty is in part why raw effort trends are rarely integrated  into the models we use to estimate the status of fish stocks [citations]. 
 However, recent advances in technology provide reason to rethink what we could learn about fish abundance from fishing behavior. Global Fishing Watch [GFW, presented in @Kroodsma2018], provides a new and vast picture of fishing effort around the planet in near real time. GFW provides high resolution data detailing factors such as the number and horsepower of fishing vessels active in a given region and the distance that fishermen are moving from port to fish. We pair these data with fishery-independent research surveys compiled by the [FishData](https://github.com/James-Thorson/FishData) package in R [@RCoreTeam2018] to ask, can the GFW derived effort data be used to predict the abundance of fish?
 
 <!-- Answering this question can help us address several critical gaps in our knowledge of marine ecosystems. First, the majority of fisheries in the world lack data for formal stock assessment, limiting our ability to understand and manage these critical resources. To address this gap, numerous publications have attempted to use catch data supplied by the United Nations Food and Agricultural Organization [@cite] to provide some understanding of the status of the world's fisheries, as this bas been the only global database available [@Costello2012; @Costello2016;@Rosenberg2017]. GFW's effort data provides a new opportunity for understanding these fisheries.  Second, while we are increasingly interested in ecosystem-based fisheries management, many of our data-collection practices are still centered around single-species management [@cite]. GFW's effort data provides a potential link to status of all the fish stocks targeted by the fishing gears and fleets covered by GFW. Third, climate change is predicted to change the distribution and range of fish stocks around the planet [@cite]. GFW's data could allow us to track shifts in fishing effort and fish abundance potentially influenced by climate change [@citation]  -->
@@ -539,7 +555,25 @@ We include this mostly to explore the basic evidence for a hypothesis that more 
 
 # Results 
 
-## Which Model is Best?
+## How does effort relate to abundance
+
+show plots of effort vs abundance at various spatial scales 
+
+## GFW catch per unit effort
+
+Show CPUE calculations 
+
+## Predicting Effort
+
+Bio-economic theory suggests that effort and abundance are a coupled system: Density should affect the amount and location of effort, and the amount and location of effort should affect density. 
+
+Regression and structural approach to predicting density as a latent variable 
+
+## Predicting Density
+
+All GFW only to this point. 
+
+### Which Model is Best?
 
 plot showing training r2 of machine learning and non approachs
 
@@ -747,7 +781,7 @@ We explore the ability of our models to make accurate out-of-sample (OOS) predic
 All predicted results represent the models prediction of the net abundance of all fished species encountered by the fishery independent surveys. In other words, there is no way at the moment to isolate individual species from the indices. 
 
 
-## Which data transformation is best?
+### Which data transformation is best?
 
 Holding everything constant except for the test-training split. 
 
@@ -776,7 +810,7 @@ best_fits <- best_fits %>%
 
 Given similar median/mean performance but more variables range of other data splits, sticking with skynet as your default. 
 
-## Broad Model Performance
+### Broad Model Performance
 
 How well do each of the models perform across the range of scenarios evaluated? We can judge this by examining the OOS R^2^ between the observed densities and the OOS predictions for those densities. As expected, the machine learning models perform vastly better on average than either the structural or linear models. However, even the machine learning models struggled in OOS performance in some instances, for example when the data were trained on the west coast and used to predict densities in Alaska (Fig.\@ref(fig:perf-plot))
 
@@ -805,7 +839,7 @@ best_fits %>%
 Demonstrates that what you train on matters a lot... one question, what happens if you predict alaska with the model trained on the random west coast?
 
 
-## Predicting Spatial Abudance
+### Predicting Spatial Abudance
 
 
 How well can the model predict abundance at locations that are not included in the model training but are in the same geographic region as the training data? To test this, we split the data into randomized training (75% of the data) and testing (25%) splits. We train each model (using v-fold cross validation of the training data where needed for tuning) on the training data, and then use the trained model to predicted the testing data. Since the data are spatial and temporal, we expect that the model should perform fairly well at this task; densities at one location and time are correlated with densities at a nearby location and time, and therefore a model fit on a subset of data should do a good job of predicting omitted neighbors, but this is a useful starting point for model assessment. 
@@ -884,9 +918,9 @@ map_theme +
   ) / resid_hist  + plot_layout(nrow = 2, ncol = 1, widths = c(2,1),heights = c(2.5,1)) & theme(plot.margin = unit(rep(0.01,4), "points"))
 ```
 
-## Filling in the Gaps
+### Filling in the Gaps
 
-## Predicting out-of-region Spatial Abundance
+### Predicting out-of-region Spatial Abundance
 
 In Fig.\@ref(fig:spatial-plot), we are essentially using the model to fill simulated gaps in the data through our test and training splits.  However, this is not the ultimate goal of a project such as this: Ideally, we want to be able to use data such as those provided by GFW to estimate spatio-temporal abundance trends in regions completely outside of areas in which we do have fishery independent research surveys. While we do not (yet, looking at you west Africa trawl surveys....) have fishery independent data from vastly different regions to train on, we can at least split up the data that we do have. 
 
@@ -1102,7 +1136,7 @@ trained_plot + tested_plot &
 ```
 
 
-## Predicting Trends
+### Predicting Trends
 
 Understanding the spatial distribution of fish is important since it can help us understand expansion, contraction, and shifts in fish ranges, whether caused by fishing pressure of environmental factors such as climate change. 
 
@@ -1200,7 +1234,10 @@ time_test_performance %>%
 ```
 
 
+
 ## Value of Information
+
+Now, comapre GFW only to GFW + environment
 
 ```{r}
 

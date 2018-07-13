@@ -3600,8 +3600,44 @@ Nothing doing there. OK, so interesting idea, mention it in discussion, but not 
 Getting catch data...
 
 ```{r}
+library(taxize)
+
+
+comma_foo <- function(x){
+  
+  if (str_detect(x, ", ")){
+    
+    split <- str_split(x, ", ", simplify = T)
+    
+    x <- glue::glue("{split[2]} {split[1]}")
+    
+  } 
+  
+  return(x)
+}
+
+nmfs_landings <- read_csv("~/Box Sync/Databases/NMFS/nmfs_pacific_state_landings.csv") %>% 
+  mutate(common_name = map_chr(common_name, comma_foo))
+
+
+nmfs_sci_names <- data_frame(common_name = unique(nmfs_landings$common_name)) %>% 
+  mutate(scientific_name = map(common_name,~taxize::comm2sci(.x, db = "worms")))
+
+
+nmfs_sci_names <- nmfs_sci_names %>% 
+  mutate(scientific_name = map_chr(scientific_name, ~ifelse(length(.x[[1]])>0,.x[[1]], NA)))
+
+nmfs_landings <- nmfs_landings %>% 
+  left_join(nmfs_sci_names, by = "common_name")
+
+```
+
+
+```{r}
 
   load(here::here("data","DBdata.RData")) # as of copy, RAM v4.40 with model fits
+
+fao_capture <- read_csv("~/Box Sync/Databases/FAO/fao_2018_capture_statistics.csv")
 
 
 included_species <- vast_fish %>% 
@@ -3628,6 +3664,16 @@ ram_catch <- tcbest.data %>%
   left_join(assessment, by = "stockid")
 
 
+nmfs_catch <- nmfs_landings %>% 
+  filter(state == "Alaska", scientific_name %in% included_species) %>% 
+  group_by(year) %>% 
+  summarise(total_nmfs_catch = sum(metric_tons, na.rm = T))
+
+fao_catch <- fao_capture %>% 
+  filter(fao_area_code == 67, scientific_name %in% included_species) %>% 
+  group_by(year) %>% 
+  summarise(total_fao_catch = sum(capture, na.rm = T))
+
 ebsbts_catch <- ram_catch %>% 
   filter(region == "US Alaska") %>% 
   filter(!str_detect(stocklong.x, "Gulf of Alaska")) %>% 
@@ -3644,10 +3690,6 @@ ebsbts_biomass<- ram_biomass %>%
   summarise(total_biomass = sum(biomass, na.rm = T))
 
 
-ebsbts_catch %>% 
-  ggplot(aes(year, total_catch)) + 
-  geom_line() + 
-  geom_point()
 
 ebsbts_effort <- gfw_data %>% 
   filter(survey %in% c("ebsbts")) %>% 
@@ -3665,15 +3707,32 @@ ebsbts_effort <- gfw_data %>%
   summarise(total_effort = sum(total_hours, na.rm = T))
 
 
+
+survey_biomass <- candidate_data %>% 
+  filter(fished_only == TRUE, unfished_only == FALSE,
+         survey_months_only == TRUE) %>%  
+select(total_fish_data) %>% 
+  unnest() %>% 
+  filter(survey %in% "ebsbts") %>% 
+  unnest() %>% 
+  group_by(year) %>% 
+  summarise(total_survey_biomass = sum(biomass, na.rm = T))
+
+
 ebsbts_cpue <- ebsbts_catch %>% 
   left_join(ebsbts_effort, by = "year") %>% 
   left_join(ebsbts_biomass, by = "year") %>% 
-  mutate(cpue = total_catch / total_effort)  
+  left_join(survey_biomass, by = "year") %>% 
+  left_join(fao_catch, by = "year") %>% 
+  left_join(nmfs_catch, by = "year") %>% 
+  mutate(ram_cpue = total_catch / total_effort,
+         fao_cpue = total_fao_catch / total_effort,
+         nmfs_cpue = total_nmfs_catch / total_effort)
 
 ebsbts_cpue %>% 
-  filter(!is.na(cpue)) %>% 
+  filter(!is.na(ram_cpue)) %>% 
   gather(metric, value, -year) %>% 
-  filter(value > 0) %>% 
+  filter(value > 0, str_detect(metric, "cpue|biomass")) %>% 
   group_by(metric) %>% 
   mutate(scaled_value = value / max(value, na.rm = T)) %>% 
     ungroup() %>% 
@@ -3683,6 +3742,126 @@ ebsbts_cpue %>%
 
 ```
 
+```{r}
+
+  load(here::here("data","DBdata.RData")) # as of copy, RAM v4.40 with model fits
+
+
+included_species <- vast_fish %>% 
+  filter(survey %in% c("wcgbts"))
+
+included_species <- unique(included_species$spp) %>% 
+  str_replace_all("_"," ")
+
+
+  
+nmfs_catch <- nmfs_landings %>% 
+  filter(state %in% c("California","Washington", "Oregon"), scientific_name %in% included_species) %>% 
+  group_by(year) %>% 
+  summarise(total_nmfs_catch = sum(metric_tons, na.rm = T))
+
+
+fao_catch <- fao_capture %>% 
+  filter(fao_area_code == 77, scientific_name %in% included_species) %>% 
+  group_by(year) %>% 
+  summarise(total_fao_catch = sum(capture, na.rm = T))
+
+
+ram_biomass <- tb.data %>% 
+    mutate(year = as.numeric(rownames(.))) %>%
+    select(year, everything()) %>%
+    gather(stockid, biomass, -year) %>% 
+  left_join(stock, by = "stockid") %>% 
+    left_join(assessment, by = "stockid")
+
+
+ram_catch <- tcbest.data %>% 
+    mutate(year = as.numeric(rownames(.))) %>%
+    select(year, everything()) %>%
+    gather(stockid, catch, -year) %>% 
+  left_join(stock, by = "stockid") %>% 
+  left_join(assessment, by = "stockid")
+
+
+ebsbts_catch <- ram_catch %>% 
+  filter(region == "US West Coast") %>% 
+  filter(!str_detect(stocklong.x, "Gulf of Alaska")) %>% 
+  filter(scientificname %in% included_species) %>% 
+  group_by(year) %>% 
+  summarise(total_catch = sum(catch, na.rm = T),
+            n_catch_stocks = sum(is.na(catch) == F & catch > 0))
+
+
+ebsbts_biomass<- ram_biomass %>% 
+  filter(region == "US West Coast") %>% 
+  filter(!str_detect(stocklong.x, "Gulf of Alaska")) %>% 
+  filter(scientificname %in% included_species) %>% 
+  group_by(year) %>% 
+  summarise(total_biomass = sum(biomass, na.rm = T),
+            n_biomass_stocks =sum(is.na(biomass) == F & biomass > 0))
+
+
+ebsbts_catch %>% 
+  ggplot(aes(year, total_catch)) + 
+  geom_line() + 
+  geom_point()
+
+ebsbts_effort <- gfw_data %>% 
+  filter(survey %in% c("wcgbts")) %>% 
+  unnest() %>% 
+   filter(
+      (
+        inferred_label_allyears == "trawlers" |
+          inferred_sublabel_allyears == "pots_and_traps" |
+          str_detect(inferred_sublabel_allyears, "set_") |
+          inferred_sublabel_allyears == "trawlers"
+      ) &
+        !inferred_label_allyears %in% c("cargo_or_tanker", "passenger")
+    ) %>% 
+  group_by(year) %>% 
+  summarise(total_effort = sum(total_hours, na.rm = T))
+
+
+
+survey_biomass <- vast_fish %>% 
+  filter(survey %in% "wcgbts",
+         spp %in% str_replace_all(included_species," ","_")) %>% 
+  mutate(abundance = map(vasterized_data,"time_index")) %>% 
+  select(survey, spp, abundance) %>% 
+  unnest() %>% 
+  group_by(Year) %>% 
+  summarise(total_survey_biomass = sum(abundance)) %>% 
+  rename(year = Year)
+
+
+ebsbts_cpue <- ebsbts_catch %>% 
+  left_join(ebsbts_effort, by = "year") %>% 
+  left_join(ebsbts_biomass, by = "year") %>% 
+  left_join(survey_biomass, by = "year") %>% 
+  mutate(cpue = total_catch / total_effort)
+
+ebsbts_cpue <- ebsbts_catch %>% 
+  left_join(ebsbts_effort, by = "year") %>% 
+  left_join(ebsbts_biomass, by = "year") %>% 
+  left_join(survey_biomass, by = "year") %>% 
+  left_join(fao_catch, by = "year") %>% 
+  left_join(nmfs_catch, by = "year") %>% 
+  mutate(ram_cpue = total_catch / total_effort,
+         fao_cpue = total_fao_catch / total_effort,
+         nmfs_cpue = total_nmfs_catch / total_effort)
+
+ebsbts_cpue %>% 
+  filter(!is.na(ram_cpue)) %>% 
+  gather(metric, value, -year) %>% 
+  filter(value > 0, str_detect(metric, "cpue|biomass")) %>% 
+  group_by(metric) %>% 
+  mutate(scaled_value = value / max(value, na.rm = T)) %>% 
+    ungroup() %>% 
+  ggplot(aes(year, scaled_value, color = metric)) + 
+  geom_line() + 
+  geom_point()
+
+```
 
 
 # what's the paper about?

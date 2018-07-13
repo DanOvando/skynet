@@ -4,10 +4,21 @@ prepare_data <-
            unfished_only,
            survey_months_only,
            raw_fish,
+           trawl_only,
            no_wcghl = T,
            species_prices,
            vars_to_drop = vars_to_drop,
            survey_years) {
+
+    if (trawl_only == T){
+
+      gfw_data <- gfw_data %>%
+        unnest() %>%
+        filter(inferred_label_allyears == "trawlers") %>%
+        nest(-survey)
+
+    }
+
     if (survey_months_only == T) {
       survey_months <- tribble(
         ~ survey,
@@ -153,6 +164,33 @@ prepare_data <-
         nest(-survey, .key = "knots")
     }
 
+
+    if (trawl_only == T){
+
+      trawl_species <- c("Gadus_chalcogrammus",
+                         "Gadus_macrocephalus",
+                         "Pleurogrammus_monopterygius",
+                         "Pleuronectes_quadrituberculatus",
+                         "Atheresthes_stomas",
+                         "Hippoglossoides_elassodon",
+                         "Reinhardtius_hippoglossoides",
+                         "Atheresthes_evermanni",
+                         "Lepidopsetta_polyxystra",
+                         "Limanda_aspera",
+                         "Microstomus pacificus",
+                         "Parophrys vetulus",
+                         "Ophiodon elongatus",
+                         "Mercluccius productus",
+                         "Eopsetta jordani",
+                         "Anoplopoma fimbria",
+                         "Platichthys stellatus")
+
+
+
+      total_fish_data <- total_fish_data %>%
+        filter(species %in% trawl_species | str_detect(species, "Sebastes"))
+
+    }
 
     mean_survey_prices <- total_fish_data %>%
       left_join(species_prices, by = "species") %>%
