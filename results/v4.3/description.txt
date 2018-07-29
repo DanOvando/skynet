@@ -1,1 +1,0 @@
-only medians instead of totals to check for problems there

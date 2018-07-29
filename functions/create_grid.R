@@ -8,6 +8,7 @@ create_grid <-
     lon_name <- enquo(lon_name)
 
     lat_name <- enquo(lat_name)
+
     map_data <-  data %>%
       dplyr::mutate(geometry = purrr::map2(!!lon_name,!!lat_name, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
       ungroup() %>%

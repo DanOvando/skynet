@@ -3753,8 +3753,6 @@ included_species <- vast_fish %>%
 included_species <- unique(included_species$spp) %>% 
   str_replace_all("_"," ")
 
-
-  
 nmfs_catch <- nmfs_landings %>% 
   filter(state %in% c("California","Washington", "Oregon"), scientific_name %in% included_species) %>% 
   group_by(year) %>% 
@@ -3947,6 +3945,93 @@ a = gfw_data %>%
   group_by(survey) %>% 
   count()
 ```
+
+
+# Jim's thoughts
+
+Look into spatial residuals, Bryan Stock has done some work on that. Residuals
+
+
+# better paper framing
+
+the paper is still about predicting, but instea of "it doesn't work", the story is that the environment is a more perfect predictor, and the data suggests that fishermen are responding to the environment, but constrained by regulation. So, environmental proxies for distributions in trends might be a more worthy path to pursue
+
+Environment is the only thing that moves
+
+ARE BEHAVIOR AND THE ENVIRONMENT WORTH MORE THAN THE SUM OF THEIR PARTS?
+
+# idiota
+
+So wait, you went back and for the paper remade the just effort vs density plot and noticed something. If you correctly sum up to total effort vs total biomass (or total revenue), then there seems to be a pretty damn clear relationahip between total effort and total revenue, i.e. the alaska hypothesis. 
+
+And, if that's the case, just eyeballing it, on the log scale a simple linear model would do quite well in or out of sample. So, a more complex model had damn well better do better as well. 
+
+So part of the problem was that you were doing total effort vs mean density over an area, and that doesn't really make any sense. If the bulk of the fishing is in a small area and you sum over a bigger area, but then average over the densities, the mean density could be low even if the total density is low. 
+
+You have to either do total vs totals or means vs means, or at least those seem a lot more logical. And if that's the case, it certainly seems like this thing might actually work. Still no guarantee that it would be better or worse than just ent environment, but still way better to explore. POOP. 
+
+
+```{r}
+
+skynet_data <- basic_skynet_data
+
+downscaled_performance <-
+  cross_df(list(
+    resolution = c(2,25,200),
+    training_data = list(skynet_data %>% filter(no_take_mpa == FALSE, restricted_use_mpa == FALSE))
+  ))
+
+downscaled_performance <-  downscaled_performance %>%
+  mutate(
+    new_grid  = map2(
+      training_data,
+      resolution,
+      create_grid,
+      lon_name = rounded_lon,
+      lat_name = rounded_lat
+    )
+  )
+
+downscaled_performance <-  downscaled_performance %>%
+  mutate(
+    new_data = map2(
+      training_data,
+      new_grid,
+      snap_to_grid,
+      old_lon_name = rounded_lon,
+      old_lat_name = rounded_lat,
+      new_lon_name = lon,
+      new_lat_name = lat
+    )
+  )
+
+
+
+
+# hack in here to deal with wrong price units in analysis
+e_v_ed_plot <- downscaled_performance %>%
+  select(resolution, new_data) %>%
+  unnest() %>%
+  filter(agg_total_hours > 0) %>%
+  ggplot(aes((agg_mean_density), (total_revenue), fill = approx_survey)) +
+  geom_point(alpha = 0.5, shape = 21,size = 2) +
+  labs(x = "Fishing Hours", y = "Available Revenues (USD)",
+       caption = "Note log-10 scale of axes") +
+  scale_fill_viridis_d(name = "Survey Region") +
+  scale_color_viridis_d(name = "Survey Region") +
+  geom_abline(aes(intercept = 0, slope = 1),linetype = 2, alpha = 0.75) +
+  geom_smooth(method = "lm", aes(color = approx_survey), se = FALSE) +
+  scale_x_log10(labels = scales::comma) +
+  scale_y_log10(labels = scales::dollar) + 
+  facet_wrap(~resolution)
+
+e_v_ed_plot
+```
+
+
+
+
+
 
 
 

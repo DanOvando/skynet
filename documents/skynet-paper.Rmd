@@ -15,204 +15,32 @@ knitr::opts_chunk$set(message = F, warning = F, echo = F ,
                       fig.width = 10, fig.height = 8, eval = T, cache = F)
 ```
 
-```{r, message = FALSE, warning = FALSE}
-
-library(gbm)
-library(randomForest)
-library(stringr)
-library(modelr)
-library(broom)
-library(hrbrthemes)
-library(viridis)
-library(sf)
-library(ggmap)
-library(caret)
-library(extrafont)
-library(patchwork)
-library(scico)
-library(wesanderson)
-library(ggridges)
-library(tidyposterior)
-library(tidyverse)
-
-
-functions <- list.files(here::here("functions"))
-
-walk(functions, ~ here::here("functions", .x) %>% source()) # load local functions
-
-# run options -------------------------------------------------------------
-
-run_name <- 'd1.0'
-
-run_dir <- here::here('results',run_name)
-
-fig_theme <- theme_ipsum(base_size = 14, axis_title_size = 18)
-
-theme_set(fig_theme)
-
-load(here::here("results", run_name,'skynet_data.Rdata'))
-
-load(here::here("results", run_name,'skynet_models.Rdata'))
-
-load(here::here("data","vast_fish.Rdata"))
-
-load(file = here::here("data","global_map.Rdata"))
-
-load(file = here::here('data','fish_prices.Rdata'))
-
-load(file = here::here('data','gfw_data.Rdata'))
-
-map_size <- 1
-
-
-skynet_data <- candidate_data %>% 
-  filter(fished_only == T, survey_months_only ==T) %>% 
-  select(skynet_data) %>% 
-  unnest() 
-
-# prep things
-
-pacific_map <- global_map %>%
-  as("Spatial") %>%
-  maptools::nowrapRecenter() %>%
-  sf::st_as_sf()
-  
-map_theme <-   theme_get() +theme(legend.key.height = unit(1.5,"cm"),
-                     axis.text.x = element_blank(),
-                     axis.text.y = element_blank(),
-                     plot.margin = unit(c(0,0,0,0),"cm"),
-                     legend.box.margin =  ggplot2::margin(0,0,0,0))
-
-vast_fish <- vast_fish[!map_lgl(vast_fish$vasterized_data, is.null), ]
-
-
-
-skynet_models <- skynet_models %>%
-  mutate(index = 1:nrow(.)) %>%
-  mutate(error = map(fitted_model, "error")) %>%
-  mutate(no_error = map_lgl(error, is.null)) %>%
-  filter(no_error)
-
-
-
-  diagnostic_plot_foo <- function(data,
-                                  r2,
-                                  dep_var,
-                                  test_region,
-                                  train_region,
-                                  data_set) {
-    data %>%
-      filter(surveyed_year == T) %>% 
-      ggplot(aes_(as.name(dep_var), ~ pred)) +
-      geom_abline(aes(intercept = 0, slope = 1),
-                  color = "red",
-                  linetype = 2) +
-      geom_point(alpha = 0.75) +
-      labs(
-        title = paste0(
-          "tested on ",
-          test_region,
-          "- trained on ",
-          train_region,
-          "; R2 = ",
-          r2
-        ),
-        subtitle = paste0("data subset is: ", data_set)
-      )
-  } # close diagnostic functions
-
-
-  skynet_models <- skynet_models %>%
-    mutate(
-      test_data = map(fitted_model, c("result", "test_predictions")),
-      training_data = map(fitted_model, c("result", "training_predictions"))
-    ) %>%
-    select(-fitted_model) %>%
-    mutate(
-      var_y = map2_dbl(test_data, dep_var, ~ var(.x[, .y])),
-      r2 = map2_dbl(test_data, dep_var, ~ yardstick::rsq(.x %>% filter(surveyed_year == T), .y, "pred")),
-      rmse = map2_dbl(test_data, dep_var, ~ yardstick::rmse(.x %>% filter(surveyed_year == T), .y, "pred")),
-      ccc = map2_dbl(test_data, dep_var, ~ yardstick::ccc(.x %>% filter(surveyed_year == T), .y, "pred")),
-      r2_training = map2_dbl(training_data, dep_var, ~ yardstick::rsq(.x %>% filter(surveyed_year == T), .y, "pred")),
-      rmse_training = map2_dbl(training_data, dep_var, ~ yardstick::rmse(.x %>% filter(surveyed_year == T), .y, "pred")),
-      ccc_training = map2_dbl(training_data, dep_var, ~ yardstick::ccc(.x %>% filter(surveyed_year == T), .y, "pred"))
-    ) %>%
-    mutate(
-      test_plot = pmap(
-        list(
-          data = test_data,
-          r2 = r2,
-          test_region = test_sets,
-          train_region = train_set,
-          data_set = data_subset,
-          dep_var = dep_var
-        ),
-        diagnostic_plot_foo
-      ),
-      training_plot = pmap(
-        list(
-          data = training_data,
-          r2 = r2_training,
-          test_region = paste0(test_sets),
-          train_region = paste0(train_set, "- training plot"),
-          data_set = data_subset,
-          dep_var = dep_var
-        ),
-        diagnostic_plot_foo
-      )
-    )
-  
-  skynet_models <- skynet_models %>% 
-    mutate(unfished_only = str_detect(data_subset, "unfished"))
-
-
-  skynet_models %>%
-    filter(data_subset == "skynet",
-           test_sets == "random",
-           model == "ranger") %>% 
-  ggplot(aes(variables, r2_training, color = dep_var)) +
-  geom_point() +
-  coord_flip()
-
-  
-```
-
-```{r filter}
-
-# bad_data <- "delta_skynet"
-# 
-bad_surveys <- "wcghl"
-# 
-# skynet_models <- skynet_models %>% 
-#   filter(!data_subset %in% bad_data)
-
-```
 
 # Executive Summary
 
-The goal of this study is to determine the ability of Global Fishing Watch (GFW) derived data on fishing activity to predict fish abundance as estimated from fishery independent research surveys. 
+The goal of this study is to determine the ability of Global Fishing Watch (GFW) derived data on fishing activity to predict fish abundance as estimated from fishery independent research surveys.
 
-We do this by testing the ability of structural and machine learning models to use GFW data to make accurate out-of-sample predictions. 
+We do this by testing the ability of structural and machine learning models to use GFW data to make accurate out-of-sample predictions.
 
-Current results suggest that structural approaches are not capable of this task, but the machine learning approaches show potential. 
+Current results suggest that structural approaches are not capable of this task, but the machine learning approaches show potential.
 
-The model can predict absolute and relative spatial abundance with some accuracy. The model can also capture overall temporal trends, but struggles to perform for time periods excluded from the model training. 
+The model can predict absolute and relative spatial abundance with some accuracy. The model can also capture overall temporal trends, but struggles to perform for time periods excluded from the model training.
 
 ## Next Steps
 
   - Fitting the model using only GFW derived data (no environmental covariates)
       - might degrade in-sample performance but improve out-of-sample performance
-      
+
   - Fitting the model using only unfished species
       - If we are truly capturing a "fishing signal", the the performance of a model fit to unfished species should degrade substantially (though we would still expect it to work somewhat due to covariance between fished and unfished species)
-      
+
   - Getting our hands on a much more "out of sample" dataset: North Sea, Mediterranean, West Africa?
-  
+
   - Determining a method for benchmarking performance: How good is good enough?
       - Compare performance of Catch-MSY/surplus production model estimates of abundance trends?
       - ....?
-  
-  - Do one more pass at a "keep it simple stupid" approach: Get catch data for the survey regions for all the species in the surveys, take total catch divided by total effort from GFW, see how that index of multi-species abundance compares to survey based estimates. 
+
+  - Do one more pass at a "keep it simple stupid" approach: Get catch data for the survey regions for all the species in the surveys, take total catch divided by total effort from GFW, see how that index of multi-species abundance compares to survey based estimates.
 
 
 
@@ -220,29 +48,33 @@ The model can predict absolute and relative spatial abundance with some accuracy
 
 <!-- Is the paper about global status? At this point, no it's not. It's about linking behavior to abundance, so lead with that. Once it works, then you can start thinking about global applications.  -->
 
-Fishing is a massive activity, spanning the globe and ranging from small-scale subsistence practices up to massive industrial operations. Across these scales though, the fisheries share a common underlying incentive structure: fishermen desire some utility derived from capturing fish (e.g. some combination of food, income, and cultural activity) and tune their fishing activities in order to try and maximize that utility, subject to the constraints of the world. As time goes on, these fishing actions affect fish stocks, for example through reductions in abundance or mean length, causing the behavior of the fishermen to be updated. In short then, fishing and fish are part of a dynamic system, in which the behavior of each affects the behavior the other. 
+Fishing activity has a massive footprint, spanning the globe and ranging from small-scale subsistence practices up to huge industrial operations. Across these scales though, fisheries share a common underlying incentive structure: fishermen desire some utility derived from capturing fish (e.g. some combination of food, income, and cultural activity) and tune their fishing activities in order to try and maximize that utility, subject to the constraints of the world. As time goes on, these fishing actions affect fish stocks, for example through reductions in abundance or mean length, causing the behavior of the fishermen to be updated. In short then, fishing and fish are part of a dynamic system, in which the behavior of each affects the behavior the other.
 
+These dynamic links between fishing fleets and fish populations are a critical part of fisheries management. @Gordon1954 predicted that in the absence of property rights or access restrictions, these bio-economic dynamics would result in the fishery reaching an open-access equilibrium at which net profits in the fishery are driven to zero, often resulting biological overfishing of the stock. This thinking was central to the bleak predictions of the "tragedy of the commons" [@Hardon1968]. While @Ostrom1990 demonstrated that the evolution of natrual resource systems such as fisheries are driven by a more complete and complex set of drivers than pure profitability, the critical link between the dynamics of fish populations and fishing communities remains in the form of social-ecological systems [@Ostrom2009].
 
-These dynamic links between fishing fleets and fish populations are a critical part of fisheries management. @Gordon1954 predicted that in the absence of property rights or access restrictions, these bio-economic dynamics would result in the fishery reaching an open-access equilibrium at which net profits in the fishery are driven to zero, often resulting biological overfishing of the stock. This thinking was central to the bleak predictions of the "tragedy of the commons" [@Hardon1968]. While @Ostrom1990 demonstrated that the evolution of natrual resource systems such as fisheries are driven by a more complete and complex set of drivers than pure profitability, the critical link between the dynamics of fish populations and fishing communities remains in the form of social-ecological systems [@Ostrom2009]. 
+Understanding the dynamics of these social-ecological systems is critical to effective fisheries management. Bio-economic theory and empirical evidence helps us design and implement policies that best achieve societal objectives, by allowing us to model what the potential impacts of policy choices may be. This process has underpinned the recent expansion in the use of rights-based fisheries management [e.g. @Costello2008; @Costello2017; @Deacon2007; @Grainger2016; @Kaffine2008; @Wilen2012; @Cancino2007; @Grafton1996; @Squires2016], and increasingly is used in the management-strategy-evaluation [MSE, @Butterworh2007; @Punt2016a] process. @Nielsen2017 provides a thorough review of models currently utilizing bio-economic modeling to model and guide the policy implementation process.
 
-Understanding the dynamics of these social-ecological systems is critical to effective fisheries management. Bio-economic theory and empirical evidence helps us design and implement policies that best achieve societal objectives, by allowing us to model what the potential impacts of policy choices may be. This process has underpinned the recent expansion in the use of rights-based fisheries management [e.g. @Costello2008; @Costello2017; @Deacon2007; @Grainger2016; @Kaffine2008; @Wilen2012; @Cancino2007; @Grafton1996; @Squires2016], and increasingly is used in the management-strategy-evaluation [MSE, @Butterworh2007; @Punt2016a] process. @Nielsen2017 provides a thorough review of models currently utilizing bio-economic modeling to model and guide the policy implementation process. 
-
-These works demonstrate a rich history of thinking about how fishing fleets respond to incentives and population dynamics. However, the vast majority of the literature in this field is focused on predicting fishing effort as a function of fish populations; very little research has reversed this question and asked, what do the dynamics of fishing effort suggest about the state of fish populations? If fisheries are indeed a coupled bio-economic system, then just as we believe the dynamics of fishing effort should be predictable from fish abundance, fish abundance should be predictible from fishing effort [@Sugihara2012]. The reason for this omission is likely driven by the realities of fisheries management. Bio-economic modeling is almost exclusively used in the MSE phase of fisheries management, rarely in the stock assessment phase itself. This is partly due simply to the history of stock assessment as a biological science [@Smith1994], and partly due to data realities. Historically, most fisheries with say accurate and complete records of fishing effort would also have records of more directly useful (from the perspective of traditional stock assessment) indicies such as catches and catch-per-unit-effort. 
-
-
-
+These works demonstrate a rich history of thinking about how fishing fleets respond to incentives and population dynamics. However, the vast majority of the literature in this field is focused on predicting fishing effort as a function of fish populations; very little research has reversed this question and asked, what do the dynamics of fishing effort suggest about the state of fish populations? If fisheries are indeed a coupled bio-economic system, then just as we believe the dynamics of fishing effort should be predictable from fish abundance, fish abundance should be predictible from fishing effort [@Sugihara2012]. The reason for this omission is likely driven by the realities of fisheries management. Bio-economic modeling is almost exclusively used in the MSE phase of fisheries management, rarely in the stock assessment phase itself. This is partly due simply to the history of stock assessment as a biological science [@Smith1994], and partly due to data realities. Historically, most fisheries with say accurate and complete records of fishing effort would also have records of more directly useful (from the perspective of traditional stock assessment) indicies such as catches and catch-per-unit-effort. In these cases the catch data, combined with catch-per-unit-effort (CPUE) data, can provide a clearer signal of the state of a fish stock (with the catch data providing information on the scale of abundance and CPUE data on trends) than the effort data.
 
 <!-- Many fisheries management policies are based around first achieving a biological objective (e.g. not overfishing the stock), and policies are then evaluated in terms of alternative strategies for achieving that objective.  -->
 
-Where we have enough data to comprehensively track effort, we often also have catch data, and the catch data, combined with catch-per-unit-effort (CPUE) data can provide a clearer signal of the state of a fish stock (with the catch data providing information on the scale of abundance and CPUE data on trends) [citation]. 
+While effort dynamics have not been historically used to understand fish populations, it is reasonable to believe that given sufficient data, it should be possible to infer something about the state of a fish population as a function of the behavior of fishing fleets. This idea is in many ways analogous to earlier research linking the behavior of sea birds and the location of their prey [citation]. While this idea is grounded in sound theory, the actual form of link between fishing effort and fish abundance is far from clear. High levels of fishing effort could reflect high abundance of fish in the earlier years of a fishing ground, or could reflect an overfished but easily accessible region. We hypothesize that all else equal, fishermen would like to maximize their utility from fishing, but the varied and complex nature of these individual utility functions, combined with the shifting and uncertain nature of the natural world, make the structure of the link between fishing behavior and fish abundance a complicated question.
 
-
-manifold... 
-
-Based on this then, it is reasonable to believe that given sufficient data, it should be possible to infer something about the state of the fish population as a function of the behavior of fishing fleets. This idea is in many ways analogous to earlier research linking the behavior of sea birds and the location of their prey [citation]. While this idea makes intuitive sense, the actual form of link between fishing effort and fish abundance is far from clear. High levels of fishing effort could reflect high abundance of fish in the earlier years of a fishing ground, or could reflect an overfished but easily accessible region. We hypothesize that all else equal fishermen would like to maximize their utility from fishing, but the varied and complex nature of these individual utility functions, combined with the shifting and uncertain nature of the natural world, make the structure of the link between fishing behavior and fish abundance a complicated question. 
-
-It is therefore far from obvious what simply observing the effort of fishing tells us about the abundance of fish. This uncertainty is in part why raw effort trends are rarely integrated  into the models we use to estimate the status of fish stocks [citations]. 
+It is therefore far from obvious what simply observing the effort of fishing tells us about the abundance of fish. This uncertainty is in part why raw effort trends are rarely integrated  into the models we use to estimate the status of fish stocks [citations].
 However, recent advances in technology provide reason to rethink what we could learn about fish abundance from fishing behavior. Global Fishing Watch [GFW, presented in @Kroodsma2018], provides a new and vast picture of fishing effort around the planet in near real time. GFW provides high resolution data detailing factors such as the number and horsepower of fishing vessels active in a given region and the distance that fishermen are moving from port to fish. We pair these data with fishery-independent research surveys compiled by the [FishData](https://github.com/James-Thorson/FishData) package in R [@RCoreTeam2018] to ask, can the GFW derived effort data be used to predict the abundance of fish?
+
+We break this assessment into a series of discrete phases.
+
+  - We assess the relationships between total effort and biomass indicies in order to see if, simply put, more fishermen = more or less fish
+
+  - We assess whether total effort can be paired with regional catch data to create an index of catch-per-unit-effort which in turn provides a reasonable index of fish abundance
+
+  - We consider the ability of a series of structural economic models, based on bioeconomic theory, to predict fish abundance as a function of fishing behavior
+
+  - We compare the predictive performance of the structural models to a suite of machine-learning models that utilize the same GFW data, and available covariates if desired, to predict fish abundance
+
+  - Lastly, we consider the predictive value of GFW derived information relative to other globally available indicies (e.g. sea surface temperature and chlorrophyl)
+
 
 <!-- Answering this question can help us address several critical gaps in our knowledge of marine ecosystems. First, the majority of fisheries in the world lack data for formal stock assessment, limiting our ability to understand and manage these critical resources. To address this gap, numerous publications have attempted to use catch data supplied by the United Nations Food and Agricultural Organization [@cite] to provide some understanding of the status of the world's fisheries, as this bas been the only global database available [@Costello2012; @Costello2016;@Rosenberg2017]. GFW's effort data provides a new opportunity for understanding these fisheries.  Second, while we are increasingly interested in ecosystem-based fisheries management, many of our data-collection practices are still centered around single-species management [@cite]. GFW's effort data provides a potential link to status of all the fish stocks targeted by the fishing gears and fleets covered by GFW. Third, climate change is predicted to change the distribution and range of fish stocks around the planet [@cite]. GFW's data could allow us to track shifts in fishing effort and fish abundance potentially influenced by climate change [@citation]  -->
 
@@ -254,238 +86,256 @@ However, recent advances in technology provide reason to rethink what we could l
 
 # Methods
 
-At the coarsest scale, this project compares the ability of candidate models to utilize GFW effort data and other globally-available covariates to predict fishery-independent estimates of fish abundance. We judge performance by out-of-sample predictive capability of each of our candidate models, across a range of training-test splits of the data (historic-future, Alaska to West Coast, etc). 
+This study compares the ability of various candidate models to utilize GFW effort data, potentially along with other globally-available covariates, to predict fishery-independent estimates of fish abundance. We judge performance by out-of-sample predictive capability of each of our candidate models, across a range of training-test splits of the data (historic-future, Alaska to West Coast, etc).
 
 ## Data
 
-Primary data were collected from two sources: GFW provides our data on the amount and location of fishing effort, along with available covariates such as vessel size, distance from shore/port, and engine power. Estimates of fish abundance in space and time were obtained from their relevant surveys through the `FishData` package. The following two data sections provide summaries of the data as well as descriptions of relevant data processing steps taken. 
+GFW provides our data on the amount and location of fishing effort, along with available observed or estiamted covariates such as vessel size, distance from shore/port, and engine power. Estimates of fish abundance in space and time were obtained from their relevant surveys through the `FishData` package. The following two data sections provide summaries of the data as well as descriptions of relevant data processing steps taken.
 
 ### Survey Data
 
-`FishData` provides access to numerous fishery independent research surveys throughout the world. We use the bottom trawl surveys conducted along the west coast of North America (\@ref(fig:knot-map))
+`FishData` provides access to numerous fishery independent research surveys throughout the world. We use the bottom trawl surveys conducted along the west coast of North America by the National Marine Fisheries Service  (\@ref(fig:knot-map))
 
-  - Eastern Bering Sea Bottom Trawl Survey (ebsbts)
-  - Aleutian Islands Bottom Trawl Survey (aibts)
-  - Gulf of Alaska Bottom Trawl Survey (goabts)
-  - West Coast Groundfish Bottom Trawl Survey (wcgbts)
+  - [Eastern Bering Sea Bottom Trawl Survey](https://www.afsc.noaa.gov/RACE/groundfish/bottom%20trawl%20surveys.php) (ebsbts)
+  - [Aleutian Islands Bottom Trawl Survey](https://www.afsc.noaa.gov/RACE/groundfish/bottom%20trawl%20surveys.php) (aibts)
+  - [Gulf of Alaska Bottom Trawl Survey](https://www.afsc.noaa.gov/RACE/groundfish/bottom%20trawl%20surveys.php) (goabts)
+  - [West Coast Groundfish Bottom Trawl Survey](https://www.nwfsc.noaa.gov/research/divisions/fram/groundfish/bottom_trawl.cfm) (wcgbts)
   <!-- - West Coast Groundfish Hook and Line Survey -->
-  
+
 ```{r knot-map, fig.cap='Spatial coverage of fishery independent research surveys (will convert to polygons)'}
 
 knots <- vast_fish %>%
-  filter(!survey %in% bad_surveys) %>% 
+  filter(!survey %in% bad_surveys) %>%
   select(survey,spp,vasterized_data) %>%
   mutate(knots = map(vasterized_data, c('spatial_list', 'loc_x_lat_long'))) %>%
   select(-vasterized_data,-spp) %>%
   unnest() %>%
-  unique() %>% 
+  unique() %>%
   mutate(recenter_lon = ifelse(approx_long < 0, 180 + (180 - abs(approx_long)), approx_long))
-  
 
-  
+
+
   map_knots <-  knots %>%
   dplyr::mutate(geometry = purrr::map2(recenter_lon, approx_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
   ungroup() %>%
   mutate(geometry = sf::st_sfc(geometry, crs =
   "+proj=longlat +datum=WGS84 +no_defs")) %>%
   sf::st_sf()
-  
+
   bbox <- sf::st_bbox(map_knots)
-  
+
   knot_map <- map_knots %>%
   ggplot() +
   geom_sf(data = pacific_map, fill = 'grey60') +
   geom_sf(aes(color = survey), size = 1, alpha = 0.5) +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
-  scale_color_viridis_d() + 
+  scale_color_viridis_d() +
   theme(legend.key.height = unit(1.5,"cm"))
 
-  
+
   knot_map
-      
+
 ```
 
 
-Each of the surveys contains a variety of different species, including highly abundance fished species such as arrowtooth flounder and Alaska pollock, as well as unfished species such as sea anemones. The selected surveys utilize bottom trawl gear, and as such primarily contain bottom-associated species (\@ref(fig:fish-plot)). Surveys are conducted in summer months (July-August for the Alaska surveys and May-October for the West Coast Bottom Trawl Survey). 
+Each of the surveys contains data on a wide variety of different species, including highly abundanct fished species such as arrowtooth flounder and Alaska pollock, as well as unfished species such as sea anemones. The selected surveys utilize bottom trawl gear, and as such primarily contain bottom-associated species (\@ref(fig:fish-plot)). Surveys are conducted in summer months (July-August for the Alaska surveys and May-October for the West Coast Bottom Trawl Survey).
 
 ```{r fish-plot, fig.cap = "Number of positive encounters for the top-10 most observed species in each research survey (XXswitch to common names"}
 
-fish_summary <- vast_fish %>% 
-    filter(!survey %in% bad_surveys) %>% 
-  select(survey, data,spp) %>% 
-  unnest() %>% 
+fish_summary <- vast_fish %>%
+    filter(!survey %in% bad_surveys) %>%
+  select(survey, data,spp) %>%
+  unnest() %>%
   group_by(survey, spp) %>%
-  summarise(n_seen = sum(catch_kg > 0)) %>% 
-  group_by(spp) %>% 
-  mutate(tc = sum(n_seen)) %>% 
-  ungroup() %>% 
-  mutate(spp = forcats::fct_reorder(spp, tc)) %>% 
-  group_by(survey) %>% 
-  top_n(10, tc) %>% 
+  summarise(n_seen = sum(catch_kg > 0)) %>%
+  group_by(spp) %>%
+  mutate(tc = sum(n_seen)) %>%
+  ungroup() %>%
+  mutate(spp = forcats::fct_reorder(spp, tc)) %>%
+  group_by(survey) %>%
+  top_n(10, tc) %>%
   ungroup()
 
-fish_summary %>% 
-  ggplot(aes(spp, tc, fill = survey)) + 
-  geom_col() + 
-  coord_flip() + 
+fish_summary %>%
+  ggplot(aes(spp, tc, fill = survey)) +
+  geom_col() +
+  coord_flip() +
   theme(axis.text.y = element_text(size = 10),
-        axis.title.y = element_blank()) + 
-  labs(y = "# of times observed") + 
+        axis.title.y = element_blank()) +
+  labs(y = "# of times observed") +
   scale_fill_viridis_d()
 
 ```
 
+Survey data are provided by `FishData` in their "raw" form (biomass of species per unit of survey effort at a given sampling event). The data therefore require standardization to account for differences in vessel characteristics, spatio-temporal correlation structures, and the presence of zeros in the haul data. This standardization was performed using the [`VAST`](https://github.com/James-Thorson/VAST) package [@Thorson2016a], which implements a spatial delta-generalized linear mixed model across multiple species. In essence, this model leverages the spatio-temporal correlations within and among species (along with to provided covariates) to provide a standardized index of abundance for each of the species in the supplied data.
 
-Survey data come in their "raw" form, which requires standardization to account for differences in vessel characteristics, spatio-temporal correlation structures, and the presence of zeros. This standardization was performed using the [`VAST`](https://github.com/James-Thorson/VAST) package [@Thorson2016a], which implements a spatial delta-generalized linear mixed model across multiple species. In essence, this model leverages the spatio-temporal correlations within and among species (along with to provided covariates) to provide a standardized index of abundance for each of the species in the supplied data.
-
-The result of VAST is a network of "knots" that define polygons of equal density for each species, where the density of each species is measured in units of tons/km^2^ XX (Fig.\@ref(fig:fish-map)). 
+The result of VAST is a network of "knots" that define polygons of equal density for each species, where the density of each species is measured in units of tons/km^2^ XX (Fig.\@ref(fig:fish-map)).
 
 ```{r fish-map, fig.cap = "VAST estimates of density (tons/km^2^) of species observed in bottom trawl surveys"}
 
-fish_abundance <- skynet_data %>% 
-  filter(!survey %in% bad_surveys) %>% 
-  group_by(survey,knot, rounded_lat, rounded_lon) %>% 
-  summarise(total_density = mean(density)) %>% 
+fish_abundance <- skynet_data %>%
+  filter(!survey %in% bad_surveys) %>%
+  group_by(survey,knot, rounded_lat, rounded_lon) %>%
+  summarise(total_density = mean(density)) %>%
   mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon))
-  
+
   fish_abundance <-  fish_abundance %>%
   dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
   ungroup() %>%
   mutate(geometry = sf::st_sfc(geometry, crs =
   "+proj=longlat +datum=WGS84 +no_defs")) %>%
   sf::st_sf()
-  
-  
+
+
   bbox <- sf::st_bbox(map_knots)
-  
+
   fish_map <- fish_abundance %>%
   ggplot() +
   geom_sf(aes(color = total_density), size = 1, alpha = 0.5) +
   geom_sf(data = pacific_map, fill = 'grey60') +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
-      # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+ 
+      # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+
   scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)))+
   theme(legend.key.height = unit(1.5,"cm"))
 
 
-  
-    
-  
+
+
+
   fish_map
 
 
 ```
 
 
-Surveyed species also varied substantially in their abundance and economic importance. We mark species encountered in the surveys as "fished" if their name, or a synonym for their name identified through the `taxize` package, was found within the global catch records of the Food and Agriculture Organization of the United Nations (FAO). For each species, we also obtained price estimates using @Melnychuk2016 (Fig.\@ref(fig:price-plot)). 
+Surveyed species also vary substantially in their abundance and economic importance. We mark species encountered in the surveys as "fished" if their name, or a synonym for their name identified through the `taxize` package, was found within the global catch records of the Food and Agriculture Organization of the United Nations (FAO citation). For each species, we also obtained price estimates using @Melnychuk2016 (Fig.\@ref(fig:price-plot)). Together, these data provide estimated density for fished species encountered by the US west coast bottom trawl survey program over space and time, along with the associated value of these species.
 
 ```{r price-plot, fig.cap = "Mean ex-vessel price (USD/ton) of species in database from @Melnychuk2016"}
 
 species_prices %>%
-  filter(is.na(mean_exvessel_price) == F) %>% 
-  mutate(species = fct_reorder(species, mean_exvessel_price))  %>% 
+  filter(is.na(mean_exvessel_price) == F) %>%
+  mutate(species = fct_reorder(species, mean_exvessel_price))  %>%
   ggplot(aes(species, mean_exvessel_price)) +
-  geom_col() + 
-  scale_y_continuous(labels = scales::dollar) + 
-  coord_flip() + 
-  theme(axis.text.y = element_text(size = 8), axis.title.y = element_blank()) + 
+  geom_col() +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(axis.text.y = element_text(size = 8), axis.title.y = element_blank()) +
   labs(y = "Mean ex-vessel price (USD)")
 
 ```
 
-Together these data provide estimated density for fished species encountered by the US west coast bottom trawl survey program over space and time, along with the associated value of these species. 
-
 ### GFW Data
 
-GFW data were obtained using the `bigrquery` package in R from the GFW servers (xx check on description here to note back-end access). Data were aggregated to the resolution of year and nearest 0.25 degree latitude and longitude, and for each vessel at this a given location we calculated the total fishing hours spent, average distance from shore, average distance from port, and whether that location is inside an MPA (and if so what kind). We also collected relevant data for that vessel such as its engine power, length, tonnage, and vessel type (trawler, purse-seine, fixed-gear, etc). Together, these data provide fishing effort-related data covering the regions surveyed in our fishery-independent data (\@ref(fig:gfw-map)).  
+GFW data were obtained using the `bigrquery` package in R from the GFW servers (xx check on description here to note back-end access). Data were aggregated to the resolution of year and nearest 0.1 degree latitude and longitude, and for each vessel at this a given location we calculated the total fishing hours spent, average distance from shore, average distance from port, and whether that location is inside an MPA (and if so what kind). We also collected relevant data for that vessel such as its engine power, length, tonnage, and vessel type (trawler, purse-seine, fixed-gear, etc). Together, these data provide fishing effort-related data covering the regions surveyed in our fishery-independent data (\@ref(fig:gfw-map)).
 
 ```{r gfw-map, fig.cap="Map of GFW effort data"}
 gfw_effort <- gfw_data %>%
-  unnest() %>% 
-  group_by(year, rounded_lat, rounded_lon) %>% 
-  summarise(total_effort = median(total_hours, na.rm = T)) %>% 
-  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+  unnest() %>%
+  filter(inferred_label_allyears == "trawlers",
+         survey != "wcgbts" & survey != "wcghl") %>%
+  group_by(year, rounded_lat, rounded_lon) %>%
+  summarise(total_effort = pmin(10,sum(total_hours, na.rm = T))) %>%
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>%
   filter(total_effort > 0, year == max(year))
-  
+
   gfw_map <-  gfw_effort %>%
   dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
   ungroup() %>%
   mutate(geometry = sf::st_sfc(geometry, crs =
   "+proj=longlat +datum=WGS84 +no_defs")) %>%
   sf::st_sf()
-  
-  
+
+
   bbox <- sf::st_bbox(gfw_map)
-  
+
   gfw_map <- gfw_map %>%
   ggplot() +
-  geom_sf(aes(color = total_effort), size = 1, alpha = 0.5) +
+  geom_sf(aes(color = total_effort), size = 0.1, alpha = 0.25) +
   geom_sf(data = pacific_map, fill = 'grey60') +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
   ylim = c(bbox['ymin'], bbox['ymax'])) +
-  # scale_color_viridis(name = "Fishing Hours", labels = scales::comma) + 
-      scale_color_viridis(trans = "log10", name = "Fishing Hours", labels = scales::comma) +
+  # scale_color_viridis(name = "Fishing Hours", labels = scales::comma) +
+      scale_color_viridis(name = "Fishing Hours", labels = scales::comma) +
   theme(legend.key.height = unit(1.5,"cm"))
-  
+
   gfw_map
 ```
 
 ### Environmental Covariates
 
-We augment with the GFW and FishData data with globally accessible environmental covariates, including remote sensing estimates of 
+We augment with the GFW and FishData data with globally accessible environmental covariates, including remote sensing estimates of
 
-  - Chlorophyll 
+  - Chlorophyll
   - Sea surface temperature
   - Bathymetry
-  
-All data were obtained from NOAA ERDDAP portal (https://coastwatch.pfeg.noaa.gov/erddap/index.html), and aggregated as needed to match the resolution of the GFW data (annual and 0.25 degree lat/long resolution). Other environmental data were explored (e.g. wave and wind), but did not have sufficient near-shore coverage for inclusion in the model. 
 
-### Creating Merged Data
+All data were obtained from NOAA ERDDAP portal (https://coastwatch.pfeg.noaa.gov/erddap/index.html), and aggregated as needed to match the resolution of the GFW data (annual and 0.1 degree lat/long resolution). Other environmental data were explored (e.g. wave and wind), but did not have sufficient near-shore coverage for inclusion in the model.
 
-The GFW data were merged to the survey data by 1) clipping the GFW to only include observations that occurred within the spatial perimeter of one of the surveys and 2) snapping each GFW observation to the nearest (in terms of latitude and longitude distance) knot identified by VAST from the survey data. Since the survey data are at a courser resolution than the GFW data, this means that multiple GFW observations are usually associated with any one knot at any one time. 
+### Merging GFW and Abudnance Data
 
-We can also filter the data to ensure model quality and convergence
+The GFW data were merged to the survey data by
+  - clipping the GFW to only include observations that occurred within the spatial perimeter of one of the surveys
+  - snapping each GFW observation to the nearest (in terms of latitude and longitude distance) knot identified by VAST from the survey data. Since the survey data are generally at a courser resolution than the GFW data, this means that multiple GFW observations are usually associated with any one knot at any one time.
 
-  <!-- - Only fished species are included from the survey data (under the assumption that fishermen are not responding to abundance of unfished species such as starfish, though we do run an unfished-only as a test of model performance). -->
+  - Since all surveys are geared towards bottom dwelling species, only bottom-associated gears are included from GFW. In this case that means vessels identified by GFW as trawlers, pots and traps, and set gears (longline and gillnet).
 
-  - Since all surveys are geared towards bottom dwelling species, only bottom-associated gears. In this case that means vessels identified by GFW as trawlers, pots and traps, and set gears (longline and gillnet).
-  
   - We only include species that were observed 10 or more times during each year of the survey to improve model convergence.
-  
+
+
+The preceding steps were conducted for all constructed databases. We also constructed a series of subset data from this master set, including factorial combinations of
+
+  - Only utilizing GFW from the months in which the relevant NMFS surveys were conducted
+
+  - Only including/excluding commercially exploited species, to test the models performance when fitted to unfished species
+
   <!-- - We Only including GFW data from the months corresponding to the appropriate survey months -->
 
   <!-- - VAST provides estimates of abundance in years without surveys by predicting based on spatio-temporal patterns. In order to reduce potential bias of models estimating the VAST process instead of underlying abundance, for now we only include survey data from years in which a survey was actively conducted.  -->
 
-## Model
 
-We can construct a wide array of candidate models that relate fish abundance and relevant covariates to fishing decisions, from simple distance-from-shore based cost corrections, to highly specified models of capital investment and knowledge accrual. The relevant question then is how do we test the performance of these alternative models? As the ultimate goal of this model is to use GFW to predict abundance indices in places where fishery independent samples are not available, we will use out-of-sample predictive power as our metric of model performance, R^2^ and root-mean squared error (RMSE) of data held out of the training of the model.
 
-We fit a series of candidate models to the data, defined in terms of 
 
-- Data Splitting: the data used for training and testing. 
+## Candidate Models
+
+We evaluated three classes of candidate models for linking GFW effort to fish abundance:
+
+  1. Linear models
+    - These simply link abundance to effort through linear models
+  2. Structural economic models
+    - These assume that marginal profits are equal across a given spatio-temporal resolution,
+    and estimate fish abundances that rationalize the observed fishing Effort
+  3. Machine learning models
+    - These models make no structural assumptions, but rather
+    find the combination of predictor variables that maximize the out-of-sample
+    predictive power of the model
+
+
+We fit a series of candidate models to the data, defined in terms of
+
+- Data Splitting: the data used for training and testing.
     - Random splits (train on a random subset, predict the remaining subset)
     - Spatial splits (e.g. train on Alaska, predict US west coast)
-    - Temporal splits (e.g. train on 2010-2013, predict 2014-2015) 
+    - Temporal splits (e.g. train on 2010-2013, predict 2014-2015)
 
 - Predictive goal:
     - Absolute abundance in space in time
     - Changes in abundance in space and time
-  
-- Model Type: 
+
+- Model Type:
     - Machine learning (random forests, gradient boosted models)
     - Linear regression (fish abundance ~ fishing effort)
     - Structural modeling (fitting of structural economic models that conform to ideal free distribution)
-    
+
 
 We fit factorial combinations of each of these candidate models, allowing us to evaluate model performance from a variety of relevant angles. The comparison between the machine learning and structural modeling approaches are worth discussing further for a brief moment. While different in their mechanics, all the candidate machine learning models are black-box models whose sole objective is to maximize the predictive power of the model. The user specifies some model options, but the model decides which data are important and how those data relate to each other. This allows these algorithms to fit highly non-linear models (if the data demand it), without the need to specify an exact statistical or structural form for how variables such as costs, safety, and fish abundance interact to affect fishing behavior. As a result, machine learning models can serve as an effective benchmark for the best possible ability of GFW data to predict fish abundance. The disadvantage is that, while new techniques are emerging for interpreting machine learning model fits, they are inherently black boxes and as such do not permit us to really interpret the meaning of specific coefficients. The lack of a structural theory behind the model may also hamper the ability of these models to predict radically out of sample data (e.g. a machine learning model trained in Alaska may perform terribly in Africa).
 
-This stands in contrast to the structural modeling approach, in which we write out a functional form for the relationship between fish abundance and fishing pressure, and the fit that specified model to the data. This has the advantage of interpretability, but opens us up to errors in model specification. By running both, we can compare the machine learning and structural approach and see how much the interpretability of the structural model "costs" us in terms of predictive power, relative to the benchmark of the machine learning model. 
+This stands in contrast to the structural modeling approach, in which we write out a functional form for the relationship between fish abundance and fishing pressure, and the fit that specified model to the data. This has the advantage of interpretability, but opens us up to errors in model specification. By running both, we can compare the machine learning and structural approach and see how much the interpretability of the structural model "costs" us in terms of predictive power, relative to the benchmark of the machine learning model.
 
-For each model run, the data are split into test and training sets. Within the training sets, the data are further split through v-fold cross validation (using five repeats of ten splits) into assessment and analysis splits, which are used to fine tune model characteristics prior to fitting the model on the full training data and testing performance on the testing data. 
+For each model run, the data are split into test and training sets. Within the training sets, the data are further split through v-fold cross validation (using five repeats of ten splits) into assessment and analysis splits, which are used to fine tune model characteristics prior to fitting the model on the full training data and testing performance on the testing data.
 
-Each model was designed using a separate subset of data, so as to isolate  initial model design from the data that will eventually be used to judge model performance. 
+Each model was designed using a separate subset of data, so as to isolate  initial model design from the data that will eventually be used to judge model performance.
 
 Below I provide high-level summaries of each of the models, purely to aid in understanding (more detailed descriptions will be provided in future drafts)
 
@@ -493,36 +343,36 @@ Below I provide high-level summaries of each of the models, purely to aid in und
 
 Two machine learning algorithms, random forests (implemented through the `ranger` package in R) and generalized boosted regression modeling (gbm), were evaluated. Tuning parameters of each method were selected using the `caret` package on an isolated set of data.
 
-A random forest works by fitting a series of regression trees. Each regression tree takes a sub-sample of the training data, and a sub sample of the independent variables provided for model fitting. The algorithm then determines the variable and variable split (e.g. vessel size and vessel size above 30ft) that provides the greatest explanatory power in estimating density of the "out of bag" samples (the part of the training data that were not included in the tree), and creates that as the first node. The next two nodes are selected in the same process, and so on and so forth, down to a specified tree depth tuned through the `caret` package. Each tree provides a high-variance, low bias estimator of densities. The random forest then averages over hundreds of trees to reduce this variance and provide an improved estimate of density as a function of provided covariates. The advantage of this approach is that it makes no assumptions about error distributions or linearity of parameters, and actively pushes back against over fitting by prioritizing out-of-sample prediction, and sub sampling of the provided independent variables (lots and lots of literature on this). 
+A random forest works by fitting a series of regression trees. Each regression tree takes a sub-sample of the training data, and a sub sample of the independent variables provided for model fitting. The algorithm then determines the variable and variable split (e.g. vessel size and vessel size above 30ft) that provides the greatest explanatory power in estimating density of the "out of bag" samples (the part of the training data that were not included in the tree), and creates that as the first node. The next two nodes are selected in the same process, and so on and so forth, down to a specified tree depth tuned through the `caret` package. Each tree provides a high-variance, low bias estimator of densities. The random forest then averages over hundreds of trees to reduce this variance and provide an improved estimate of density as a function of provided covariates. The advantage of this approach is that it makes no assumptions about error distributions or linearity of parameters, and actively pushes back against over fitting by prioritizing out-of-sample prediction, and sub sampling of the provided independent variables (lots and lots of literature on this).
 
-XX Will add in explanation of GBM, but really just a modification of a random forest that helps the model target and improve the fit of parts of the data that the model struggles with  
+XX Will add in explanation of GBM, but really just a modification of a random forest that helps the model target and improve the fit of parts of the data that the model struggles with
 
 1 Select tree depth, D, and number of iterations, K 2 Compute the average response, y, and use this as the initial predicted value for each sample 3 for k = 1 to K do 4 Compute the residual, the difference between the observed value and the current predicted value, for each sample 5 Fit a regression tree of depth, D, using the residuals as the response 6 Predict each sample using the regression tree fit in the previous step 7 Update the predicted value of each sample by adding the previous iteration’s predicted value to the predicted value generated
 
-(Page 205, Kuhn & Johnson). 
+(Page 205, Kuhn & Johnson).
 
 
 ## Structural Model
 
-We fit a structural model in the manner of @Miller2016 to the data. The key of this model assumption here is that fishermen conform to an ideal free distribution, and so marginal profits are equal across appropriate groups in space and time, at the unit of year and "knot", a knot being a geographic region of constant abundance estimated per the methods of @Thorson2016a. 
+We fit a structural model in the manner of @Miller2016 to the data. The key of this model assumption here is that fishermen conform to an ideal free distribution, and so marginal profits are equal across appropriate groups in space and time, at the unit of year and "knot", a knot being a geographic region of constant abundance estimated per the methods of @Thorson2016a.
 
-Following @Miller2016, we consider marginal profits per unit effort as being 
+Following @Miller2016, we consider marginal profits per unit effort as being
 
-$$ \pi_{y,k} = pCPUE_{y,k}e^{-qE_{y,k}} - c_{y,k}  $$
+$$\pi_{y,k} = pCPUE_{y,k}e^{-qE_{y,k}} - c_{y,k}$$
 
-where for year *y* at knot *k*, *p* is price, CPUE is the index of abundance prior to any fishing effort occurring (our index of abundance, *q* is catchability, *E* is effort, and *c* are variable costs). 
+where for year *y* at knot *k*, *p* is price, CPUE is the index of abundance prior to any fishing effort occurring (our index of abundance, *q* is catchability, *E* is effort, and *c* are variable costs).
 
 @Miller2016 was primarily interested in estimating quota price aspects of *c*, taking as data *p*, *CPUE*, *E*, and other components of *c* (fuel, labor, ice, etc.). We are instead interested in estimating CPUE as a function of other variable, and so we can rearrange this equation as
 
 $$ CPUE_{y,k} = \frac{\pi_{y,k} + c_{y,k}}{pe^{-qE_{y,k}}}$$
 
-Similar to @Miller2016 we assume for now that $\pi_{y,k}$ is zero, though this is clearly not accurate given that many of the fisheries sampled by this model are highly regulated and in some cases rationalized (however, changing $\pi_{y,k}$ to positive values had little effect on the fit of the model). *p* is taken from @Melnychuk2016, and $E_{y,k}$ is observed from GFW. 
+Similar to @Miller2016 we assume for now that $\pi_{y,k}$ is zero, though this is clearly not accurate given that many of the fisheries sampled by this model are highly regulated and in some cases rationalized (however, changing $\pi_{y,k}$ to positive values had little effect on the fit of the model). *p* is taken from @Melnychuk2016, and $E_{y,k}$ is observed from GFW.
 
-That leaves *q* and *c* as unknown parameters. While we do not have the high resolution logbook data available to @Miller2016, we could certainly obtain data on fuel and labor prices for this model. However, at this time, I simply assume that $c_{y,k}$ is a function of the distance of a knot *k* from port, the mean vessel size used at knot *k* in year *y*, and the interaction of these terms (under the assumption that cost of large vessels increase with distance). 
+That leaves *q* and *c* as unknown parameters. While we do not have the high resolution logbook data available to @Miller2016, we could certainly obtain data on fuel and labor prices for this model. However, at this time, I simply assume that $c_{y,k}$ is a function of the distance of a knot *k* from port, the mean vessel size used at knot *k* in year *y*, and the interaction of these terms (under the assumption that cost of large vessels increase with distance).
 
 $$ c_{y,k} = \beta_{1}pd_{k} + \beta_{2}vs_{y,k} + \beta_{3}pd_{k}vs_{y,k} $$
 
-Where $pd_{k}$ is the distance from port of knot *k* and $vs_{y,k}$ is the mean vessel length observed fishing at knot *k* in year *y*. 
+Where $pd_{k}$ is the distance from port of knot *k* and $vs_{y,k}$ is the mean vessel length observed fishing at knot *k* in year *y*.
 
 We fit the model through maximum likelihood using Template Model Builder (TMB).
 
@@ -550,265 +400,126 @@ As a counterbalance to the relative complexity of the machine learning and struc
 
 $$log(density_{i}) = \beta_0 + log(\beta_1effort_i)$$
 
-We include this mostly to explore the basic evidence for a hypothesis that more effort means high fish density.  
+We include this mostly to explore the basic evidence for a hypothesis that more effort means high fish density.
 
 
-# Results 
+# Results
 
-## How does effort relate to abundance
+## Linear Models
 
-show plots of effort vs abundance at various spatial scales 
+Before heading down the statistical rabbit hole, we can simply examine how well linear transformations of effort predict abundance. This has an intuitiatve aspect to it; we can hypothesize that the reason that more fishing occurs in the challenging waters off Alaska than Santa Barbara is that there are higher volumes of valuable fish in that area. However, we could also imagine a scenario where fishing effort is concentrated in overfished but inexpensive grounds, leaving higher fish abundance in more remote areas that are not economical to fish. 
 
-## GFW catch per unit effort
+Looking at the effort and abundance indicies, we see some evidence of a "more fishing where there's more fish" hypothesis. Across each of the survey regions, aggregating up to a 200 km^2^ area, there is a positive correlation between the total hours of applicable fishing observed by GFW in that area and the total estimated revenues available in that area (estimated by the sum of the density per knot times the area of that knot times the price of each price of each species in that knot witihn the area encompased by the 200 km^2^ box). However, the relationship is far from clear, with subtantial variation around the mean slope for each region. In addition, we see if all one knew was the total amount of fishing hours, the magnitude of the fishing oppotrunity that those hours might correspond to varies substantially. (Fig.\@ref(fig:effort-v-fish)).
 
-Show CPUE calculations 
+```{r effort-v-fish, fig.cap = "Total fishing hours plotted against fish revenue density. Available revenue is calculated as the sum of the densities of each species times their respective ex-vessel price. Each point represents a 200km^2^ area"}
+
+e_v_ed_plot
+
+```
+
+
+This coarse data analysis suggests that there may be a relationship between total fishing effort and the value of the fishing opportunity witihn a region, but certainly not a clear enough relationship to serve as a reliable predictor of fishable biomass. That effort levels alone are not clearly informative is not very surprising. What though do we learn by pairing effort data with locally available catch data to construct a CPUE index? CPUE can, under the appropriate circumstances, serve as an index of relative abundance. To create a GFW derived CPUE index, we pulled catch data for the relevant regions and species from three different databases: the RAM Legacy Stock Assessment Databse [@Ricard2011], the NMFS commercial landings database [citation], and the FAO's capture production database [citation]. Pairing these catch data with the the GFW effort data gives us a timeseries of aggregate CPUE for a given region. We then compared these CPUE trends to trends in biomass provided by the RAM database and from the processed trawl survey used throughout this study. We see no clear agreement between these two metrics, and if we take the RAM and survey derived indicies of abundance as true, the GFW derived CPUE index is in some cases provides an exactly oppositive index of abundance from the true value (Fig.\@ref(fig:gfw-cpue))
+
+```{r gfw-cpue, fig.cap="GFW derived CPUE (yellow lines) and assessments of abundance (blue) for the US West Coast and Eastern Bering Sea regions"}
+
+wc_cpue_plot + ebsbts_cpue_plot
+
+```
+
+
+## Structural Models 
+
+Since raw effort and effort derived CPUE indicies do not appear to be valid methods for estimating abundance, we now turn to more detailed modeling approaches to utilize effort data to predict abundance. Our structural modeling approach follows a standard bio-economic framework, as layed out in @Miller2016. @Miller2016 used a structural modeling approach in part to estimate the quota prices in the US West Coast grouddfish trawl fishery individual fishing quota (IFQ) program, using data on logbook reported CPUE, prices, amd variable and fixed costs (labor, fuel, etc.). Making the assumption that for an appropriate fleet unit and time period marginal profits are equal in space, @Miller2016 then estimates quota prices for different species that, given their other data, rationalize the observed distribution of effort in the fishery. 
+
+We follow a similar approach but rearrange the problem to estimate abundance instead of effort. We do so by fitting a model that estimates fishing costs as a function of distance from port, distance from shore, vessel size, and hours fished. Fishing costs are estiamted by finding the costs that, given the observed distribution of effort, rationalize the biomass reported by the fishery independent trawl surveys....see methods...
+
+Fitted cost coefficients 
+
+The biomass-predicting structural model shows limited predictive ability within the training set. For all but three of the training datasets, the R^2^ was less than 0.1... 
+
+What else to say?
+
+
+```{r cost-coefs}
+
+```
+
+```{r strct_o_v_p, fig.cap= "Observed vs predicted biomass (A) and R2 values (B) for the fitted structural models across different evaluated data splits"}
+
+strct_ovp + strct_r2 + plot_layout(ncol = 1, nrow = 2, heights = c(2,1))
+
+```
+
 
 ## Predicting Effort
 
-Bio-economic theory suggests that effort and abundance are a coupled system: Density should affect the amount and location of effort, and the amount and location of effort should affect density. 
+Linear and structural models demonstrate little ability in accurately predicting fish abundance using effort data. We turned to machine learning as a final strategy for identifying a mechanism for predicting fish abundance using fishing effort. To begin with, we tested a range of XX different machine learning approaches: random forests [ranger, citation], gradient boosted machines (gbm, citation), and multivariate adaptive regression splines (bagged MARS and MARS models, citation). Each of these machine learning models is designed to make use of supplied data to maximize out-of-sample predictive power. However, each model also contains a number of tuning parameters that can only be reliably selected by cross-validation. To that end, we used the `caret` package in R [citation] to perform two repeats of ten fold cross validation across factorial combinations of candidate tuning parameters, and selected the set of tuning parameters that minimized the out-of-sample root mean squared error. 
 
-Regression and structural approach to predicting density as a latent variable 
+With those tuning parameters in hand, we then utilized the cross-validation routines from those selected tuning parameters to quantitatively compare each of the tuned machine learning models in terms of their out-of-sample predictive power. For each model, we have twenty out-of-sample RMSE estiamtes. We used the `tidyposterior` package [citation] to fit a Bayesian hierarchichal model that, controlling for split effects, estimates the relative effect of each candidate model on out-of-sample RMSE. Based on this analysis, the random forest model (as implemented by the `ranger` package) has the lowest estiamted out-of-sample RMSE. As such, we use the random forest, as implemented by the `ranger`, as our candidate machine learning model for the remainder of this paper. 
 
-## Predicting Density
+```{r best-ml-plot, fig.cap="Posterior densities of out-of-sample RMSE predicted by `tidyposterior`"}
+best_ml_model_plot
+```
 
-All GFW only to this point. 
+The random forest approach shows substantially more predictive ability within the training data split than any of the linear or structural approaches, with a median R^2^ across the training splits of over 0.5.  What else to say here?
 
-### Which Model is Best?
+```{r ranger-ovp, fig.cap="Observed vs predicted biomass (A) and R2 values (B) for the fitted random forest models across different evaluated data splits"}
 
-plot showing training r2 of machine learning and non approachs
-
-```{r model-plot, fig.cap = "Training data R2 of each tested model. Fill denotes whether the model was used to predict fished or unfished species "}
-
-skynet_models %>% 
-  group_by(model) %>% 
-  mutate(mean_r2 = mean(r2_training, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(model = fct_reorder(model, mean_r2)) %>% 
-  ggplot(aes(r2_training, model,fill = unfished_only)) +
-  geom_density_ridges(alpha = 0.75) +
-  facet_grid(~dep_var ) + 
-  scale_x_continuous(limits = c(0,1), name = bquote(R^2)) + 
-  theme(axis.title.y = element_blank()) + 
-  scale_fill_manual(values = wes_palette("Royal1"))
-  
+ranger_ovp + ranger_r2 + plot_layout(ncol = 1, nrow = 2, heights = c(2,1))
 
 ```
 
-tidyposterior selection of best machine learning model
-
-```{r, results = "hide"}
 
 
-kfold_preds <- readRDS(file = here::here("results",run_name, "kfold_preds.RDS"))
+## Structural vs. Machine Learning
 
-kfold_preds_summary <-  kfold_preds %>% 
-  select(-fitted_model) %>% 
-  unnest() %>% 
-  select(Resample, model, variables, obs, pred,) %>% 
-  mutate(model = glue::glue("{model}-{variables}")) %>% 
-  select(-variables) %>% 
-  group_by(Resample, model) %>% 
-  summarise(model_rmse = sqrt(mean((obs - pred)^2))) %>% 
-  rename(id = Resample) %>% 
-  spread(model, model_rmse)
-              
-
-rmse_mod <- perf_mod(kfold_preds_summary, seed = 4344, iter = 5000)
-
-rmse_post <- tidy(rmse_mod)
-
-stacked_summary <- kfold_preds_summary %>% 
-  gather(model, model_rmse, -id)
-
-ggplot(rmse_post) + 
-  geom_point(
-    data = stacked_summary, 
-    aes(x = model, y = model_rmse), 
-    alpha = .5, col = "blue"
-  ) + 
-  coord_flip()
-
-
-best_ml_model <- rmse_mod$stan %>% 
-  tidy() %>%
-  filter(str_detect(term, "model")) %>% 
-  mutate(model = str_replace_all(term, "model","")) %>% 
-  arrange((estimate))
-  
-
-best_ml_model <- str_extract(best_ml_model$model[[1]]
-,".*(?=-)")
-
-
-
-# best_ml_model <- "gbm"
-
-best_fits <- skynet_models %>% 
-  filter(model == best_ml_model,
-         dep_var == "density",
-         variables == "gfw_and_enviro") %>% 
-  mutate(data_subset = if_else(data_subset == "lag_1_skynet_data", "skynet", data_subset))
-```
-
-
-figure showing spatial resolution effects of best ML model against linear/structural models. 
-
-### Fig.2 Upscaling/downscaling performance
-
-We see then that in nearly all circumstances the machine learning approaches outperform either structural approach. However, these results are at relatively fine spatial scales (~25km^2^ XX), and we might not expect something like a structural model to accurately predict densities at that scale. To address this, we conducted "downscaling" and "upscaling" analysis. For "downscaling", we fit the model to the finest resolution data, and then calculating the average densities at increasingly coarse resolutions. For example, if the model predicted densities of 10 tons/km^2^ in one 25km^2^ block, and 0 tons/km^2^ in the neighboring 25km^2^ block, we can downscale them together into on 50km^2^ block with an average density of 5 tons/km^2^. "Upscaling" works in the same manner, but applies to the data that the model is fit on. So, we start with the finest resolution data, upscale it to a resolution of say 100km^2 blocks, calculate the average density in that block, and fit the models to that now coarser resolution data. 
+he machine learning approaches outperform either structural approach. However, these results are at relatively fine spatial scales (~25km^2^ XX), and we might not expect something like a structural model to accurately predict densities at that scale. To address this, we conducted "downscaling" and "upscaling" analysis. For "downscaling", we fit the model to the finest resolution data, and then calculating the average densities at increasingly coarse resolutions. For example, if the model predicted densities of 10 tons/km^2^ in one 25km^2^ block, and 0 tons/km^2^ in the neighboring 25km^2^ block, we can downscale them together into on 50km^2^ block with an average density of 5 tons/km^2^. "Upscaling" works in the same manner, but applies to the data that the model is fit on. So, we start with the finest resolution data, upscale it to a resolution of say 100km^2 blocks, calculate the average density in that block, and fit the models to that now coarser resolution data.
 
 As would be expected, the performance of the models increases at coarser resolutions, both for the downscaling and upscaling examples. However, even at the most extreme cases,the structural or linear models does not approach acceptable performance standards (Fig.\@ref(fig:resolution-plot)).
 
-
-```{r downscaling}
-
-  sub_skynet_models <- skynet_models %>%
-    mutate(
-      run_name = glue::glue(
-        "{.$dep_var}--{.$model}--{.$weight_surveys}--{.$test_sets}--{.$data_subset}"
-      )
-    ) %>% 
-  filter(model %in% c(best_ml_model, "structural"),
-         dep_var == "density",
-         data_subset == "skynet",
-         test_set == "random",
-         variables == "gfw_and_enviro") %>% 
-  mutate(training_data = map(training_data, ~.x %>% filter(surveyed_year == T)))
+```{r strct-v-ml-plot, fig.cap="Training set R2 from aggregating results of model fit on finest resolution (A) and fitting the model at coarser resolutions (B)"}
+strct_v_ml_plot
+```
 
 
-  downscaled_performance <-
-    cross_df(list(
-      run_name = sub_skynet_models$run_name,
-      resolution =  seq(25, 200, by = 50)
-    )) %>%
-    left_join(
-      sub_skynet_models %>% select(
-        run_name,
-        training_data,
-        dep_var,
-        model,
-        weight_surveys,
-        test_sets,
-        data_subset
-      ),
-      by = "run_name"
-    ) %>%
-    arrange(run_name)
+# Value of Information
 
-  downscaled_performance <-  downscaled_performance %>%
-    mutate(
-      new_grid  = map2(
-        training_data,
-        resolution,
-        create_grid,
-        lon_name = rounded_lon,
-        lat_name = rounded_lat
-      )
-    )
-
-  downscaled_performance <-  downscaled_performance %>%
-    mutate(
-      new_data = map2(
-        training_data,
-        new_grid,
-        snap_to_grid,
-        old_lon_name = rounded_lon,
-        old_lat_name = rounded_lat,
-        new_lon_name = lon,
-        new_lat_name = lat
-      )
-    )
-
-  r2foo <- function(x) {
-    r2 <-
-      yardstick::rsq(x, truth = agg_mean_density, estimate = agg_pred)
-
-  }
-
-
-  downscaled_performance <- downscaled_performance %>%
-    mutate(oob_r2 = map_dbl(new_data, r2foo))
-
-
-downscale_plot <- downscaled_performance %>% 
-  group_by(model) %>% 
-  mutate(meanr2 = mean(oob_r2, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(model = fct_reorder(model, -meanr2)) %>% 
-  ggplot(aes(resolution, oob_r2, color = model)) + 
-  geom_line(show.legend = F) + 
-  geom_point(size = 2, show.legend = F) + 
-  labs(y = bquote(R^2), x = bquote("Resolution"~(km^2)), title = "A)") + 
-  theme(axis.title.y = element_text(angle = 0))
-
-
-upscale_plot <- skynet_models %>% 
-  ungroup() %>% 
-  filter(test_sets == "random", data_subset %in% c("skynet","skynet_25km","skynet_100km"), dep_var == "density",!str_detect(data_subset,"delta"),
-         model %in% c(best_ml_model,"structural"),
-         variables == "gfw_and_enviro") %>% 
-  group_by(model) %>% 
-  mutate(meanr2 = mean(r2_training, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(model = fct_reorder(model, -meanr2)) %>% 
-  mutate(data_subset = fct_relevel(data_subset,c("skynet","skynet_25km","skynet_100km"))) %>% 
-  ggplot(aes(data_subset,r2_training, fill = model)) + 
-  geom_col(position = "dodge") + 
-  scale_x_discrete(labels = c("Raw", bquote("25"~km^2), bquote("100"~km^2))) +
-  labs(title = "B)") + 
-  theme(axis.title.y = element_blank(), axis.title.x = element_blank()) + 
-    coord_flip()
-
-upscale_plot <-  upscale_plot + coord_flip() 
- downscale_plot + upscale_plot 
-
+```{r test-training-plot, fig.cap="R2 for testing and training splits across candidate variables and data splits"}
+test_training_plot
 ```
 
 
 
-
-
-These results are from model run `r run_name`. For now I am just describing the results enough to try and convey what I hope to get out of that graph, since specific results are still in flux. However, I've run these results enough different ways that I'm fairly confident that these overall results will remain relatively stable (the results are highly insensitive to things like log density vs log biomass vs density vs center-scaled density, etc.)
-
-We explore the ability of our models to make accurate out-of-sample (OOS) predictions across combinations of three dimensions
-
-- Space (where fish are)
-
-- Abundance (how many fish there)
-
-- Trends (chance in fish abundance)
-
-All predicted results represent the models prediction of the net abundance of all fished species encountered by the fishery independent surveys. In other words, there is no way at the moment to isolate individual species from the indices. 
-
+## Extras
 
 ### Which data transformation is best?
 
-Holding everything constant except for the test-training split. 
+Holding everything constant except for the test-training split.
 
 ```{r}
 
-best_data_subset <- best_fits %>% 
-  filter(dep_var == "density", unfished_only == FALSE) %>% 
-  group_by(data_subset) %>% 
-  mutate(median_r2 = median(r2_training, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(data_subset = fct_reorder(data_subset, median_r2)) %>% 
+best_data_subset <- best_fits %>%
+  filter(dep_var == "density", unfished_only == FALSE) %>%
+  group_by(data_subset) %>%
+  mutate(median_r2 = median(r2_training, na.rm = T)) %>%
+  ungroup() %>%
+  mutate(data_subset = fct_reorder(data_subset, median_r2)) %>%
   arrange(desc(median_r2))
 
-best_data_subset %>% 
-  ggplot() + 
-  geom_point(position = "dodge",aes(data_subset,r2_training), alpha = 0.5) + 
+best_data_subset %>%
+  ggplot() +
+  geom_point(position = "dodge",aes(data_subset,r2_training), alpha = 0.5) +
   geom_point(aes(data_subset, median_r2), color = "red", size = 2) +
   coord_flip()
 
 best_data_subset <- "skynet"
 
 
-best_fits <- best_fits %>% 
+best_fits <- best_fits %>%
   filter(data_subset == best_data_subset)
 ```
 
-Given similar median/mean performance but more variables range of other data splits, sticking with skynet as your default. 
+Given similar median/mean performance but more variables range of other data splits, sticking with skynet as your default.
 
 ### Broad Model Performance
 
@@ -818,19 +529,19 @@ How well do each of the models perform across the range of scenarios evaluated? 
 
 ```{r perf-plot, fig.cap = "Boxplots of R^2^ between observed and out-of-sample predicted densities for each model across all model configurations. Facet name reflects the testing split"}
 
-best_fits %>% 
-  group_by(test_set) %>% 
-  mutate(mean_r2 = mean(r2, na.rm = T)) %>% 
-  ungroup() %>% 
-  mutate(test_set = fct_reorder(test_set, mean_r2)) %>% 
-  gather(r2_source, r2_value, r2, r2_training) %>% 
-  ggplot(aes(test_set, r2_value)) + 
+best_fits %>%
+  group_by(test_set) %>%
+  mutate(mean_r2 = mean(r2, na.rm = T)) %>%
+  ungroup() %>%
+  mutate(test_set = fct_reorder(test_set, mean_r2)) %>%
+  gather(r2_source, r2_value, r2, r2_training) %>%
+  ggplot(aes(test_set, r2_value)) +
   geom_line() +
-  geom_point(aes( color = r2_source), size = 4) + 
-  coord_flip() + 
-  theme(axis.title.y = element_blank()) + 
-  labs(y = bquote(R^2)) + 
-  scale_color_manual(name = "Data Split",labels = c("Testing","Training"),values = wes_palette("Zissou1")) 
+  geom_point(aes( color = r2_source), size = 4) +
+  coord_flip() +
+  theme(axis.title.y = element_blank()) +
+  labs(y = bquote(R^2)) +
+  scale_color_manual(name = "Data Split",labels = c("Testing","Training"),values = wes_palette("Zissou1"))
 
 
 ```
@@ -842,17 +553,17 @@ Demonstrates that what you train on matters a lot... one question, what happens 
 ### Predicting Spatial Abudance
 
 
-How well can the model predict abundance at locations that are not included in the model training but are in the same geographic region as the training data? To test this, we split the data into randomized training (75% of the data) and testing (25%) splits. We train each model (using v-fold cross validation of the training data where needed for tuning) on the training data, and then use the trained model to predicted the testing data. Since the data are spatial and temporal, we expect that the model should perform fairly well at this task; densities at one location and time are correlated with densities at a nearby location and time, and therefore a model fit on a subset of data should do a good job of predicting omitted neighbors, but this is a useful starting point for model assessment. 
+How well can the model predict abundance at locations that are not included in the model training but are in the same geographic region as the training data? To test this, we split the data into randomized training (75% of the data) and testing (25%) splits. We train each model (using v-fold cross validation of the training data where needed for tuning) on the training data, and then use the trained model to predicted the testing data. Since the data are spatial and temporal, we expect that the model should perform fairly well at this task; densities at one location and time are correlated with densities at a nearby location and time, and therefore a model fit on a subset of data should do a good job of predicting omitted neighbors, but this is a useful starting point for model assessment.
 
 ```{r}
-spatial_performance <- best_fits %>% 
+spatial_performance <- best_fits %>%
   filter(test_set == "random")  %>% {
     .$test_data[[1]]
-  } %>% 
-  filter(surveyed_year == T) %>% 
-  group_by(survey) %>% 
-  mutate(sd_density = sd(density, na.rm = T)) %>% 
-  group_by(rounded_lat, rounded_lon, survey) %>% 
+  } %>%
+  filter(surveyed_year == T) %>%
+  group_by(survey) %>%
+  mutate(sd_density = sd(density, na.rm = T)) %>%
+  group_by(rounded_lat, rounded_lon, survey) %>%
   summarise(resid = mean(pred - density),
             scaled_resid = pmax(-2,pmin(2,resid / mean(sd_density))))
 ```
@@ -866,8 +577,8 @@ For visual clarity, we present results upscaled to the 100km^2^ resolution. At e
 
 
 
-spatial_performance_plot <- spatial_performance %>% 
-      mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+spatial_performance_plot <- spatial_performance %>%
+      mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>%
   dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
   ungroup() %>%
   mutate(geometry = sf::st_sfc(geometry, crs =
@@ -881,9 +592,9 @@ alaska_bbox <- sf::st_bbox(spatial_performance_plot %>% filter(survey != "wcgbts
 wc_bbox <- sf::st_bbox(spatial_performance_plot %>% filter(survey == "wcgbts"))
 
 
-resid_hist <- spatial_performance %>% 
-  ggplot(aes(scaled_resid)) + 
-  geom_density(color = "black", fill = "grey", alpha = 0.5) + 
+resid_hist <- spatial_performance %>%
+  ggplot(aes(scaled_resid)) +
+  geom_density(color = "black", fill = "grey", alpha = 0.5) +
   labs(x = "Scaled Residuals", caption = "Residuals divided by standard deviation of observed densities") +
   theme(axis.title.y = element_blank(),
         axis.text.y = element_blank(),
@@ -892,26 +603,26 @@ resid_hist <- spatial_performance %>%
 
 
 
-alaska_spatial_residual_plot <- ggplot() + 
-  geom_sf(data = spatial_performance_plot %>% filter(survey != "wcgbts"), aes(color = scaled_resid),size = 0.5, alpha = 0.75) + 
-  geom_sf(data = pacific_map, shape = 21) + 
+alaska_spatial_residual_plot <- ggplot() +
+  geom_sf(data = spatial_performance_plot %>% filter(survey != "wcgbts"), aes(color = scaled_resid),size = 0.5, alpha = 0.75) +
+  geom_sf(data = pacific_map, shape = 21) +
   coord_sf(xlim = c(alaska_bbox['xmin'], alaska_bbox['xmax']),
-  ylim = c(alaska_bbox['ymin']*.95, alaska_bbox['ymax'] * 1.1), expand = F) + 
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Scaled Residuals", guide = guide_colorbar(frame.colour = "black")) + 
+  ylim = c(alaska_bbox['ymin']*.95, alaska_bbox['ymax'] * 1.1), expand = F) +
+  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Scaled Residuals", guide = guide_colorbar(frame.colour = "black")) +
 map_theme +
-  labs(caption = "Alaska") + 
+  labs(caption = "Alaska") +
   theme(legend.key.height = unit(1,"cm"))
-  
 
-wc_spatial_residual_plot <- ggplot() + 
-  geom_sf(data = spatial_performance_plot %>% filter(survey == "wcgbts"), aes(color = scaled_resid), size = 0.5, alpha = 0.75) + 
-  geom_sf(data = pacific_map) + 
+
+wc_spatial_residual_plot <- ggplot() +
+  geom_sf(data = spatial_performance_plot %>% filter(survey == "wcgbts"), aes(color = scaled_resid), size = 0.5, alpha = 0.75) +
+  geom_sf(data = pacific_map) +
   coord_sf(xlim = c(wc_bbox['xmin']*.98, wc_bbox['xmax']),
-  ylim = c(wc_bbox['ymin'], wc_bbox['ymax'] * 1.05), expand = F) + 
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals", guide = "none") + 
+  ylim = c(wc_bbox['ymin'], wc_bbox['ymax'] * 1.05), expand = F) +
+  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals", guide = "none") +
 map_theme +
   labs(caption = "West Coast")
-  
+
 
 (
   wc_spatial_residual_plot + alaska_spatial_residual_plot
@@ -922,37 +633,37 @@ map_theme +
 
 ### Predicting out-of-region Spatial Abundance
 
-In Fig.\@ref(fig:spatial-plot), we are essentially using the model to fill simulated gaps in the data through our test and training splits.  However, this is not the ultimate goal of a project such as this: Ideally, we want to be able to use data such as those provided by GFW to estimate spatio-temporal abundance trends in regions completely outside of areas in which we do have fishery independent research surveys. While we do not (yet, looking at you west Africa trawl surveys....) have fishery independent data from vastly different regions to train on, we can at least split up the data that we do have. 
+In Fig.\@ref(fig:spatial-plot), we are essentially using the model to fill simulated gaps in the data through our test and training splits.  However, this is not the ultimate goal of a project such as this: Ideally, we want to be able to use data such as those provided by GFW to estimate spatio-temporal abundance trends in regions completely outside of areas in which we do have fishery independent research surveys. While we do not (yet, looking at you west Africa trawl surveys....) have fishery independent data from vastly different regions to train on, we can at least split up the data that we do have.
 
-In this case, we will now split the data into a training set comprised of all of the surveys around Alaska (ebsbts, aibts, goabts), and a test set comprised of the wcgbts. With that data, we then repeat the same exercise as the last step (calculating spatial residuals and assessing). 
+In this case, we will now split the data into a training set comprised of all of the surveys around Alaska (ebsbts, aibts, goabts), and a test set comprised of the wcgbts. With that data, we then repeat the same exercise as the last step (calculating spatial residuals and assessing).
 
-Our estimates of absolute density in the testing data (the west coast groundfish bottom trawl survey) are positively biased. This is perhaps unsurprising: observed densities are higher in the Alaska region than they are in the west coast region, and therefore a model trained on Alaska can be expected to predict higher biomass than might be actually observed in a lower density ecosystem (Fig.\@ref(fig:oor-plot)). 
+Our estimates of absolute density in the testing data (the west coast groundfish bottom trawl survey) are positively biased. This is perhaps unsurprising: observed densities are higher in the Alaska region than they are in the west coast region, and therefore a model trained on Alaska can be expected to predict higher biomass than might be actually observed in a lower density ecosystem (Fig.\@ref(fig:oor-plot)).
 
 
 ```{r spatial-res-plot, fig.cap = "Scaled spatial resisduals from a model fit to a coarse grid, applied to a finer grid"}
 
-train_performance <- best_fits %>% 
-  filter(test_set == "spatial_alaska", data_subset == "skynet")  %>%{
+train_performance <- best_fits %>%
+  filter(test_set == "random", data_subset == "skynet")  %>%{
     .$training_data[[1]]
-  } %>% 
-  mutate(resid = pred - density) %>% 
+  } %>%
+  mutate(resid = pred - density) %>%
   mutate(split = "Training")
 
-test_performance <- best_fits %>% 
+test_performance <- best_fits %>%
   filter(test_set == "spatial_alaska", data_subset == "skynet")  %>% {
     .$test_data[[1]]
-  } %>% 
-  mutate(resid = pred - density) %>% 
+  } %>%
+  mutate(resid = pred - density) %>%
   mutate(split = "Testing")
 
-spatial_performance <- train_performance %>% 
-  bind_rows(test_performance) %>% 
-    filter(surveyed_year == T) %>% 
-  group_by(survey) %>% 
+spatial_performance <- train_performance %>%
+  bind_rows(test_performance) %>%
+    filter(surveyed_year == T) %>%
+  group_by(survey) %>%
   mutate(scaled_resid = resid / sd(density))
 
-spatial_performance_plot <- spatial_performance %>% 
-      mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>% 
+spatial_performance_plot <- spatial_performance %>%
+      mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>%
   dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
   ungroup() %>%
   mutate(geometry = sf::st_sfc(geometry, crs =
@@ -962,34 +673,34 @@ spatial_performance_plot <- spatial_performance %>%
 bbox <- sf::st_bbox(spatial_performance_plot)
 
 
-resid_hist <- spatial_performance %>% 
-  ggplot(aes(scaled_resid,fill = split)) + 
-  geom_density(alpha = 0.75) + 
+resid_hist <- spatial_performance %>%
+  ggplot(aes(scaled_resid,fill = split)) +
+  geom_density(alpha = 0.75) +
   labs(x = "Scaled Residuals", title = "A)") +
   theme(axis.title.y = element_blank(),
-        axis.text.y = element_blank()) + 
-  theme(legend.position = "right") + 
+        axis.text.y = element_blank()) +
+  theme(legend.position = "right") +
   scale_fill_discrete(name = '')
 
 
-spatial_residual_plot <- ggplot() + 
-  geom_sf(data = spatial_performance_plot %>% filter(split == "Testing"), aes(color = scaled_resid), size = 0.5, alpha = 0.75) + 
-  geom_sf(data = pacific_map) + 
+spatial_residual_plot <- ggplot() +
+  geom_sf(data = spatial_performance_plot %>% filter(split == "Testing"), aes(color = scaled_resid), size = 0.5, alpha = 0.75) +
+  geom_sf(data = pacific_map) +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
-  ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) + 
+  ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) +
   scale_shape(guide = FALSE) +
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "lightgrey", name = "Residuals") + 
+  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "lightgrey", name = "Residuals") +
 map_theme +
   labs(title = "B)")
-  
+
 
   resid_hist + spatial_residual_plot + plot_layout(ncol = 2, nrow = 1, widths = c(1,2))
 
 ```
 
-Given this understandable bias, we can also consider to what extent the model is able to predict the **relative** spatial density (i.e. regions with relatively density vs those with relatively lower density), even if the absolute spatial densities are off. To accomplish this, we scale the densities in each region relative to the maximum density observed in that region. 
+Given this understandable bias, we can also consider to what extent the model is able to predict the **relative** spatial density (i.e. regions with relatively density vs those with relatively lower density), even if the absolute spatial densities are off. To accomplish this, we scale the densities in each region relative to the maximum density observed in that region.
 
-Re-scaling the densities substantially reduces the bias in the testing data, indicating that the model is much better at estimating the relative spatial density of fish within a region than the absolute value in regions that vary substantially in their mean density from the training region (Fig.\@ref(fig:rel-plot)). 
+Re-scaling the densities substantially reduces the bias in the testing data, indicating that the model is much better at estimating the relative spatial density of fish within a region than the absolute value in regions that vary substantially in their mean density from the training region (Fig.\@ref(fig:rel-plot)).
 
 ```{r aggregate}
 
@@ -1001,12 +712,12 @@ resolution_km2 <- 100
       run_name = glue::glue(
         "{.$dep_var}--{.$model}--{.$weight_surveys}--{.$test_sets}--{.$data_subset}"
       )
-    ) %>% 
+    ) %>%
   filter(model %in% c(best_ml_model),
          dep_var == "density",
          data_subset == "skynet",
-         test_set %in% c("random","alaska", "random_west_coast", "west_coast","year_greq_than_2014"),
-         variables == "gfw_and_enviro")  %>% 
+         test_set %in% c("random","spatial","alaska", "random_west_coast", "west_coast","year_greq_than_2014"),
+         variables == "gfw_only")  %>%
     mutate(test_data = map(test_data, ~.x %>% filter(surveyed_year == T)),
            training_data = map(training_data, ~.x %>% filter(surveyed_year == T)))
 
@@ -1041,7 +752,7 @@ downscaled_results <-
         lon_name = rounded_lon,
         lat_name = rounded_lat
       )
-    ) %>% 
+    ) %>%
     mutate(
       training_data = map2(
         training_data,
@@ -1054,7 +765,7 @@ downscaled_results <-
         dep_var = "density"
       )
     )
-  
+
     downscaled_results <-  downscaled_results %>%
     mutate(
       testing_grid  = map2(
@@ -1064,7 +775,7 @@ downscaled_results <-
         lon_name = rounded_lon,
         lat_name = rounded_lat
       )
-    ) %>% 
+    ) %>%
     mutate(
       test_data = map2(
         test_data,
@@ -1082,45 +793,45 @@ downscaled_results <-
 
 ```{r out-of-region-plot, fig.cap = "Relative out-of-region "}
 
-train_performance <- downscaled_results %>% 
-  select(test_set,train_set, training_data) %>% 
-  unnest() %>% 
-  group_by(train_set) %>% 
+train_performance <- downscaled_results %>%
+  select(test_set,train_set, training_data) %>%
+  unnest() %>%
+  group_by(train_set) %>%
   mutate(rel_pred = agg_pred / max(agg_pred),
-         rel_density = agg_mean_density / max(agg_mean_density)) %>% 
+         rel_density = agg_mean_density / max(agg_mean_density)) %>%
   mutate(split = "Training")
 
-test_performance <- downscaled_results %>% 
-  select(test_set,train_set, test_data) %>% 
-  unnest() %>% 
-  group_by(test_set) %>% 
+test_performance <- downscaled_results %>%
+  select(test_set,train_set, test_data) %>%
+  unnest() %>%
+  group_by(test_set) %>%
   mutate(rel_pred = agg_pred / max(agg_pred),
-         rel_density = agg_mean_density / max(agg_mean_density)) %>% 
+         rel_density = agg_mean_density / max(agg_mean_density)) %>%
   mutate(split = "Testing")
 
-spatial_performance <- train_performance %>% 
-  bind_rows(test_performance) %>% 
-  ungroup() %>% 
-    filter(!str_detect(test_set, "year_")) %>% 
-  mutate(set_order = as.numeric(factor(test_set))) %>% 
+spatial_performance <- train_performance %>%
+  bind_rows(test_performance) %>%
+  ungroup() %>%
+    filter(!str_detect(test_set, "year_")) %>%
+  mutate(set_order = as.numeric(factor(test_set))) %>%
   mutate(test_set = fct_reorder(test_set, set_order),
-         train_set = fct_reorder(train_set, set_order)) 
+         train_set = fct_reorder(train_set, set_order))
 
-trained_plot <- spatial_performance %>% 
-  filter(split == "Training") %>% 
-  ggplot(aes(rel_density, rel_pred)) + 
-  geom_point() + 
-  facet_wrap(~ train_set, strip.position = "left", nrow = n_distinct(spatial_performance$test_set), ncol = 1 ) + 
+trained_plot <- spatial_performance %>%
+  filter(split == "Training") %>%
+  ggplot(aes(rel_density, rel_pred)) +
+  geom_point() +
+  facet_wrap(~ train_set, strip.position = "left", nrow = n_distinct(spatial_performance$test_set), ncol = 1 ) +
   labs(title = "Trained on...", y = "Predicted")  +
     theme(axis.title.x = element_blank())
 
 
-tested_plot <- spatial_performance %>% 
-  filter(split == "Testing") %>% 
-  ggplot(aes(rel_density, rel_pred)) + 
-  geom_point() + 
-  facet_wrap(~ test_set, strip.position = "right", nrow = n_distinct(spatial_performance$test_set), ncol = 1 ) + 
-  labs(title = "Tested on...", x = "Observed") + 
+tested_plot <- spatial_performance %>%
+  filter(split == "Testing") %>%
+  ggplot(aes(rel_density, rel_pred)) +
+  geom_point() +
+  facet_wrap(~ test_set, strip.position = "right", nrow = n_distinct(spatial_performance$test_set), ncol = 1 ) +
+  labs(title = "Tested on...", x = "Observed") +
   theme(axis.title.y = element_blank())
 
 trained_plot + tested_plot &
@@ -1131,52 +842,52 @@ trained_plot + tested_plot &
   strip.text = element_text(size = 7),
   plot.margin = unit(rep(.1, 4), "lines")
   )
-  
+
 
 ```
 
 
 ### Predicting Trends
 
-Understanding the spatial distribution of fish is important since it can help us understand expansion, contraction, and shifts in fish ranges, whether caused by fishing pressure of environmental factors such as climate change. 
+Understanding the spatial distribution of fish is important since it can help us understand expansion, contraction, and shifts in fish ranges, whether caused by fishing pressure of environmental factors such as climate change.
 
-From the perspective understanding population dynamics though, it is also critical to understand trends in overall population abundance. To that extent, how well does this model based on fishing effort predict trends in total species abundance? To accomplish this, in each year we take our estimated and observed densities (ton/km^2^) per block, multiply the density in each block by the area of that block, and then sum the estimated and observed abundances in each block. 
+From the perspective understanding population dynamics though, it is also critical to understand trends in overall population abundance. To that extent, how well does this model based on fishing effort predict trends in total species abundance? To accomplish this, in each year we take our estimated and observed densities (ton/km^2^) per block, multiply the density in each block by the area of that block, and then sum the estimated and observed abundances in each block.
 
-We begin by examining the ability of the model to replicate trends observed in the testing data, using the "random" data splitting scenario  (where the testing data and training data cover the same geographic and temporal ranges). Under these somewhat ideal circumstances, we see that the model is able to predict the trends in abundance for both the training and testing data (Fig.\@ref(fig:random-time-plot)). 
+We begin by examining the ability of the model to replicate trends observed in the testing data, using the "random" data splitting scenario  (where the testing data and training data cover the same geographic and temporal ranges). Under these somewhat ideal circumstances, we see that the model is able to predict the trends in abundance for both the training and testing data (Fig.\@ref(fig:random-time-plot)).
 
 
 ```{r random-time-plot, fig.cap = "Mean scaled observed and predicted trends in total abundance over time for the training and test splits (where splits are randomly sampled)"}
 
 
 train_performance <- downscaled_results %>%
-    filter(test_set == "random") %>% {
+    filter(test_set == "spatial") %>% {
     .$training_data[[1]]
-  } %>% 
+  } %>%
   mutate(split = "Training")
 
-test_performance <- downscaled_results %>% 
-      filter(test_set == "random") %>% {
+test_performance <- downscaled_results %>%
+      filter(test_set == "spatial") %>% {
 
     .$test_data[[1]]
-  } %>% 
+  } %>%
   mutate(split = "Testing")
 
-performance <- train_performance %>% 
-  bind_rows(test_performance) %>% 
-  group_by(approx_survey, year, split) %>% 
+performance <- train_performance %>%
+  bind_rows(test_performance) %>%
+  group_by(approx_survey, year, split) %>%
   summarise(observed = sum(agg_mean_density * resolution_km2),
-            predicted= sum(agg_pred * resolution_km2)) %>% 
-  gather(source, value, observed:predicted) %>% 
-  ungroup() %>% 
-  group_by(approx_survey, split, source) %>% 
+            predicted= sum(agg_pred * resolution_km2)) %>%
+  gather(source, value, observed:predicted) %>%
+  ungroup() %>%
+  group_by(approx_survey, split, source) %>%
   mutate(cs_value = (value - mean(value)))
 
-performance %>% 
-  ggplot(aes(year,cs_value, color = approx_survey, linetype = source, shape = source)) + 
+performance %>%
+  ggplot(aes(year,cs_value, color = approx_survey, linetype = source, shape = source)) +
   geom_point(size = 2) +
-  geom_line(size = 1) + 
+  geom_line(size = 1) +
   scale_color_viridis_d(guide = FALSE) +
-  facet_grid(approx_survey~split, scales = "free_y") + 
+  facet_grid(approx_survey~split, scales = "free_y") +
   theme(panel.spacing = unit(10,"points"),
         axis.text.y = element_blank())
 
@@ -1185,7 +896,7 @@ performance %>%
 ```
 
 
-We have already considered the ability of the model to predict abundance in regions excluded from the training data (Fig.\@ref(fig:oor-plot)). How then does the model perform for time periods excluded from the training data? For this, we split the training data into the years 2012 and 2013, leaving 2014, 2015, and 2016 for the testing data. Our results show that the model performs relatively poorly at predicting trends in the time periods omitted from the model (Fig.\@ref(fig:oot-plot)). 
+We have already considered the ability of the model to predict abundance in regions excluded from the training data (Fig.\@ref(fig:oor-plot)). How then does the model perform for time periods excluded from the training data? For this, we split the training data into the years 2012 and 2013, leaving 2014, 2015, and 2016 for the testing data. Our results show that the model performs relatively poorly at predicting trends in the time periods omitted from the model (Fig.\@ref(fig:oot-plot)).
 
 
 XX the reason you were summing here before was becuase you were working at the 25km2 resolution, which made it kosher XX revisit this
@@ -1193,41 +904,41 @@ XX the reason you were summing here before was becuase you were working at the 2
 
 ```{r oot-plot, fig.cap="Observed and predicted abundance trends in each of the survey regions. Vertical red dashed line indicates break between training data (to the left) and testing data (at and to the right of the line)"}
 
-time_train_performance <- downscaled_results %>% 
+time_train_performance <- downscaled_results %>%
   filter(test_set == "year_greq_than_2014") %>% {
     .$training_data[[1]]
-  } %>% 
-      mutate(state = ifelse(approx_survey == "wcgbts",if_else(lat > 46.25, "washington", if_else(lat > 42, "oregon", "california")),"Alaska")) %>% 
-  group_by(state, year) %>% 
-  summarise(observed = sum(agg_mean_density * 25), 
-            predicted =  sum(agg_pred * 25)) %>% 
-  gather(source,value, observed:predicted) %>% 
-  ungroup() %>% 
+  } %>%
+      mutate(state = ifelse(approx_survey == "wcgbts",if_else(lat > 46.25, "washington", if_else(lat > 42, "oregon", "california")),"Alaska")) %>%
+  group_by(state, year) %>%
+  summarise(observed = sum(agg_mean_density * 25),
+            predicted =  sum(agg_pred * 25)) %>%
+  gather(source,value, observed:predicted) %>%
+  ungroup() %>%
   mutate(split = "training")
 
-time_test_performance <- downscaled_results %>% 
+time_test_performance <- downscaled_results %>%
     filter(test_set == "year_greq_than_2014") %>% {
     .$test_data[[1]]
-  } %>% 
-      mutate(state = ifelse(approx_survey == "wcgbts",if_else(lat > 46.25, "washington", if_else(lat > 42, "oregon", "california")),"Alaska")) %>% 
-  group_by(state, year) %>% 
-summarise(observed = sum(agg_mean_density * 25), 
-            predicted =  sum(agg_pred * 25)) %>% 
-  gather(source,value, observed:predicted) %>% 
-  ungroup() %>% 
+  } %>%
+      mutate(state = ifelse(approx_survey == "wcgbts",if_else(lat > 46.25, "washington", if_else(lat > 42, "oregon", "california")),"Alaska")) %>%
+  group_by(state, year) %>%
+summarise(observed = sum(agg_mean_density * 25),
+            predicted =  sum(agg_pred * 25)) %>%
+  gather(source,value, observed:predicted) %>%
+  ungroup() %>%
   mutate(split = "testing")
 
-time_test_performance %>% 
-  bind_rows(time_train_performance) %>% 
-  ungroup() %>% 
-  group_by(state, source) %>% 
+time_test_performance %>%
+  bind_rows(time_train_performance) %>%
+  ungroup() %>%
+  group_by(state, source) %>%
   mutate(sd_value = sd(value),
          mean_value  = mean(value)) %>%
-  ungroup() %>% 
-  mutate(cs_value = (value - mean_value) / sd_value) %>% 
-  ggplot(aes(year, value, color = source)) + 
+  ungroup() %>%
+  mutate(cs_value = (value - mean_value) / sd_value) %>%
+  ggplot(aes(year, value, color = source)) +
   geom_vline(aes(xintercept = 2014), color = "red", linetype = 2, alpha = 0.75) +
-  geom_line() + 
+  geom_line() +
   geom_point() +
   facet_wrap(~state, scales = "free_y")
 
@@ -1241,20 +952,20 @@ Now, comapre GFW only to GFW + environment
 
 ```{r}
 
-skynet_models %>% 
+skynet_models %>%
   filter(data_subset == "skynet", model == best_ml_model,
-         test_set == "random_west_coast", dep_var == "density") %>% 
-  select(variables, r2, r2_training) %>% 
-  gather(r2_source, r2_value, -variables) %>% 
-  ggplot(aes(variables, r2_value, fill = r2_source)) + 
+         test_set == "random", dep_var == "density") %>%
+  select(variables, r2, r2_training) %>%
+  gather(r2_source, r2_value, -variables) %>%
+  ggplot(aes(variables, r2_value, fill = r2_source)) +
   geom_col(position = "dodge")
 
-skynet_models %>% 
+skynet_models %>%
   filter(data_subset == "skynet", model == best_ml_model,
-         test_set == "random_west_coast", dep_var == "density") %>% 
-  select(variables, rmse, rmse_training) %>% 
-  gather(rmse_source, rmse_value, -variables) %>% 
-  ggplot(aes(variables, rmse_value, fill = rmse_source)) + 
+         test_set == "random", dep_var == "density") %>%
+  select(variables, rmse, rmse_training) %>%
+  gather(rmse_source, rmse_value, -variables) %>%
+  ggplot(aes(variables, rmse_value, fill = rmse_source)) +
   geom_col(position = "dodge")
 
 
@@ -1269,18 +980,18 @@ skynet_models %>%
 
 ```{r unfished-better-plot}
 best_fits %>%
-  filter(data_subset %in% c("skynet", "unfished_skynet")) %>% 
-  group_by(test_sets, unfished_only) %>% 
-  summarise(max_r2 = max(r2_training)) %>% 
-  ungroup() %>% 
-  group_by(test_sets) %>% 
+  filter(data_subset %in% c("skynet", "unfished_skynet")) %>%
+  group_by(test_sets, unfished_only) %>%
+  summarise(max_r2 = max(r2_training)) %>%
+  ungroup() %>%
+  group_by(test_sets) %>%
   mutate(mean_max_r2 = mean(max_r2)) %>%
-  ungroup() %>% 
-  mutate(test_sets = fct_reorder(test_sets, mean_max_r2)) %>% 
-  ggplot(aes(test_sets,max_r2)) + 
+  ungroup() %>%
+  mutate(test_sets = fct_reorder(test_sets, mean_max_r2)) %>%
+  ggplot(aes(test_sets,max_r2)) +
   geom_line() +
   geom_point(shape = 21, size = 4, aes(fill = unfished_only)) +
-  coord_flip() 
+  coord_flip()
 ```
 
 
@@ -1288,24 +999,24 @@ best_fits %>%
 
 ## Correlations
 
-We can examine simple correlations between our data and the estimated total density of fished species at a given knot in a given year (Fig. \@ref(fig:var-cor)). 
+We can examine simple correlations between our data and the estimated total density of fished species at a given knot in a given year (Fig. \@ref(fig:var-cor)).
 
 ```{r var-cor, eval = F,fig.cap= 'Smoothed visual correlations between covariates and total fished species density'}
 
-skynet_data %>% 
-  ungroup() %>% 
-  dplyr::select(log_density, dist_from_port, total_hours,total_engine_power,mean_chlorophyll) %>% 
-  gather('variable','value', -log_density) %>% 
-  ggplot() + 
-  geom_smooth(aes(value, log_density, color = variable), show.legend = F) + 
+skynet_data %>%
+  ungroup() %>%
+  dplyr::select(log_density, dist_from_port, total_hours,total_engine_power,mean_chlorophyll) %>%
+  gather('variable','value', -log_density) %>%
+  ggplot() +
+  geom_smooth(aes(value, log_density, color = variable), show.legend = F) +
   labs(y = 'Total Density of Fished Species') +
-  facet_wrap(~variable, scales = 'free') + 
+  facet_wrap(~variable, scales = 'free') +
   theme_minimal() +
   theme(axis.text.x = element_blank(),
         axis.text.y = element_blank(),
         strip.text = element_text(size = 8),
         panel.spacing = unit(.1, 'lines'))
-  
+
 
 ```
 
@@ -1316,13 +1027,13 @@ skynet_data %>%
 
 #cody-style map plot, pretty but not much added information for all the work
 
- skynet_box <- skynet_data %>% 
-    group_by(knot, year, rounded_lat, rounded_lon) %>% 
-    summarise(total_density = sum(density)) %>% 
-    ungroup() %>% 
-      mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) 
+ skynet_box <- skynet_data %>%
+    group_by(knot, year, rounded_lat, rounded_lon) %>%
+    summarise(total_density = sum(density)) %>%
+    ungroup() %>%
+      mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon))
 
-  
+
   skynet_map <-  skynet_box %>%
   dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
   ungroup() %>%
@@ -1333,42 +1044,42 @@ skynet_data %>%
 bbox <- sf::st_bbox(skynet_map)
 
 
-base_map <- pacific_map %>% 
-ggplot() + 
-  geom_sf() + 
+base_map <- pacific_map %>%
+ggplot() +
+  geom_sf() +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
-  ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) + 
+  ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) +
 theme_ipsum() +
   theme(panel.grid = element_blank(),
         text = element_blank(),
          plot.margin = unit(c(0,1,0,1),"cm"))
 
-survey_positions <- skynet_data %>% 
-  group_by(survey) %>% 
+survey_positions <- skynet_data %>%
+  group_by(survey) %>%
   summarise(mean_lat = median(rounded_lat),
-            mean_lon = median(rounded_lat)) %>% 
-  ungroup() %>% 
-  arrange(desc(mean_lat)) 
+            mean_lon = median(rounded_lat)) %>%
+  ungroup() %>%
+  arrange(desc(mean_lat))
 
-random_gbm_abundance <- abundance %>% 
-  filter(train_set == "random", model == "gbm") %>% 
-  group_by(year, approx_survey) %>% 
-  gather(abundance_source, abundance, contains("abundance")) %>% 
+random_gbm_abundance <- abundance %>%
+  filter(train_set == "random", model == "gbm") %>%
+  group_by(year, approx_survey) %>%
+  gather(abundance_source, abundance, contains("abundance")) %>%
   left_join(survey_positions, by = c("approx_survey" = "survey"))
 
-trend_plot <- random_gbm_abundance %>% 
-  ungroup() %>% 
+trend_plot <- random_gbm_abundance %>%
+  ungroup() %>%
   filter(str_detect(abundance_source, "scaled"),
-         approx_survey != "goabts") %>% 
-  ggplot(aes(year + -mean_lon * 0.3, 2.5*abundance + mean_lat, color = approx_survey, linetype = abundance_source)) + 
-  geom_smooth(show.legend = F) + 
-  geom_point(show.legend = F, size = 1.5) + 
+         approx_survey != "goabts") %>%
+  ggplot(aes(year + -mean_lon * 0.3, 2.5*abundance + mean_lat, color = approx_survey, linetype = abundance_source)) +
+  geom_smooth(show.legend = F) +
+  geom_point(show.legend = F, size = 1.5) +
   theme_ipsum() +
     theme(panel.grid = element_blank(),
         text = element_blank(),
-        plot.margin = unit(c(0,0,0,0),"cm")) 
+        plot.margin = unit(c(0,0,0,0),"cm"))
 
-  trend_map <-  ggdraw(base_map) + 
+  trend_map <-  ggdraw(base_map) +
   draw_plot(trend_plot, y = -.01,width = 0.7, height = 0.9)
 ```
 
@@ -1376,66 +1087,66 @@ trend_plot <- random_gbm_abundance %>%
 
 
 ```{r eval = F}
-spatial_trend_performance <- spatial_performance %>% 
-  group_by(year, survey,split) %>% 
-  summarise(observed = sum(exp(log_density) * 100), 
-            predicted =  sum(exp(pred) * 100)) %>% 
-  gather(source,value, observed:predicted) %>% 
-  ungroup() 
+spatial_trend_performance <- spatial_performance %>%
+  group_by(year, survey,split) %>%
+  summarise(observed = sum(exp(log_density) * 100),
+            predicted =  sum(exp(pred) * 100)) %>%
+  gather(source,value, observed:predicted) %>%
+  ungroup()
 
-spatial_trend_performance %>% 
-  ggplot(aes(year,value, color = survey, linetype = source)) + 
-  geom_line() + 
+spatial_trend_performance %>%
+  ggplot(aes(year,value, color = survey, linetype = source)) +
+  geom_line() +
   facet_wrap(survey~split, scales = "free_y")
 
 ```
 
 ```{r eval = F}
-spatial_trend_performance <- spatial_performance %>% 
-  group_by(year, survey,split) %>% 
-  summarise(observed = sum(exp(log_density) * 100), 
-            predicted =  sum(exp(pred) * 100)) %>% 
-  gather(source,value, observed:predicted) %>% 
-  ungroup() 
+spatial_trend_performance <- spatial_performance %>%
+  group_by(year, survey,split) %>%
+  summarise(observed = sum(exp(log_density) * 100),
+            predicted =  sum(exp(pred) * 100)) %>%
+  gather(source,value, observed:predicted) %>%
+  ungroup()
 
-spatial_trend_performance %>% 
-  group_by(survey, split,source) %>% 
-  mutate(cs_value =  (value - mean(value))  / sd(value)) %>% 
-  ungroup() %>% 
-  ggplot(aes(year,cs_value, color = survey, linetype = source)) + 
-  geom_line() + 
+spatial_trend_performance %>%
+  group_by(survey, split,source) %>%
+  mutate(cs_value =  (value - mean(value))  / sd(value)) %>%
+  ungroup() %>%
+  ggplot(aes(year,cs_value, color = survey, linetype = source)) +
+  geom_line() +
   facet_wrap(survey~split, scales = "free_y")
 
 ```
 
 
 
-The random forest allows us to classify each variable by its "importance", a measure of the degree to which the fit of the model decreases when that variable is omitted from the model. 
+The random forest allows us to classify each variable by its "importance", a measure of the degree to which the fit of the model decreases when that variable is omitted from the model.
 
-(Fig. \@ref(fig:var-imp)). 
+(Fig. \@ref(fig:var-imp)).
 
-Plot of variable importance 
+Plot of variable importance
 
 ```{r eval = F}
 
-ml_models <- skynet_models %>% 
+ml_models <- skynet_models %>%
   filter(model %in% c('rf','gbm')) %>%
   mutate(varimp = map(results, ~varImp(.x$finalModel) %>% as.data.frame() %>% mutate(variable = rownames(.))))
 
-varimp <- ml_models %>% 
-  select(model, data_subset,varimp) %>% 
-  unnest() %>% 
-  group_by(variable) %>% 
-  mutate(mean_importance = mean(Overall)) %>% 
-  arrange(desc(mean_importance)) %>% 
-  ungroup() %>% 
-  mutate(variable = fct_reorder(variable, mean_importance)) %>% 
+varimp <- ml_models %>%
+  select(model, data_subset,varimp) %>%
+  unnest() %>%
+  group_by(variable) %>%
+  mutate(mean_importance = mean(Overall)) %>%
+  arrange(desc(mean_importance)) %>%
+  ungroup() %>%
+  mutate(variable = fct_reorder(variable, mean_importance)) %>%
   filter(model == 'rf')
 
 
-varimp %>% 
-  ggplot() + 
-  geom_boxplot(aes(variable, Overall, fill = model)) + 
+varimp %>%
+  ggplot() +
+  geom_boxplot(aes(variable, Overall, fill = model)) +
   coord_flip() +
   facet_wrap( ~ data_subset)
 
@@ -1449,11 +1160,11 @@ Plot of r2/mse by model type
 
 ```{r eval = F}
 
-skynet_models %>% 
-  filter(data_subset == 'skynet') %>% 
-  ggplot(aes(pmax(0,psuedo_r2_training), fill = model)) + 
-  geom_histogram(show.legend = F) + 
-  facet_wrap(model~dep_var, scales = 'free') + 
+skynet_models %>%
+  filter(data_subset == 'skynet') %>%
+  ggplot(aes(pmax(0,psuedo_r2_training), fill = model)) +
+  geom_histogram(show.legend = F) +
+  facet_wrap(model~dep_var, scales = 'free') +
   theme(axis.text.x = element_text(size = 8),
         axis.text.y = element_text(size = 8))
 
@@ -1461,14 +1172,14 @@ skynet_models %>%
 
 ```{r eval = F}
 
-skynet_models %>% 
+skynet_models %>%
   filter(model == 'rf', test_sets == 'historic')
 
-skynet_models %>% 
-    filter(data_subset == 'skynet') %>% 
-  ggplot(aes(pmax(0,psuedo_r2), fill = model)) + 
-  geom_histogram(show.legend = F) + 
-  facet_wrap(model~dep_var, scales = 'free') + 
+skynet_models %>%
+    filter(data_subset == 'skynet') %>%
+  ggplot(aes(pmax(0,psuedo_r2), fill = model)) +
+  geom_histogram(show.legend = F) +
+  facet_wrap(model~dep_var, scales = 'free') +
   theme(axis.text.x = element_text(size = 8),
         axis.text.y = element_text(size = 8))
 
@@ -1478,32 +1189,32 @@ skynet_models %>%
 Time series of abundance observed vs predicted
 
 
-We can also construct partial dependence plots, which visualize the marginal effect of each independent variable (Fig. \@ref(fig:partial-plot)). 
+We can also construct partial dependence plots, which visualize the marginal effect of each independent variable (Fig. \@ref(fig:partial-plot)).
 
 ```{r eval = F,partial-plot, fig.cap='Partial dependence plots of variables in random forest', eval = F}
 
 partial_foo <- function(variable) {
-  
+
   eval(parse(text = paste0('a <- randomForest::partialPlot(skynet_models$results[[1]]$finalModel
 , skynet_models$training_data[[1]] %>% as.data.frame() %>% remove_missing() %>% as.data.frame(),', variable,', plot = F)')))
-  
+
 
 }
 
 
-partial_plot <- data_frame(variable = skynet_models$results[[1]]$finalModel$xNames) %>% 
-  mutate(varname = map(variable, as.name)) %>% 
+partial_plot <- data_frame(variable = skynet_models$results[[1]]$finalModel$xNames) %>%
+  mutate(varname = map(variable, as.name)) %>%
   mutate(partials = map(.$varname, partial_foo))
 
-partial_plot <- partial_plot %>% 
-  mutate(partial = map(.$partials, as_data_frame)) %>% 
-  select(variable, partial) %>% 
+partial_plot <- partial_plot %>%
+  mutate(partial = map(.$partials, as_data_frame)) %>%
+  select(variable, partial) %>%
   unnest()
 
 
-partial_plot %>% 
-  ggplot() + 
-  geom_line(aes(x,y, color = variable), show.legend = F) + 
+partial_plot %>%
+  ggplot() +
+  geom_line(aes(x,y, color = variable), show.legend = F) +
   labs(y = 'Predicted Density') +
   facet_wrap(~variable, scales = 'free')
 
@@ -1512,24 +1223,22 @@ partial_plot %>%
 
 # Summary
 
-So far the GFW data show a limited but promising ability to predict CPUEs outside of sample (both through K-fold cross validation and through omission of the most recent data). 
+So far the GFW data show a limited but promising ability to predict CPUEs outside of sample (both through K-fold cross validation and through omission of the most recent data).
 
-There is clearly a lot of work to be done from here, and I think that improvements in model fit can be achieved through re-scaling of coefficients (e.g. we don't really care about absolute CPUE, but rather the trend). We will also need to explore the ability of the model to perform across different aggregations of fleets and species. The structural model can also be improved by integration of additional data on fuel and labor costs. 
+There is clearly a lot of work to be done from here, and I think that improvements in model fit can be achieved through re-scaling of coefficients (e.g. we don't really care about absolute CPUE, but rather the trend). We will also need to explore the ability of the model to perform across different aggregations of fleets and species. The structural model can also be improved by integration of additional data on fuel and labor costs.
 
-Early results suggest then that this idea isn't insane. The most rigorous approach then will be a careful development and comparison of machine learning and structural models. However so far the machine learning approach is in the front of the pack by a decent distance. 
+Early results suggest then that this idea isn't insane. The most rigorous approach then will be a careful development and comparison of machine learning and structural models. However so far the machine learning approach is in the front of the pack by a decent distance.
 
 
 # Literature notes
 
-see @vanPutten2012 for references supporting fish abundance as a driver of economic activity 
+see @vanPutten2012 for references supporting fish abundance as a driver of economic activity
 
 @Gillis2012 for an alternative economic model to the ideal free distribution. Also has great citations for behavior tracking abundance for snow crabs, as well as failures for other fisheries
 # Works Cited
 
-look into urban economics 
+look into urban economics
 
 structraul models around migration. It's too costly for people to move
 
 John kennon econometrica, costs and benefits of moving from point a to point b
-
-

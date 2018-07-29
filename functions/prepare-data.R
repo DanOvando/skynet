@@ -229,10 +229,10 @@ prepare_data <-
         log_lag_density = log(sum(temp_lag_density)),
         mean_knot_area = mean(area),
         biomass = sum(temp_biomass),
-        economic_density = sum(temp_density * (mean_exvessel_price * .001)),
-        lag_economic_density = sum(temp_lag_density * (mean_exvessel_price * .001)),
-        log_lag_economic_density = log(sum(temp_lag_density * (mean_exvessel_price * .001))),
-        economic_biomass = sum(temp_biomass * (mean_exvessel_price * .001)),
+        economic_density = sum(temp_density * (mean_exvessel_price)),
+        lag_economic_density = sum(temp_lag_density * (mean_exvessel_price)),
+        log_lag_economic_density = log(sum(temp_lag_density * (mean_exvessel_price))),
+        economic_biomass = sum(temp_biomass * (mean_exvessel_price)),
         surveyed_year = unique(surveyed_year)
       ) %>%
       ungroup() %>%

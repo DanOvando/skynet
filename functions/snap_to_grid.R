@@ -51,17 +51,17 @@ snap_to_grid <-
 
     }
 
-
-
     new_grid <- old_grid %>%
       group_by(year, new_knot) %>%
       summarise(
+        old_obs = length(density),
         lat = unique(!!new_lat_name),
         lon = unique(!!new_lon_name),
         approx_survey = unique(survey)[1],
-        agg_mean_density = weighted.mean(density, w = mean_knot_area),
-        agg_total_biomass = sum(biomass),
-        agg_mean_log_density = weighted.mean(log_density, w = mean_knot_area),
+        agg_mean_density = sum(unique(density * mean_knot_area) / sum(unique(mean_knot_area))) ,
+        total_biomass = sum(unique(density * mean_knot_area)),
+        total_revenue = sum(unique(economic_density * mean_knot_area)),
+        agg_mean_economic_density = weighted.mean(economic_density, w = mean_knot_area),
         agg_total_engine_hours = sum(total_engine_hours),
         agg_total_hours = sum(total_hours),
         agg_total_num_vessels = sum(num_vessels),

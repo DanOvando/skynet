@@ -37,7 +37,7 @@ functions <- list.files(here::here("functions"))
 
 walk(functions, ~ here::here("functions", .x) %>% source()) # load local functions
 
-run_name <- "d1.0"
+run_name <- "d1.1"
 
 run_description <-
   "dissertation default results"
@@ -53,11 +53,11 @@ write(run_description, file = paste0(run_dir, "description.txt"))
 
 # set section options (what to run) ---------------------------------------------------------
 
-num_cores <- 3
+num_cores <- 2
 
 run_models <- TRUE # fit gfw models to fishdata
 
-tune_pars <- TRUE # pre-tune machine learning models
+tune_pars <- FALSE # pre-tune machine learning models
 
 models <-
   c("ranger",
@@ -97,9 +97,7 @@ round_environmentals <- T
 
 raw_fish <- F
 
-dep_vars <- c("density","lag_density", "lag_economic_density","lag_economic_density")
-
-gfw_vars_only <- T
+dep_vars <- c("density", "lag_economic_density","biomass")
 
 fished_only <-
   T # only include fished species in predictive model fitting
@@ -128,7 +126,7 @@ gfw_dataset <- "skynet"
 max_percent_missing <- 0.2
 
 lat_lon_res <-
-  0.1 # round data to intervels of 0.25 degrees lat lon, as in 56.25
+  0.2 # round data to intervels of 0.25 degrees lat lon, as in 56.25
 
 res <- 1 / lat_lon_res
 
@@ -283,13 +281,13 @@ if (query_gfw == T) {
       mmsi,
       FLOOR(lat*{res})/{res} rounded_lat,
       FLOOR(lon*{res})/{res} rounded_lon,
-      SUM(IF( nnet_score == 1, hours, 0)) AS total_hours,
+      SUM(IF(nnet_score2 == 1, hours, 0)) AS total_hours,
       AVG(distance_from_shore ) AS mean_distance_from_shore,
       AVG(distance_from_port) AS mean_distance_from_port,
-      INTEGER(REGEXP_REPLACE( IF(REGEXP_EXTRACT(regions,'\"(mparu:.*?)\"') CONTAINS \".\", LEFT(REGEXP_EXTRACT(regions,'\"(mparu:.*?)\"'),INSTR(REGEXP_EXTRACT(regions,'\"(mparu:.*?)\"'),\".\")-1),REGEXP_EXTRACT(regions,'\"(mparu:.*?)\"')), '[^0-9 ]','')) mparu,
-      INTEGER(REGEXP_REPLACE( IF(REGEXP_EXTRACT(regions,'\"(mpant:.*?)\"') CONTAINS \".\", LEFT(REGEXP_EXTRACT(regions,'\"(mpant:.*?)\"'),INSTR(REGEXP_EXTRACT(regions,'\"(mpant:.*?)\"'),\".\")-1),REGEXP_EXTRACT(regions,'\"(mpant:.*?)\"')), '[^0-9 ]','')) mpant
+      REGEXP_EXTRACT(regions + \',\',\',(mpant:.*?),\') mpant,
+      REGEXP_EXTRACT(regions + \',\',\',(mparu:.*?),\') mparu,
       FROM
-      [world-fishing-827:gfw_research.nn]
+      [world-fishing-827:gfw_research.nn7]
       WHERE
       (distance_from_shore > ({min_dist_from_shore})
       AND (implied_speed > ({min_speed}) AND implied_speed < ({max_speed})))
@@ -303,7 +301,7 @@ if (query_gfw == T) {
       SELECT
       seg_id
       FROM
-      [world-fishing-827:gfw_research.good_segments])
+      [world-fishing-827:gfw_research.pipeline_p_p550_daily_segs] where good_seg)
       GROUP BY
       mmsi,
       year,
@@ -324,17 +322,16 @@ if (query_gfw == T) {
       known_length,
       known_tonnage,
       best_label,
-      known_label,
+      known_geartype,
       inferred_label_allyears,
-      inferred_sublabel_allyears,
       good_shiptype_msg,
       on_fishing_list_nn
       FROM
-      [world-fishing-827:gfw_research.vessel_info]
+      [world-fishing-827:gfw_research.vessel_info_20180518]
       WHERE
-      (on_fishing_list_nn IS TRUE OR on_fishing_list IS TRUE)
+      (on_fishing_list_nn IS TRUE OR on_fishing_list_best IS TRUE)
       AND spoofing_factor < 1.01
-      AND offsetting IS NULL) b
+      AND offsetting IS FALSE) b
       ON
       a.mmsi = b.mmsi
       AND a.year = b.year",
@@ -824,9 +821,9 @@ if (bottom_gears_only == T) {
     filter(
       (
         inferred_label_allyears == "trawlers" |
-          inferred_sublabel_allyears == "pots_and_traps" |
-          str_detect(inferred_sublabel_allyears, "set_") |
-          inferred_sublabel_allyears == "trawlers"
+          inferred_label_allyears == "pots_and_traps" |
+          str_detect(inferred_label_allyears, "set_") |
+          inferred_label_allyears == "trawlers"
       ) &
         !inferred_label_allyears %in% c("cargo_or_tanker", "passenger")
     ) %>%
@@ -1354,6 +1351,11 @@ if (run_models == T) {
       mutate(tuned_pars = map(fitted_model, "tuned_pars"))
 
 
+    tuned_pars %>%
+      filter(model == "gbm") %>%
+      select(-fitted_model) %>%
+      unnest()
+
     kfold_preds <- prepped_train %>%
       ungroup() %>%
       select(model, variables,fitted_model) %>%
@@ -1371,6 +1373,9 @@ if (run_models == T) {
   } else {
     tuned_pars <- readRDS(file = paste0(run_dir, "tuned_pars.RDS"))
   }
+
+  tuned_pars <- tuned_pars %>%
+    filter(test_sets == "spatial")
 
   sfm <- safely(fit_skynet)
 
