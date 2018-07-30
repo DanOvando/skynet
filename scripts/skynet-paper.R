@@ -1,6 +1,3 @@
-library(gbm)
-library(randomForest)
-library(stringr)
 library(modelr)
 library(broom)
 library(hrbrthemes)
@@ -10,13 +7,13 @@ library(ggmap)
 library(caret)
 library(extrafont)
 library(patchwork)
-library(scico)
 library(wesanderson)
 library(ggridges)
 library(taxize)
 library(tidyposterior)
 library(recipes)
 library(rstan)
+library(brms)
 library(tidyverse)
 
 
@@ -521,20 +518,22 @@ structural <- skynet_models %>%
          variables == "gfw_only") %>%
   select(train_set, training_data, r2_training)
 
-strct_ovp <- structural %>%
+strct_ovp_plot <- structural %>%
   unnest() %>%
+  filter(train_set %in% c("random","spatial")) %>%
   mutate(train_set = fct_reorder(train_set, rev(r2_training))) %>%
   group_by(train_set) %>%
   mutate(biomass = biomass / max(biomass),
          pred = pred / max(pred)) %>%
   ggplot(aes(biomass, pred)) +
   geom_point() +
+  geom_text(aes(0.9, .75, label = glue::glue("R2 = {round(r2_training,2)}"))) +
   geom_abline(aes(slope = 1, intercept = 0), linetype = 2, color = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
   facet_wrap(~train_set) +
-  theme_minimal() +
   theme(axis.text.x = element_blank(),
         axis.text.y = element_blank()) +
-  labs(x = "Observed", y = "Predicted", title = "A)")
+  labs(x = "Observed", y = "Predicted")
 
 strct_r2 <- structural %>%
   ggplot(aes(r2_training)) +
@@ -547,126 +546,130 @@ strct_r2 <- structural %>%
 # structural fits ---------------------------------------------------------
 
 
+# latent variables
+
+skynet_100km <- rescale_data(skynet_data, resolution = 50) %>%
+  na.omit()
+
+latent_data <- skynet_100km %>%
+  mutate(location = paste0(survey, knot,sep = '_')) %>%
+  filter(year == max(year))
+
+cs_latent_data <-
+  recipe(
+    total_hours ~ dist_from_port + restricted_use_mpa + m_below_sea_level + dist_from_shore + location,
+    data = latent_data %>% filter(total_hours > 0)
+  ) %>%
+  step_log(all_outcomes()) %>%
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  prep(data = latent_data, retain = TRUE) %>%
+  juice() %>%
+  na.omit()
+
+latent_model <- brm(total_hours ~ 1 + dist_from_port + restricted_use_mpa + m_below_sea_level + dist_from_shore + (1|location),
+data = cs_latent_data)
+
+location_effects <- broom::tidy(latent_model) %>%
+  filter(str_detect(term, "location")) %>%
+  mutate(location = str_extract(term, pattern = "(?<=\\[).*(?=_)")) %>%
+  mutate(knot = str_replace_all(location,"\\D","") %>% as.numeric(),
+         survey = str_replace_all(location,"\\d","")) %>%
+  mutate(location_effect = exp(estimate + std.error^2/2)) %>%
+  select(survey, knot, location_effect)
+
+
+a <- latent_data %>%
+  left_join(location_effects, by = c("survey", "knot"))
+
+linear_latent_plot <- a %>%
+  mutate(density = density / max(density,na.rm = T),
+         biomass = biomass / max(biomass, na.rm = T),
+         location_effect = location_effect / max(location_effect, na.rm = T)) %>%
+  ggplot(aes(biomass, location_effect)) +
+  geom_point() +
+  geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  geom_smooth(method = "lm", color = "blue", se = F) +
+  labs(x = "Observed biomass", y = "Space Effects")
+
+
+skynet_50km <- rescale_data(skynet_data %>% filter(survey == "wcgbts"), resolution = 50) %>%
+  na.omit()
+
+latent_data <- skynet_50km %>%
+  mutate(location = paste(survey, knot,sep = 'x')) %>%
+  filter(year == max(year)) %>%
+  na.omit() %>%
+  rename(price = aggregate_price,
+         PortDist = dist_from_port)
+
+cs_latent_data <-
+  recipe(
+    total_hours ~ PortDist + restricted_use_mpa + m_below_sea_level + dist_from_shore + location +
+      price + mean_vessel_length,
+    data = latent_data %>% filter(total_hours > 0)
+  ) %>%
+  # step_log(all_outcomes()) %>%
+  step_center(all_numeric(), -all_outcomes(),-price) %>%
+  step_scale(all_numeric(), -all_outcomes(),-price) %>%
+  prep(data = latent_data, retain = TRUE) %>%
+  juice() %>%
+  na.omit()
+
+
+
+oa_model <- bf(total_hours ~ 1 / exp(q) * log((price * exp(q)*exp(cpue)) / ( exp(cost))),
+               q ~ 1,
+               cost ~ 1 + PortDist + m_below_sea_level + dist_from_shore + mean_vessel_length,
+               cpue ~ (1|location), nl = TRUE)
+
+oa_prior <- c(
+  prior(normal(0,1), nlpar = "q"),
+  prior(normal(0,1), nlpar = "cpue"),
+  prior(normal(0,1), nlpar = "cost")
+)
+
+oa_fit <-
+  brm(
+    formula = oa_model,
+    data = cs_latent_data,
+    family = Gamma(),
+    prior = oa_prior,
+    control = list(adapt_delta = 0.95),
+    chains = 1,
+    iter = 10000
+  )
+
+
+
+tidy_oa <- broom::tidy(oa_fit)
+
+oa_location_effects <- broom::tidy(oa_fit)%>%
+  filter(str_detect(term, "location")) %>%
+  mutate(location = str_extract(term, pattern = "(?<=\\[).*(?=\\,)")) %>%
+  mutate(location = str_replace_all(location,"x","")) %>%
+  mutate(knot = str_replace_all(location,"\\D","") %>% as.numeric(),
+         survey = str_replace_all(location,"\\d","")) %>%
+  mutate(location_effect = exp(estimate + std.error^2/2)) %>%
+  select(survey, knot, location_effect)
+
+
+oa_preds <- latent_data %>%
+  left_join(oa_location_effects, by = c("survey", "knot"))
+
+strct_latent_plot <- oa_preds %>%
+  mutate(density = density / max(density,na.rm = T),
+         biomass = biomass / max(biomass),
+         location_effect = location_effect / max(location_effect, na.rm = T)) %>%
+  ggplot(aes(biomass, location_effect)) +
+  geom_point() +
+  geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
+  geom_smooth(method = "lm", color = "blue", se = F) +
+  labs(x = "Observed biomass", y = "Space Effects")
 
 
 # predicting effort -------------------------------------------------------
 
-data <- skynet_data %>%
-  select(any_fishing, dist_from_port,dist_from_shore,
-         no_take_mpa,restricted_use_mpa, density, mean_analysed_sst,
-         mean_chla )
-
-fish_recipe <- recipe(any_fishing ~ . , data = data) %>%
-  step_center(all_predictors(), -no_take_mpa,-restricted_use_mpa) %>%
-  step_scale(all_predictors(), -no_take_mpa,-restricted_use_mpa)
-
-prepped_data <- prep(fish_recipe, data = data, retain = T)
-
-prepped_data <- prepped_data %>% juice()
-
-test <- glm(any_fishing ~., data = prepped_data, family = binomial)
-
-summary(test)
-
-
-# latent spatial variables
-
-
-a <- candidate_data %>%
-  filter(fished_only == TRUE,
-         unfished_only == FALSE,
-         survey_months_only == TRUE)
-
-data <- a$skynet_data[[1]] %>%
-  filter(survey == "wcgbts") %>% mutate(state = ifelse(
-    survey == "wcgbts",
-    if_else(
-      rounded_lat > 46.25,
-      "washington",
-      if_else(rounded_lat > 42, "oregon", "california")
-    ),
-    "Alaska"
-  ))
-
-oregon <- data %>%
-  filter(state == "oregon", total_hours > 0) %>%
-  filter(year == max(year))
-
-oregon_cost <- oregon %>%
-  select(dist_from_port, dist_from_shore, m_below_sea_level)
-
-cost_recipe <- recipe(oregon_cost) %>%
-  step_log(all_numeric())
-# step_center(all_numeric()) %>%
-# step_scale(all_numeric())
-#
-oregon_cost <-
-  prep(cost_recipe, oregon_cost, retain = T) %>% juice() %>%
-  mutate(intercept = 1)
-
-
-location_year <- oregon %>%
-  select(knot, year) %>%
-  mutate(knot_year = paste(knot, year,sep = '_')) %>%
-  select(knot_year) %>%
-  mutate(marker = 1) %>%
-  mutate(index = 1:nrow(.)) %>%
-  spread(knot_year, marker, fill = 0) %>%
-  select(-index)
-
-warmups <- 5000
-
-total_iterations <- 10000
-
-max_treedepth <-  12
-
-adapt_delta <-  0.8
-
-chains <- 1
-
-struct_data <- list(
-  cost_data = oregon_cost,
-  location_data = location_year,
-  log_effort = as.numeric(oregon$total_hours %>% log()),
-  price = oregon$aggregate_price,
-  mp = 0,
-  n = nrow(oregon),
-  max_q = .8/max(oregon$total_hours)
-)
-
-struct_data$n_betas <- ncol(struct_data$cost_data)
-
-struct_data$n_cpue_betas <- ncol(struct_data$location_data)
-
-# inits <- list(list(cpue_betas = rep(25, struct_data$n_cpue_betas)))
-
-
-# stan_fit <-
-#   stan(
-#     file = here::here("src", "fit_effort_model.stan"),
-#     data = struct_data,
-#     chains = chains,
-#     warmup = warmups,
-#     iter = total_iterations,
-#     cores = 1,
-#     refresh = 250,
-#     control = list(max_treedepth = max_treedepth,
-#                    adapt_delta = adapt_delta)
-#   )
-#
-# fits <- stan_fit %>%
-#   tidy()
-#
-# knots <- fits %>%
-#   filter(str_detect(term, "knot"))
-#
-# effort <- fits %>%
-#   filter(str_detect(term, "effort") & !str_detect(term, "log")) %>%
-#   mutate(effort = oregon$total_hours)
-#
-# effort %>%
-#   ggplot(aes(effort, estimate)) +
-#   geom_point()
 
 
 # predicting density ------------------------------------------------------
@@ -713,8 +716,26 @@ best_ml_model <- rmse_mod$stan %>%
   arrange((estimate))
 
 
-best_ml_model <- str_extract(best_ml_model$model[[1]]
-                             ,".*(?=-)")
+best_ml_model <- best_ml_model$model[[1]]
+
+
+# best data resolution
+
+ml_resolution_plot <- skynet_models %>%
+  filter(model == "ranger",
+         dep_var == "biomass",
+         variables == "gfw_only",
+         test_sets %in% c("random","spatial"),
+         data_subset %in% c("skynet", "skynet_25km", "skynet_100km")) %>%
+  group_by(data_subset) %>%
+  mutate(mean_r2_training = mean(r2_training)) %>%
+  ungroup() %>%
+  mutate(data_subset = fct_reorder(data_subset, (mean_r2_training))) %>%
+  ggplot(aes(data_subset, r2_training, fill = test_sets)) +
+  geom_col(position = "dodge", color = "black") +
+  geom_hline(aes(yintercept = 0)) +
+  ggsci::scale_fill_simpsons()
+
 
 
 # best model performance --------------------------------------------------
@@ -726,20 +747,23 @@ ranger <- skynet_models %>%
          variables == "gfw_only") %>%
   select(train_set, training_data, r2_training)
 
-ranger_ovp <- ranger %>%
+
+ranger_ovp_plot <- ranger %>%
   unnest() %>%
+  filter(train_set %in% c("random","spatial")) %>%
   mutate(train_set = fct_reorder(train_set, rev(r2_training))) %>%
   group_by(train_set) %>%
   mutate(biomass = biomass / max(biomass),
          pred = pred / max(pred)) %>%
   ggplot(aes(biomass, pred)) +
   geom_point() +
+  geom_text(aes(0.9, .75, label = glue::glue("R2 = {round(r2_training,2)}"))) +
   geom_abline(aes(slope = 1, intercept = 0), linetype = 2, color = "red") +
+  geom_smooth(method = "lm", se = FALSE) +
   facet_wrap(~train_set) +
-  theme_minimal() +
   theme(axis.text.x = element_blank(),
         axis.text.y = element_blank()) +
-  labs(x = "Observed", y = "Predicted", title = "A)")
+  labs(x = "Observed", y = "Predicted")
 
 ranger_r2 <- ranger %>%
   ggplot(aes(r2_training)) +
@@ -869,13 +893,23 @@ strct_v_ml_plot <- downscale_plot + upscale_plot
 
 voi_plot <- skynet_models %>%
   filter(dep_var == "biomass", model == "ranger",
-         test_sets %in% test_sets_of_interest) %>%
+         test_sets %in% c("random"),
+         data_subset %in% c("skynet","skynet_25km","skynet_100km")) %>%
   select(variables, data_subset, test_sets, r2_training) %>%
   spread(variables, r2_training) %>%
   mutate(delta_g_and_e = gfw_and_enviro - enviro_only,
          delta_g = gfw_only - enviro_only) %>%
   select(-enviro_only, -gfw_and_enviro, -gfw_only) %>%
   gather(comparison, delta, delta_g_and_e, delta_g) %>%
+  ggplot(aes(comparison, delta, fill = data_subset)) +
+  geom_col(position = "dodge", color = "black") +
+  geom_hline(aes(yintercept = 0)) +
+  scale_x_discrete(labels = c("Effort vs Environment", "Effort and Evironment vs. Environment")) +
+  coord_flip() +
+  labs(y = bquote("Difference in"~R^2), x = "") +
+  ggsci::scale_fill_startrek(name = "Data Resolution")
+
+
   ggplot(aes(delta, fill = comparison)) +
   geom_vline(aes(xintercept = 0), linetype = 2, color = "red") +
   geom_density(alpha = 0.5) +
@@ -889,346 +923,149 @@ voi_plot <- skynet_models %>%
 test_training_plot <- skynet_models %>%
   filter(dep_var == "biomass",
          data_subset == "skynet_100km",
-         model == 'ranger',
-         test_sets %in% test_sets_of_interest) %>%
+         model %in% c(best_ml_model, 'structural'),
+         test_sets %in% c("random")) %>%
+  filter(!(model == "structural" & variables != "gfw_only")) %>%
   mutate(variables = fct_reorder(variables,r2 )) %>%
-  select(variables, data_subset, test_sets, r2_training, r2) %>%
+  select(variables, data_subset, test_sets,model, r2_training, r2) %>%
   gather(`Split`,r2, r2_training, r2) %>%
   ggplot(aes(variables, r2)) +
   geom_line() +
   geom_point(aes(fill = `Split`),shape = 21, size = 4) +
   labs(y = bquote(R^2),x = "Variables") +
-  ggsci::scale_fill_rickandmorty(labels = c("Training", "Testing")) +
+  ggsci::scale_fill_rickandmorty(labels = c("Testing", "Training")) +
   coord_flip() +
-  facet_wrap(~test_sets)
-
-
-# which data subset
-
-best_data_subset <- best_fits %>%
-  filter(dep_var == "density", unfished_only == FALSE) %>%
-  group_by(data_subset) %>%
-  mutate(median_r2 = median(r2_training, na.rm = T)) %>%
-  ungroup() %>%
-  mutate(data_subset = fct_reorder(data_subset, median_r2)) %>%
-  arrange(desc(median_r2))
-
-best_data_subset %>%
-  ggplot() +
-  geom_point(position = "dodge",aes(data_subset,r2_training), alpha = 0.5) +
-  geom_point(aes(data_subset, median_r2), color = "red", size = 2) +
-  coord_flip()
-
-best_data_subset <- "skynet"
-
-
-best_fits <- skynet_models %>%
-  filter(model == best_ml_model | model == "structural",
-         dep_var == "density",
-         variables == "gfw_only") %>%
-  mutate(data_subset = if_else(data_subset == "lag_1_skynet_data", "skynet", data_subset))
-
-best_fits <- best_fits %>%
-  filter(data_subset == best_data_subset)
-
-best_fits %>%
-  group_by(test_set) %>%
-  mutate(mean_r2 = mean(r2, na.rm = T)) %>%
-  ungroup() %>%
-  mutate(test_set = fct_reorder(test_set, mean_r2)) %>%
-  gather(r2_source, r2_value, r2, r2_training) %>%
-  ggplot(aes(test_set, r2_value)) +
-  geom_line() +
-  geom_point(aes(color = r2_source), size = 4) +
-  coord_flip() +
-  theme(axis.title.y = element_blank()) +
-  labs(y = bquote(R ^ 2)) +
-  scale_color_manual(
-    name = "Data Split",
-    labels = c("Testing", "Training"),
-    values = wes_palette("Zissou1")
-  ) +
   facet_wrap(~model)
 
 
-# spatial performance -----------------------------------------------------
+# methods and data --------------------------------------------------------------------
 
-spatial_performance <- best_fits %>%
-  filter(test_set == "spatial")  %>% {
-    .$test_data[[1]]
-  } %>%
-  filter(surveyed_year == T) %>%
-  group_by(survey) %>%
-  mutate(sd_density = sd(density, na.rm = T)) %>%
-  group_by(rounded_lat, rounded_lon, survey) %>%
-  summarise(resid = mean(pred - density),
-            scaled_resid = pmax(-2,pmin(2,resid / mean(sd_density))))
+knots <- vast_fish %>%
+  filter(!survey %in% bad_surveys) %>%
+  select(survey,spp,vasterized_data) %>%
+  mutate(knots = map(vasterized_data, c('spatial_list', 'loc_x_lat_long'))) %>%
+  select(-vasterized_data,-spp) %>%
+  unnest() %>%
+  unique() %>%
+  mutate(recenter_lon = ifelse(approx_long < 0, 180 + (180 - abs(approx_long)), approx_long))
 
-spatial_performance_plot <- spatial_performance %>%
-  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>%
-  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+map_knots <-  knots %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, approx_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
   ungroup() %>%
   mutate(geometry = sf::st_sfc(geometry, crs =
                                  "+proj=longlat +datum=WGS84 +no_defs")) %>%
   sf::st_sf()
 
-bbox <- sf::st_bbox(spatial_performance_plot)
+bbox <- sf::st_bbox(map_knots)
 
-alaska_bbox <- sf::st_bbox(spatial_performance_plot %>% filter(survey != "wcgbts"))
-
-wc_bbox <- sf::st_bbox(spatial_performance_plot %>% filter(survey == "wcgbts"))
-
-
-resid_hist <- spatial_performance %>%
-  ggplot(aes(scaled_resid)) +
-  geom_density(color = "black", fill = "grey", alpha = 0.5) +
-  labs(x = "Scaled Residuals", caption = "Residuals divided by standard deviation of observed densities") +
-  theme(axis.title.y = element_blank(),
-        axis.text.y = element_blank(),
-        plot.margin = unit(c(0,0,0,0),"cm"),
-        axis.text.x = element_text(size = 8))
-
-
-
-alaska_spatial_residual_plot <- ggplot() +
-  geom_sf(data = spatial_performance_plot %>% filter(survey != "wcgbts"), aes(color = scaled_resid),size = 0.5, alpha = 0.75) +
-  geom_sf(data = pacific_map, shape = 21) +
-  coord_sf(xlim = c(alaska_bbox['xmin'], alaska_bbox['xmax']),
-           ylim = c(alaska_bbox['ymin']*.95, alaska_bbox['ymax'] * 1.1), expand = F) +
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Scaled Residuals", guide = guide_colorbar(frame.colour = "black")) +
-  map_theme +
-  labs(caption = "Alaska") +
-  theme(legend.key.height = unit(1,"cm"))
-
-
-wc_spatial_residual_plot <- ggplot() +
-  geom_sf(data = spatial_performance_plot %>% filter(survey == "wcgbts"), aes(color = scaled_resid), size = 0.5, alpha = 0.75) +
-  geom_sf(data = pacific_map) +
-  coord_sf(xlim = c(wc_bbox['xmin']*.98, wc_bbox['xmax']),
-           ylim = c(wc_bbox['ymin'], wc_bbox['ymax'] * 1.05), expand = F) +
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "grey", name = "Residuals", guide = "none") +
-  map_theme +
-  labs(caption = "West Coast")
-
-
-spatial_residual_plot <- (
-  wc_spatial_residual_plot + alaska_spatial_residual_plot
-) / resid_hist  + plot_layout(nrow = 2, ncol = 1, widths = c(2,1),heights = c(2.5,1)) & theme(plot.margin = unit(rep(0.01,4), "points"))
-
-
-# more spatial ------------------------------------------------------------
-
-train_performance <- best_fits %>%
-  filter(test_set == "california", data_subset == "skynet")  %>%{
-    .$training_data[[1]]
-  } %>%
-  mutate(resid = pred - density) %>%
-  mutate(split = "Training")
-
-test_performance <- best_fits %>%
-  filter(test_set == "california", data_subset == "skynet")  %>% {
-    .$test_data[[1]]
-  } %>%
-  mutate(resid = pred - density) %>%
-  mutate(split = "Testing")
-
-spatial_performance <- train_performance %>%
-  bind_rows(test_performance) %>%
-  filter(surveyed_year == T) %>%
-  group_by(survey) %>%
-  mutate(scaled_resid = resid / sd(density))
-
-spatial_performance_plot <- spatial_performance %>%
-  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>%
-  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
-  ungroup() %>%
-  mutate(geometry = sf::st_sfc(geometry, crs =
-                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
-  sf::st_sf()
-
-bbox <- sf::st_bbox(spatial_performance_plot)
-
-
-resid_hist <- spatial_performance %>%
-  ggplot(aes(scaled_resid,fill = split)) +
-  geom_density(alpha = 0.75) +
-  labs(x = "Scaled Residuals", title = "A)") +
-  theme(axis.title.y = element_blank(),
-        axis.text.y = element_blank()) +
-  theme(legend.position = "right") +
-  scale_fill_discrete(name = '')
-
-
-spatial_residual_plot <- ggplot() +
-  geom_sf(data = spatial_performance_plot %>% filter(split == "Testing"), aes(color = scaled_resid), size = 0.5, alpha = 0.75) +
-  geom_sf(data = pacific_map) +
+knot_plot <- map_knots %>%
+  ggplot() +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  geom_sf(aes(color = survey), size = 1, alpha = 0.5) +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
-           ylim = c(bbox['ymin']*.75, bbox['ymax'] * 1.1), expand = F) +
-  scale_shape(guide = FALSE) +
-  scale_color_gradient2(low = "tomato", high = "steelblue",midpoint = 0, mid = "lightgrey", name = "Residuals") +
-  map_theme +
-  labs(title = "B)")
+           ylim = c(bbox['ymin'], bbox['ymax'])) +
+  scale_color_viridis_d() +
+  theme(legend.key.height = unit(1.5,"cm"))
 
 
-resid_hist + spatial_residual_plot + plot_layout(ncol = 2, nrow = 1, widths = c(1,2))
-
-
-
-# no idea -----------------------------------------------------------------
-
-resolution_km2 <- 100
-
-sub_skynet_models <- skynet_models %>%
-  mutate(
-    run_name = glue::glue(
-      "{.$dep_var}--{.$model}--{.$weight_surveys}--{.$test_sets}--{.$data_subset}"
-    )
-  ) %>%
-  filter(model %in% c(best_ml_model),
-         dep_var == "density",
-         data_subset == "skynet",
-         test_set %in% c("random","spatial","alaska", "random_west_coast", "west_coast","year_greq_than_2014"),
-         variables == "gfw_only")  %>%
-  mutate(test_data = map(test_data, ~.x %>% filter(surveyed_year == T)),
-         training_data = map(training_data, ~.x %>% filter(surveyed_year == T)))
-
-
-downscaled_results <-
-  cross_df(list(
-    run_name = sub_skynet_models$run_name,
-    resolution = resolution_km2
-  )) %>%
-  left_join(
-    sub_skynet_models %>% select(
-      run_name,
-      test_data,
-      training_data,
-      dep_var,
-      model,
-      weight_surveys,
-      train_set,
-      test_set,
-      data_subset
-    ),
-    by = "run_name"
-  ) %>%
-  arrange(run_name)
-
-downscaled_results <-  downscaled_results %>%
-  mutate(
-    training_grid  = map2(
-      training_data,
-      resolution,
-      create_grid,
-      lon_name = rounded_lon,
-      lat_name = rounded_lat
-    )
-  ) %>%
-  mutate(
-    training_data = map2(
-      training_data,
-      training_grid,
-      snap_to_grid,
-      old_lon_name = rounded_lon,
-      old_lat_name = rounded_lat,
-      new_lon_name = lon,
-      new_lat_name = lat,
-      dep_var = "density"
-    )
-  )
-
-downscaled_results <-  downscaled_results %>%
-  mutate(
-    testing_grid  = map2(
-      test_data,
-      resolution,
-      create_grid,
-      lon_name = rounded_lon,
-      lat_name = rounded_lat
-    )
-  ) %>%
-  mutate(
-    test_data = map2(
-      test_data,
-      testing_grid,
-      snap_to_grid,
-      old_lon_name = rounded_lon,
-      old_lat_name = rounded_lat,
-      new_lon_name = lon,
-      new_lat_name = lat,
-      dep_var = "density"
-    )
-  )
-
-train_performance <- downscaled_results %>%
-  select(test_set,train_set, training_data) %>%
+fish_summary <- vast_fish %>%
+  filter(!survey %in% bad_surveys) %>%
+  select(survey, data,spp) %>%
   unnest() %>%
-  group_by(train_set) %>%
-  mutate(rel_pred = agg_pred / max(agg_pred),
-         rel_density = agg_mean_density / max(agg_mean_density)) %>%
-  mutate(split = "Training")
-
-test_performance <- downscaled_results %>%
-  select(test_set,train_set, test_data) %>%
-  unnest() %>%
-  group_by(test_set) %>%
-  mutate(rel_pred = agg_pred / max(agg_pred),
-         rel_density = agg_mean_density / max(agg_mean_density)) %>%
-  mutate(split = "Testing")
-
-spatial_performance <- train_performance %>%
-  bind_rows(test_performance) %>%
+  group_by(survey, spp) %>%
+  summarise(n_seen = sum(catch_kg > 0)) %>%
+  group_by(spp) %>%
+  mutate(tc = sum(n_seen)) %>%
   ungroup() %>%
-  filter(!str_detect(test_set, "year_")) %>%
-  mutate(set_order = as.numeric(factor(test_set))) %>%
-  mutate(test_set = fct_reorder(test_set, set_order),
-         train_set = fct_reorder(train_set, set_order))
+  mutate(spp = forcats::fct_reorder(spp, tc)) %>%
+  group_by(survey) %>%
+  top_n(10, tc) %>%
+  ungroup()
 
-trained_plot <- spatial_performance %>%
-  filter(split == "Training") %>%
-  ggplot(aes(rel_density, rel_pred)) +
-  geom_point() +
-  facet_wrap(~ train_set, strip.position = "left", nrow = n_distinct(spatial_performance$test_set), ncol = 1 ) +
-  labs(title = "Trained on...", y = "Predicted")  +
-  theme(axis.title.x = element_blank())
-
-
-tested_plot <- spatial_performance %>%
-  filter(split == "Testing") %>%
-  ggplot(aes(rel_density, rel_pred)) +
-  geom_point() +
-  facet_wrap(~ test_set, strip.position = "right", nrow = n_distinct(spatial_performance$test_set), ncol = 1 ) +
-  labs(title = "Tested on...", x = "Observed") +
-  theme(axis.title.y = element_blank())
-
-trained_plot + tested_plot &
-  theme(
-    panel.spacing = unit(10, "points"),
-    axis.text.x = element_blank(),
-    axis.text.y = element_blank(),
-    strip.text = element_text(size = 7),
-    plot.margin = unit(rep(.1, 4), "lines")
-  )
+fish_plot <- fish_summary %>%
+  ggplot(aes(spp, tc, fill = survey)) +
+  geom_col() +
+  coord_flip() +
+  theme(axis.text.y = element_text(size = 10),
+        axis.title.y = element_blank()) +
+  labs(y = "# of times observed") +
+  scale_fill_viridis_d()
 
 
-## Value of information
+fish_abundance <- skynet_data %>%
+  filter(!survey %in% bad_surveys) %>%
+  group_by(survey,knot, rounded_lat, rounded_lon) %>%
+  summarise(total_density = mean(density)) %>%
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon))
 
-skynet_models %>%
-  filter(data_subset == "skynet", model == best_ml_model,
-         test_set == "spatial", dep_var == "density") %>%
-  select(variables, r2, r2_training) %>%
-  gather(r2_source, r2_value, -variables) %>%
-  ggplot(aes(variables, r2_value, fill = r2_source)) +
-  geom_col(position = "dodge")
-
-skynet_models %>%
-  filter(data_subset == "skynet", model == best_ml_model,
-         test_set == "spatial", dep_var == "density") %>%
-  select(variables, rmse, rmse_training) %>%
-  gather(rmse_source, rmse_value, -variables) %>%
-  ggplot(aes(variables, rmse_value, fill = rmse_source)) +
-  geom_col(position = "dodge")
+fish_abundance <-  fish_abundance %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
 
 
+bbox <- sf::st_bbox(map_knots)
 
-## Supplementary predictions
+fish_map_plot <- fish_abundance %>%
+  ggplot() +
+  geom_sf(aes(color = total_density), size = 1, alpha = 0.5) +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+           ylim = c(bbox['ymin'], bbox['ymax'])) +
+  # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+
+  scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)))+
+  theme(legend.key.height = unit(1.5,"cm"))
+
+price_plot <- species_prices %>%
+  filter(is.na(mean_exvessel_price) == F) %>%
+  mutate(species = fct_reorder(species, mean_exvessel_price))  %>%
+  ggplot(aes(species, mean_exvessel_price)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::dollar) +
+  coord_flip() +
+  theme(axis.text.y = element_text(size = 8), axis.title.y = element_blank()) +
+  labs(y = "Mean ex-vessel price (USD)")
+
+
+gfw_effort <- gfw_data %>%
+  unnest() %>%
+  filter(inferred_label_allyears == "trawlers",
+         survey != "wcgbts" & survey != "wcghl") %>%
+  group_by(year, rounded_lat, rounded_lon) %>%
+  summarise(total_effort = pmin(10,sum(total_hours, na.rm = T))) %>%
+  mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>%
+  filter(total_effort > 0, year == max(year))
+
+gfw_map <-  gfw_effort %>%
+  dplyr::mutate(geometry = purrr::map2(recenter_lon, rounded_lat, ~ sf::st_point(x = c(.x, .y), dim = 'XY'))) %>%
+  ungroup() %>%
+  mutate(geometry = sf::st_sfc(geometry, crs =
+                                 "+proj=longlat +datum=WGS84 +no_defs")) %>%
+  sf::st_sf()
+
+
+bbox <- sf::st_bbox(gfw_map)
+
+gfw_plot <- gfw_map %>%
+  ggplot() +
+  geom_sf(aes(color = total_effort), size = 0.1, alpha = 0.25) +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+           ylim = c(bbox['ymin'], bbox['ymax'])) +
+  # scale_color_viridis(name = "Fishing Hours", labels = scales::comma) +
+  scale_color_viridis(name = "Fishing Hours", labels = scales::comma) +
+  theme(legend.key.height = unit(1.5,"cm"))
+
+
+# save --------------------------------------------------------------------
+
+
+
+plots <- ls()[str_detect(ls(),"_plot")]
+
+
+save(file = paste0(run_dir,"/skynet-plots.Rdata"), list = plots)
+
+
