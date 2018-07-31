@@ -411,7 +411,7 @@ ebsbts_cpue_plot <- ebsbts_cpue %>%
   ungroup() %>%
   ggplot(aes(year, scaled_value, color = Index, linetype = metric)) +
   geom_line(size = 1.5) +
-  scale_color_viridis_d(option = "E") +
+  # scale_color_viridis_d(option = "E") +
   labs(title = "Eastern Bering Sea", x = "", y = "")
 
 # west coast
@@ -502,7 +502,7 @@ wc_cpue_plot <- wc_cpue %>%
   ungroup() %>%
   ggplot(aes(year, scaled_value, color = Index, linetype = metric)) +
   geom_line(size = 1.5, show.legend = F) +
-  scale_color_viridis_d(option = "E") +
+  # scale_color_viridis_d(option = "E") +
   labs(title = "US West Coast", y = "Scaled Value", x = "Year")
 
 
@@ -648,7 +648,7 @@ oa_location_effects <- broom::tidy(oa_fit)%>%
   mutate(location = str_replace_all(location,"x","")) %>%
   mutate(knot = str_replace_all(location,"\\D","") %>% as.numeric(),
          survey = str_replace_all(location,"\\d","")) %>%
-  mutate(location_effect = exp(estimate + std.error^2/2)) %>%
+  mutate(location_effect = exp(estimate)) %>%
   select(survey, knot, location_effect)
 
 
@@ -908,21 +908,18 @@ voi_plot <- skynet_models %>%
   ggsci::scale_fill_startrek(name = "Data Resolution")
 
 
-  ggplot(aes(delta, fill = comparison)) +
-  geom_vline(aes(xintercept = 0), linetype = 2, color = "red") +
-  geom_density(alpha = 0.5) +
-  ggsci::scale_fill_npg(labels = c("GFW Only", "GFW and Environmental Data"))
-
 #then with testing
 #
 # suggests that in general just enviro would be your best bet, how does that stand up
 # to testing data
 
+skynet_models$test_sets[skynet_models$test_sets == "historic"] <- "future"
+
 test_training_plot <- skynet_models %>%
   filter(dep_var == "biomass",
          data_subset == "skynet_100km",
          model %in% c(best_ml_model, 'structural'),
-         test_sets %in% c("random","spatial","california")) %>%
+         test_sets %in% c("random","future","california")) %>%
   filter(!(model == "structural" & variables != "gfw_only")) %>%
   mutate(variables = fct_reorder(variables,r2 )) %>%
   select(variables, data_subset, test_sets,model, r2_training, r2) %>%
@@ -1014,7 +1011,8 @@ fish_map_plot <- fish_abundance %>%
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
            ylim = c(bbox['ymin'], bbox['ymax'])) +
   # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+
-  scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)))+
+  scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)),
+                      guide = guide_colorbar(frame.colour = "black"))+
   theme(legend.key.height = unit(1.5,"cm"))
 
 revenue_map_plot <- fish_abundance %>%
@@ -1024,7 +1022,12 @@ revenue_map_plot <- fish_abundance %>%
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
            ylim = c(bbox['ymin'], bbox['ymax'])) +
   # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+
-  scale_color_viridis(trans = "log10", name =bquote("Revenue Density"~(ton/km^2)), option = "A")+
+  scale_color_viridis(
+    trans = "log10",
+    name = bquote("Revenue Density" ~ (ton / km ^ 2)),
+    option = "A",
+    guide = guide_colorbar(frame.colour = "black")
+  ) +
   theme(legend.key.height = unit(1.5,"cm"))
 
 
@@ -1044,7 +1047,7 @@ gfw_effort <- gfw_data %>%
   filter(inferred_label_allyears == "trawlers",
          survey != "wcgbts" & survey != "wcghl") %>%
   group_by(year, rounded_lat, rounded_lon) %>%
-  summarise(total_effort = pmin(10,sum(total_hours, na.rm = T))) %>%
+  summarise(total_effort =sum(total_hours, na.rm = T)) %>%
   mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon)) %>%
   filter(total_effort > 0, year == max(year))
 
@@ -1064,9 +1067,13 @@ gfw_plot <- gfw_map %>%
   geom_sf(data = pacific_map, fill = 'grey60') +
   coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
            ylim = c(bbox['ymin'], bbox['ymax'])) +
-  # scale_color_viridis(name = "Fishing Hours", labels = scales::comma) +
-  scale_color_viridis(name = "Fishing Hours", labels = scales::comma) +
-  theme(legend.key.height = unit(1.5,"cm"))
+  scale_color_viridis(
+    trans = "log10",
+    name = "Fishing Hours",
+    labels = scales::comma,
+    guide = guide_colorbar(frame.colour = "black")
+  ) +
+  theme(legend.key.height = unit(1.5, "cm"))
 
 
 # save --------------------------------------------------------------------
