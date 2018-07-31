@@ -15,13 +15,13 @@ library(recipes)
 library(rstan)
 library(brms)
 library(tidyverse)
+extrafont::loadfonts()
 
+# Sys.setenv(R_MAX_VSIZE = 9e9)
 
 functions <- list.files(here::here("functions"))
 
 walk(functions, ~ here::here("functions", .x) %>% source()) # load local functions
-
-
 
 # filters -----------------------------------------------------------------
 
@@ -77,7 +77,6 @@ map_theme <-   theme_get() +theme(legend.key.height = unit(1.5,"cm"),
                                   legend.box.margin =  ggplot2::margin(0,0,0,0))
 
 vast_fish <- vast_fish[!map_lgl(vast_fish$vasterized_data, is.null), ]
-
 
 
 skynet_models <- skynet_models %>%
@@ -140,34 +139,33 @@ skynet_models <- skynet_models %>%
     r2_training = map2_dbl(training_data, dep_var, ~ yardstick::rsq(.x %>% filter(surveyed_year == T), .y, "pred")),
     rmse_training = map2_dbl(training_data, dep_var, ~ yardstick::rmse(.x %>% filter(surveyed_year == T), .y, "pred")),
     ccc_training = map2_dbl(training_data, dep_var, ~ yardstick::ccc(.x %>% filter(surveyed_year == T), .y, "pred"))
-  ) %>%
-  mutate(
-    test_plot = pmap(
-      list(
-        data = test_data,
-        r2 = r2,
-        test_region = test_sets,
-        train_region = train_set,
-        data_set = data_subset,
-        dep_var = dep_var
-      ),
-      diagnostic_plot_foo
-    ),
-    training_plot = pmap(
-      list(
-        data = training_data,
-        r2 = r2_training,
-        test_region = paste0(test_sets),
-        train_region = paste0(train_set, "- training plot"),
-        data_set = data_subset,
-        dep_var = dep_var
-      ),
-      diagnostic_plot_foo
-    )
-  )
+  ) #%>%
+  # mutate(
+  #   test_plot = pmap(
+  #     list(
+  #       data = test_data,
+  #       r2 = r2,
+  #       test_region = test_sets,
+  #       train_region = train_set,
+  #       data_set = data_subset,
+  #       dep_var = dep_var
+  #     ),
+  #     diagnostic_plot_foo
+  #   ),
+  #   training_plot = pmap(
+  #     list(
+  #       data = training_data,
+  #       r2 = r2_training,
+  #       test_region = paste0(test_sets),
+  #       train_region = paste0(train_set, "- training plot"),
+  #       data_set = data_subset,
+  #       dep_var = dep_var
+  #     ),
+  #     diagnostic_plot_foo
+  #   )
+  # )
 
 skynet_models <- skynet_models %>%
-
     mutate(unfished_only = str_detect(data_subset, "unfished"))
 
 
@@ -924,7 +922,7 @@ test_training_plot <- skynet_models %>%
   filter(dep_var == "biomass",
          data_subset == "skynet_100km",
          model %in% c(best_ml_model, 'structural'),
-         test_sets %in% c("random")) %>%
+         test_sets %in% c("random","spatial","california")) %>%
   filter(!(model == "structural" & variables != "gfw_only")) %>%
   mutate(variables = fct_reorder(variables,r2 )) %>%
   select(variables, data_subset, test_sets,model, r2_training, r2) %>%
@@ -935,7 +933,7 @@ test_training_plot <- skynet_models %>%
   labs(y = bquote(R^2),x = "Variables") +
   ggsci::scale_fill_rickandmorty(labels = c("Testing", "Training")) +
   coord_flip() +
-  facet_wrap(~model)
+  facet_grid(test_sets~model)
 
 
 # methods and data --------------------------------------------------------------------
@@ -995,7 +993,8 @@ fish_plot <- fish_summary %>%
 fish_abundance <- skynet_data %>%
   filter(!survey %in% bad_surveys) %>%
   group_by(survey,knot, rounded_lat, rounded_lon) %>%
-  summarise(total_density = mean(density)) %>%
+  summarise(total_density = mean(density),
+            total_revenue = mean(economic_density)) %>%
   mutate(recenter_lon = ifelse(rounded_lon < 0, 180 + (180 - abs(rounded_lon)), rounded_lon))
 
 fish_abundance <-  fish_abundance %>%
@@ -1017,6 +1016,17 @@ fish_map_plot <- fish_abundance %>%
   # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+
   scale_color_viridis(trans = "log10", name =bquote("Density"~(ton/km^2)))+
   theme(legend.key.height = unit(1.5,"cm"))
+
+revenue_map_plot <- fish_abundance %>%
+  ggplot() +
+  geom_sf(aes(color = total_revenue), size = 1, alpha = 0.5) +
+  geom_sf(data = pacific_map, fill = 'grey60') +
+  coord_sf(xlim = c(bbox['xmin'], bbox['xmax']),
+           ylim = c(bbox['ymin'], bbox['ymax'])) +
+  # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+
+  scale_color_viridis(trans = "log10", name =bquote("Revenue Density"~(ton/km^2)), option = "A")+
+  theme(legend.key.height = unit(1.5,"cm"))
+
 
 price_plot <- species_prices %>%
   filter(is.na(mean_exvessel_price) == F) %>%
