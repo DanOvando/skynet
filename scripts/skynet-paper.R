@@ -1131,7 +1131,7 @@ theme(axis.text.x = element_text(size = 8)) +
 voi_plot <- skynet_models %>%
   filter(dep_var == "biomass", model == "ranger",
          test_sets %in% c("random"),
-         data_subset %in% c("skynet")) %>%
+         data_subset %in% c("skynet", "skynet_25km","skynet_100km")) %>%
   select(variables, data_subset, test_sets, r2_training) %>%
   spread(variables, r2_training) %>%
   mutate(delta_g_and_e = gfw_and_enviro - enviro_only,
