@@ -9,6 +9,8 @@
 #' @examples
 rescale_data <- function(data, resolution = 25, lon_name = rounded_lon, lat_name = rounded_lat) {
 
+  orig_names <- colnames(data)
+
   lon_name <- enquo(lon_name)
 
   lat_name <- enquo(lat_name)
@@ -53,14 +55,22 @@ rescale_data <- function(data, resolution = 25, lon_name = rounded_lon, lat_name
     #   geom_point(shape = 21)
 
     # assign new lat and lon
+
+    data <- data %>%
+      mutate(survey_knot = paste(survey, knot, sep = "-")) %>%
+      group_by(year,survey_knot) %>%
+      mutate(spread_over = n_distinct(new_knot)) %>%
+      mutate(dilute_total = 1/spread_over) %>%
+      ungroup()
+
     data <- data %>%
       mutate(rounded_lat = lat,
              rounded_lon = lon,
              knot = new_knot) %>%
-      select(-lat, -lon, -recenter_lon, -new_knot)
+      select(-lat, -lon, -recenter_lon, -new_knot,-survey_knot,-spread_over)
 
     long_data <- data %>%
-      gather(variable, value, -survey, -surveyed_year,-year, -rounded_lat, -rounded_lon,-knot)
+      gather(variable, value,-dilute_total,-mean_knot_area,-survey, -surveyed_year,-year, -rounded_lat, -rounded_lon,-knot)
 
 
     variables <- unique(long_data$variable)
@@ -74,15 +84,19 @@ rescale_data <- function(data, resolution = 25, lon_name = rounded_lon, lat_name
 
     vars_to_sum <- variables[!variables %in% vars_to_average]
 
+    long_data <- long_data %>%
+      rename(mka = mean_knot_area)
+
     rescaled_data <- long_data %>%
       group_by(survey, year,surveyed_year, rounded_lat, rounded_lon, knot, variable) %>%
-      summarise(rescaled_value = rescale_foo(value, variable, vars_to_average, vars_to_sum))
+      summarise(rescaled_value = rescale_foo(value, variable, dilute_total,mka,vars_to_average, vars_to_sum),
+                mean_knot_area = mean(mka))
 
     rescaled_data <- rescaled_data %>%
       ungroup() %>%
       spread(variable, rescaled_value)
 
-    rescaled_data <- rescaled_data[, colnames(data)]
+    rescaled_data <- rescaled_data[, orig_names]
 
     rescaled_data$any_fishing <- rescaled_data$total_hours > 0
 
@@ -100,7 +114,6 @@ rescale_data <- function(data, resolution = 25, lon_name = rounded_lon, lat_name
     #   scale_fill_viridis()
 
     rescaled_data$index <- 1:nrow(rescaled_data)
-
     return(rescaled_data)
 
 

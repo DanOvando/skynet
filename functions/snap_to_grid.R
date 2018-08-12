@@ -52,20 +52,46 @@ snap_to_grid <-
     }
 
     new_grid <- old_grid %>%
-      group_by(year, new_knot) %>%
-      summarise(
-        old_obs = length(density),
-        lat = unique(!!new_lat_name),
-        lon = unique(!!new_lon_name),
-        approx_survey = unique(survey)[1],
-        agg_mean_density = sum(unique(density * mean_knot_area) / sum(unique(mean_knot_area))) ,
-        total_biomass = sum(unique(density * mean_knot_area)),
-        total_revenue = sum(unique(economic_density * mean_knot_area)),
-        agg_mean_economic_density = weighted.mean(economic_density, w = mean_knot_area),
-        agg_total_engine_hours = sum(total_engine_hours),
-        agg_total_hours = sum(total_hours),
-        agg_total_num_vessels = sum(num_vessels),
-        agg_pred = ifelse(str_detect(dep_var, "density"), weighted.mean(pred, w = mean_knot_area, na.rm = T), sum(pred, na.rm = T))
-      )
+      mutate(survey_knot = paste(survey, knot, sep = "-")) %>%
+      group_by(year,survey_knot) %>%
+      mutate(spread_over = n_distinct(new_knot)) %>%
+      mutate(dilute_total = 1/spread_over) %>%
+      group_by(year, survey, knot, new_knot, lat, lon) %>%
+      summarise(b = unique(biomass),
+                mp = unique(aggregate_price),
+                dt = unique(dilute_total),
+                ka = unique(mean_knot_area),
+                d = unique(density),
+                th = sum(total_hours),
+                teh = sum(total_engine_hours),
+                tn = sum(num_vessels),
+                mpred = mean(pred)
+                ) %>%
+      group_by(year, survey, new_knot, lat, lon) %>%
+      summarise(total_biomass = sum(b * dt),
+                total_revenue = sum(b * mp * dt),
+                agg_mean_density = weighted.mean(d,ka),
+                agg_mean_economic_density = weighted.mean(d * mp,ka),
+                approx_survey = unique(survey)[1],
+                old_obs = length(b),
+                agg_total_hours = sum(th),
+                agg_total_engine_hours = sum(teh),
+                agg_total_num_vessels = sum(tn),
+                agg_pred = ifelse(str_detect(dep_var, "density"), weighted.mean(mpred, w = ka, na.rm = T), sum(mpred * dt, na.rm = T)))
+
+
+      # old_grid %>%
+      #   group_by(survey,knot, rounded_lat, rounded_lon) %>%
+      #   summarise(tb = sum(biomass)) %>%
+      #   ggplot(aes(rounded_lon, rounded_lat, fill = tb)) +
+      #   geom_point(shape = 21) +
+      #   scale_fill_viridis()
+
+      # new_fish %>%
+      #   group_by(survey,new_knot, lat, lon) %>%
+      #   summarise(tb = sum(total_biomass)) %>%
+      #   ggplot(aes(lon, lat, fill = tb)) +
+      #   geom_point(shape = 21) +
+      #   scale_fill_viridis()
 
   }

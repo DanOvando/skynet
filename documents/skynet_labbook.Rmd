@@ -4029,9 +4029,179 @@ e_v_ed_plot
 ```
 
 
+# Ray's comments
+
+starting on page three, where you say there's not a lot of research linking abundance to effort, cite Ray's work on this, see his attached papers
+
+His main interest: does effort change with abundance?
+
+TO get at figure 6 point, maybe show total summed effort and total available revenues by region to make clearer that when you sum the plots there's more fishing where there's more effort?
+
+For the statistical analysis then, you can compare the trends from GFW only to GFW+enviro + enviro only
+
+Yup! 
+
+Maybe make the paper a little clearer at first that you tried adn the answer was no?
+
+# UNITS AGAIN
+
+Let's go through and check all your units one. last. damn. time. 
+
+```{r}
+vast_fish$vasterized_data[[1]]$spatial_densities$density %>%
+  hist()
+
+```
+
+You know that it's at least in something per km^2. Now, what are these numbers? I'm guessing metric tons. If it's kg, then the max density per km^2^ in the EBS is like 1700 lbs. 800 tons per square KM makes a lot more sense. 
+
+Hmmm, but wait
+
+Index_xcyl(x,c,y,l) = D_xcy(x,c,y) * a_xl(x,l) / 1000;  // Convert from kg to metric tonnes
+
+so this would seem to suggest densities here are actually in kg, not in tons. 
+
+Let's compare the time index to the sum of the biomasses and see if the indicies are approx 1/1000
+
+
+```{r}
+ddensity <- vast_fish$vasterized_data[[43]]$spatial_densities %>% 
+  group_by(year) %>% 
+  summarise(biomass = sum(density * area)) %>% 
+  mutate(source = "density")
+
+
+idensity <- vast_fish$vasterized_data[[43]]$time_index %>% 
+  rename(year = Year) %>% 
+  group_by(year) %>% 
+  summarise(biomass = sum(abundance)) %>% 
+      mutate(source = "index")
+
+
+ddensity %>% 
+  bind_rows(idensity) %>% 
+  ggplot(aes(year, biomass, color = source)) + 
+  geom_jitter() 
+
+
+```
+
+AHA. 
+
+identical. I see. Well, on one level, there has to be more than 70,000 kf of alaska pollock in the EBSBTS... so has to be tons. though now even that seems low. 
+
+Projected just ssb in 2018 of walleye pollock is 5,831,610
+
+AHA. The damn problem is in your area swept calculations. You have them all set to 1, which sure as shit isn't right. 
+
+From the VAST examples
+
+it seems like .01 is the default for EBS and GOA, AI is... 1, WCGBTS is... unclear?
+
+WCGBTS_Canary_example[,"AREA_SWEPT_HA"]/1e2
+
+So at the very least that needs fixing to get your units in line here. A quick example of taking the biomasses and dividing by .01 seems to get you into the right area. 
+
+
+```{r}
+
+none <- skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("random"),
+         data_subset %in% c("skynet")) %>%
+  select(variables, data_subset, test_sets, training_data) %>%
+  unnest() %>% 
+  mutate(scale = "none")
 
 
 
+one <- skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("random"),
+         data_subset %in% c("skynet_100km")) %>%
+  select(variables, data_subset, test_sets, training_data) %>%
+  unnest() %>% 
+  mutate(scale = "one")
+
+none %>% 
+  bind_rows(one) %>% 
+  group_by(survey, variables, year,scale) %>% 
+  summarise(tb = sum(unique(biomass))) %>% 
+  ggplot(aes(year, tb, fill = scale)) + 
+  geom_col(position = "dodge") + 
+  facet_grid(survey ~ variables, scales = "free")
+
+
+
+
+
+```
+
+```{r}
+
+one <- data_sources$data[data_sources$data_subset == "skynet_100km"][[1]] %>% 
+    mutate(scale = "one") %>% 
+    select(-no_take_mpa,-restricted_use_mpa)
+
+
+
+
+none <- data_sources$data[data_sources$data_subset == "skynet"][[1]] %>% 
+    mutate(scale = "none") %>% 
+  select(-no_take_mpa,-restricted_use_mpa)
+
+none %>% 
+  bind_rows(one) %>% 
+  group_by(survey, year,scale) %>% 
+  summarise(tb = sum(unique(biomass))) %>% 
+  ggplot(aes(year, tb, fill = scale)) + 
+  geom_col(position = "dodge") + 
+  facet_grid(~survey, scales = "free")
+
+
+
+
+```
+
+
+OK, so now can confirm, we're in VAST units of tons per km^2. thank god. And the price database is in units of $ per ton, so no need for conversions there. 
+
+Lastly, what's up with the really low biomasses in some places. 
+
+
+```{r}
+
+skynet_data %>% 
+  group_by(survey, knot, year) %>% 
+  summarise(b = unique(biomass)) %>% 
+  group_by(survey) %>% 
+    summarise(tb = sum(b)) 
+
+```
+
+So is the problem the cell resolution, or is it in the number of effective knots?
+
+```{r}
+
+check <- vast_fish %>% 
+  mutate(spatial_abundance = map(vasterized_data, "spatial_densities")) %>% 
+  select(-data, -vasterized_data) %>% 
+  mutate(vast_worked = map(spatial_abundance,dim)) %>%
+  mutate(vast_worked = !map_lgl(vast_worked, is_null)) %>% 
+  filter(vast_worked) %>% 
+  unnest()
+
+check %>% 
+  group_by(survey) %>% 
+  summarise(tb = sum(biomass)) %>% 
+  ggplot(aes(survey, tb)) + 
+  geom_col()
+
+
+```
+
+
+hake is about 1.5 million, so, if that'as 1/5 of the total biomass of fishable species out there, that's not totally craz...., and that's counting canada
 
 
 

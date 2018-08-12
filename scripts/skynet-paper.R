@@ -14,6 +14,7 @@ library(tidyposterior)
 library(recipes)
 library(rstan)
 library(brms)
+library(ggrepel)
 library(tidyverse)
 extrafont::loadfonts()
 
@@ -59,7 +60,7 @@ map_size <- 1
 
 
 skynet_data <- candidate_data %>%
-  filter(fished_only == T, survey_months_only ==T) %>%
+  filter(fished_only == T, survey_months_only ==T, trawl_only == FALSE) %>%
   select(skynet_data) %>%
   unnest()
 
@@ -168,6 +169,8 @@ skynet_models <- skynet_models %>%
 skynet_models <- skynet_models %>%
     mutate(unfished_only = str_detect(data_subset, "unfished"))
 
+skynet_models$test_sets[skynet_models$test_sets == "historic"] <- "future"
+
 
 # data summaries ----------------------------------------------------------
 
@@ -195,11 +198,16 @@ fish_summary %>%
   scale_fill_viridis_d()
 
 # how does effort relate to abundance -------------------------------------
+#
+# skynet_data %>%
+#   group_by(year, survey) %>%
+#   summarise(tb = sum(biomass),
+#             tr = sum(biomass * aggregate_price))
 
 
 downscaled_performance <-
   cross_df(list(
-    resolution =  seq(25, 200, by = 25),
+    resolution =  seq(50,200, by = 25),
     training_data = list(skynet_data %>% filter(no_take_mpa == FALSE, restricted_use_mpa == FALSE))
   ))
 
@@ -231,10 +239,11 @@ downscaled_performance <-  downscaled_performance %>%
 e_v_d_plot <- downscaled_performance %>%
   select(resolution, new_data) %>%
   unnest() %>%
-  filter(agg_total_hours > 0) %>%
-  ggplot(aes((agg_total_hours), (agg_mean_density), fill = approx_survey)) +
+  filter(agg_total_hours > 0,
+         resolution == 100) %>%
+  ggplot(aes((agg_total_engine_hours), (total_biomass), fill = approx_survey)) +
   geom_point(alpha = 0.5, shape = 21,size = 2) +
-  labs(x = "Fishing Hours", y = bquote("Fish Density"~(ton/km^2)),
+  labs(x = "Engine Hours", y = "Fishable Biomass (MT)",
        caption = "Note log-10 scale of axes") +
   scale_fill_viridis_d(name = "Survey Region") +
   scale_color_viridis_d(name = "Survey Region") +
@@ -245,38 +254,37 @@ e_v_d_plot <- downscaled_performance %>%
   facet_wrap(~resolution)
 
 
-total_e_v_d <- downscaled_performance %>%
-  select(resolution, new_data) %>%
-  unnest() %>%
-  filter(agg_total_hours > 0,
-         resolution == 200) %>%
-  group_by(approx_survey) %>%
-  summarise(available_rev = sum(agg_mean_economic_density * resolution),
-            total_hours = sum(agg_total_hours)) %>%
-  mutate(approx_survey = fct_reorder(approx_survey, total_hours)) %>%
-  ggplot(aes(approx_survey,available_rev)) +
-  geom_point()
+
+e_v_d_plot
 
 
-# hack in here to deal with wrong price units in analysis
-e_v_ed_plot <- downscaled_performance %>%
-  select(resolution, new_data) %>%
-  unnest() %>%
-  filter(agg_total_hours > 0,
-         resolution %in% c(100)) %>%
-  ggplot(aes((agg_total_hours), (total_revenue * 1000), fill = approx_survey)) +
-  geom_point(alpha = 0.5, shape = 21,size = 2) +
-  labs(x = "Fishing Hours", y = "Available Revenues (USD)",
-       caption = "Note log-10 scale of axes") +
-  scale_fill_viridis_d(name = "Survey Region") +
-  scale_color_viridis_d(name = "Survey Region") +
-  geom_abline(aes(intercept = 0, slope = 1),linetype = 2, alpha = 0.75) +
-  geom_smooth(method = "lm", aes(color = approx_survey), se = FALSE) +
-  scale_x_log10(labels = scales::comma) +
-  scale_y_log10(labels = scales::dollar) +
-  facet_wrap(~resolution)
+# total abundance and effort ----------------------------------------------
 
-e_v_ed_plot
+
+
+
+# abundance vs effort -----------------------------------------------------
+
+b_v_eh_plot <- skynet_data %>%
+  filter(survey %in% c("ebsbts", "wcgbts")) %>%
+  group_by(survey, year, knot) %>%
+  summarise(tb = sum(unique(biomass)),
+            teh = sum(total_engine_hours)) %>%
+  group_by(survey, year) %>%
+  summarise(total_biomass = sum(tb),
+            total_eh = sum(teh)) %>%
+  group_by(survey) %>%
+  # mutate(total_biomass = lag(total_biomass)) %>%
+  gather(metric, value, contains("total")) %>%
+  group_by(survey, metric) %>%
+  mutate(scaled_value = (value - mean(value)) / sd(value)) %>%
+  ggplot(aes(year, scaled_value, color = metric)) +
+  geom_point(size = 2) +
+  geom_line() +
+  facet_wrap(~survey) +
+  labs(x = "Year", y = "Standard Deviations from Mean") +
+  ggsci::scale_color_igv(labels = c("Biomass","Engine Hours"))
+
 
 
 # catch per unit effort ---------------------------------------------------
@@ -383,13 +391,15 @@ ebsbts_effort <- gfw_data %>%
 
 survey_biomass <- candidate_data %>%
   filter(fished_only == TRUE, unfished_only == FALSE,
-         survey_months_only == TRUE) %>%
+         survey_months_only == TRUE, trawl_only == FALSE) %>%
   select(total_fish_data) %>%
   unnest() %>%
   filter(survey %in% "ebsbts") %>%
   unnest() %>%
+  group_by(year, knot) %>%
+  summarise(tb = unique(biomass)) %>%
   group_by(year) %>%
-  summarise(total_survey_biomass = sum(biomass, na.rm = T))
+  summarise(total_survey_biomass = sum(tb, na.rm = T))
 
 ebsbts_cpue <- ebsbts_catch %>%
   left_join(ebsbts_effort, by = "year") %>%
@@ -401,17 +411,28 @@ ebsbts_cpue <- ebsbts_catch %>%
          fao_cpue = total_fao_catch / total_effort,
          nmfs_cpue = total_nmfs_catch / total_effort)
 
-ebsbts_cpue_plot <- ebsbts_cpue %>%
+
+ebsbts_trends <- ebsbts_cpue %>%
   filter(!is.na(ram_cpue)) %>%
   gather(metric, value, -year) %>%
   filter(value > 0, str_detect(metric, "cpue|biomass")) %>%
   mutate(Index = ifelse(str_detect(metric, "cpue"), "CPUE", "Abudance")) %>%
   group_by(metric) %>%
   mutate(scaled_value = value / max(value, na.rm = T)) %>%
-  ungroup() %>%
-  ggplot(aes(year, scaled_value, color = Index, linetype = metric)) +
-  geom_line(size = 1.5) +
-  # scale_color_viridis_d(option = "E") +
+  ungroup()
+
+metric_labels <- ebsbts_trends %>%
+  group_by(metric) %>%
+  filter(year == max(year))
+
+ebsbts_cpue_plot <- ebsbts_trends %>%
+  ggplot() +
+  geom_line(aes(year, scaled_value, color = Index, group = interaction(Index, metric)),size = 1.5) +
+  geom_text_repel(data = metric_labels,
+                  aes(year, scaled_value, label = metric),
+                  alpha = 0.75,
+                  arrow = arrow(length = unit(0.02, "npc")),size = 6,
+                  force = 20) +
   labs(title = "Eastern Bering Sea", x = "", y = "")
 
 # west coast
@@ -466,15 +487,18 @@ wc_effort <- gfw_data %>%
   group_by(year) %>%
   summarise(total_effort = sum(total_hours, na.rm = T))
 
-wc_survey_biomass <- vast_fish %>%
-  filter(survey %in% "wcgbts",
-         spp %in% str_replace_all(included_species," ","_")) %>%
-  mutate(abundance = map(vasterized_data,"time_index")) %>%
-  select(survey, spp, abundance) %>%
+wc_survey_biomass <- candidate_data %>%
+  filter(fished_only == TRUE, unfished_only == FALSE,
+         survey_months_only == TRUE, trawl_only == FALSE) %>%
+  select(total_fish_data) %>%
   unnest() %>%
-  group_by(Year) %>%
-  summarise(total_survey_biomass = sum(abundance)) %>%
-  rename(year = Year)
+  filter(survey %in% "wcgbts") %>%
+  unnest() %>%
+  group_by(year, knot) %>%
+  summarise(tb = unique(biomass)) %>%
+  group_by(year) %>%
+  summarise(total_survey_biomass = sum(tb, na.rm = T))
+
 
 wc_cpue <- wc_ram_catch %>%
   left_join(wc_effort, by = "year") %>%
@@ -492,18 +516,29 @@ wc_cpue <- wc_ram_catch %>%
          fao_cpue = total_fao_catch / total_effort,
          nmfs_cpue = total_nmfs_catch / total_effort)
 
-wc_cpue_plot <- wc_cpue %>%
+
+wc_trends <- wc_cpue %>%
   filter(!is.na(ram_cpue)) %>%
   gather(metric, value, -year) %>%
   filter(value > 0, str_detect(metric, "cpue|biomass")) %>%
   mutate(Index = ifelse(str_detect(metric, "cpue"), "CPUE", "Abudance")) %>%
   group_by(metric) %>%
   mutate(scaled_value = value / max(value, na.rm = T)) %>%
-  ungroup() %>%
-  ggplot(aes(year, scaled_value, color = Index, linetype = metric)) +
-  geom_line(size = 1.5, show.legend = F) +
-  # scale_color_viridis_d(option = "E") +
-  labs(title = "US West Coast", y = "Scaled Value", x = "Year")
+  ungroup()
+
+metric_labels <- wc_trends %>%
+  group_by(metric) %>%
+  filter(year == max(year))
+
+wc_cpue_plot <- wc_trends %>%
+  ggplot() +
+  geom_line(aes(year, scaled_value, color = Index, group = interaction(Index, metric)),size = 1.5) +
+  geom_text_repel(data = metric_labels,
+                  aes(year, scaled_value, label = metric),
+                  alpha = 0.75,
+                  arrow = arrow(length = unit(0.02, "npc")),size = 6,
+                  force = 20) +
+  labs(title = "US West Coast", x = "", y = "")
 
 
 
@@ -512,13 +547,13 @@ wc_cpue_plot <- wc_cpue %>%
 structural <- skynet_models %>%
   filter(model == "structural",
          dep_var == "biomass",
-         data_subset == "skynet_100km",
+         data_subset == "skynet",
          variables == "gfw_only") %>%
   select(train_set, training_data, r2_training)
 
 strct_ovp_plot <- structural %>%
   unnest() %>%
-  filter(train_set %in% c("random","spatial")) %>%
+  filter(train_set %in% c("random")) %>%
   mutate(train_set = fct_reorder(train_set, rev(r2_training))) %>%
   group_by(train_set) %>%
   mutate(biomass = biomass / max(biomass),
@@ -546,8 +581,22 @@ strct_r2 <- structural %>%
 
 # latent variables
 
-skynet_100km <- rescale_data(skynet_data, resolution = 50) %>%
+skynet_100km <- rescale_data(skynet_data, resolution = 100) %>%
   na.omit()
+
+# skynet_data %>%
+#   group_by(survey,knot, rounded_lat, rounded_lon) %>%
+#   summarise(tb = sum(unique(biomass))) %>%
+#   ggplot(aes(rounded_lon, rounded_lat, fill = tb)) +
+#   geom_point(shape = 21) +
+#   scale_fill_viridis()
+
+# new_fish %>%
+#   group_by(survey,new_knot, lat, lon) %>%
+#   summarise(tb = sum(total_biomass)) %>%
+#   ggplot(aes(lon, lat, fill = tb)) +
+#   geom_point(shape = 21) +
+#   scale_fill_viridis()
 
 latent_data <- skynet_100km %>%
   mutate(location = paste0(survey, knot,sep = '_')) %>%
@@ -591,10 +640,10 @@ linear_latent_plot <- a %>%
   labs(x = "Observed biomass", y = "Space Effects")
 
 
-skynet_50km <- rescale_data(skynet_data %>% filter(survey == "wcgbts"), resolution = 50) %>%
+skynet_100km <- rescale_data(skynet_data %>% filter(survey == "wcgbts"), resolution = 100) %>%
   na.omit()
 
-latent_data <- skynet_50km %>%
+latent_data <- skynet_100km %>%
   mutate(location = paste(survey, knot,sep = 'x')) %>%
   filter(year == max(year)) %>%
   na.omit() %>%
@@ -635,10 +684,8 @@ oa_fit <-
     prior = oa_prior,
     control = list(adapt_delta = 0.95),
     chains = 1,
-    iter = 10000
+    iter = 5000
   )
-
-
 
 tidy_oa <- broom::tidy(oa_fit)
 
@@ -664,7 +711,6 @@ strct_latent_plot <- oa_preds %>%
   geom_abline(aes(intercept = 0, slope = 1), linetype = 2, color = "red") +
   geom_smooth(method = "lm", color = "blue", se = F) +
   labs(x = "Observed biomass", y = "Space Effects")
-
 
 # predicting effort -------------------------------------------------------
 
@@ -748,7 +794,7 @@ ranger <- skynet_models %>%
 
 ranger_ovp_plot <- ranger %>%
   unnest() %>%
-  filter(train_set %in% c("random","spatial")) %>%
+  filter(train_set %in% c("random")) %>%
   mutate(train_set = fct_reorder(train_set, rev(r2_training))) %>%
   group_by(train_set) %>%
   mutate(biomass = biomass / max(biomass),
@@ -885,14 +931,207 @@ upscale_plot <-  upscale_plot + coord_flip()
 strct_v_ml_plot <- downscale_plot + upscale_plot
 
 
+# trend prediciton  ----------------------------------------------------
+
+#first with training
+
+consistent_knots <-
+  skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("random"),
+         data_subset %in% c("skynet")) %>%
+  select(variables, data_subset, test_sets, training_data) %>%
+  unnest() %>%
+  filter(survey %in% c("wcgbts", "ebsbts")) %>%
+  mutate(survey_knot = paste(survey, knot, sep = "")) %>%
+  group_by(survey,survey_knot) %>%
+  summarise(nl = n_distinct(year)) %>%
+  group_by(survey) %>%
+  filter(nl == max(nl))
+
+train_trend_plot <- skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("random"),
+         data_subset %in% c("skynet")) %>%
+  select(variables, data_subset, test_sets, training_data) %>%
+  unnest() %>%
+  filter(survey %in% c("wcgbts", "ebsbts")) %>%
+  mutate(survey_knot = paste(survey, knot, sep = "")) %>%
+  filter(survey_knot %in% consistent_knots$survey_knot) %>%
+  group_by(survey, variables, year, knot) %>%
+  summarise(tb = sum(unique(biomass)),
+            tpb = mean(pred)) %>%
+  group_by(survey, variables, year) %>%
+  summarise(total_biomass = sum(tb),
+            total_pred_biomass = sum(tpb)) %>%
+  gather(metric, value, contains("total")) %>%
+  group_by(survey, variables, metric) %>%
+  mutate(scaled_value = (value - mean(value)) / sd(value)) %>%
+  ungroup() %>%
+  ggplot(aes(year, scaled_value, color = metric)) +
+  geom_line() +
+  facet_grid(survey~ variables) +
+  ggsci::scale_color_igv(labels = c("Observed","Predicted"))
+
+#then with testing
+
+consistent_knots <-
+  skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("random"),
+         data_subset %in% c("skynet")) %>%
+  select(variables, data_subset, test_sets, test_data) %>%
+  unnest() %>%
+  filter(survey %in% c("wcgbts", "ebsbts")) %>%
+  mutate(survey_knot = paste(survey, knot, sep = "")) %>%
+  group_by(survey,survey_knot) %>%
+  summarise(nl = n_distinct(year)) %>%
+  group_by(survey) %>%
+  filter(nl == max(nl))
+
+
+test_trend_plot <- skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("random"),
+         data_subset %in% c("skynet")) %>%
+  select(variables, data_subset, test_sets, test_data) %>%
+  unnest() %>%
+  filter(survey %in% c("wcgbts", "ebsbts")) %>%
+  mutate(survey_knot = paste(survey, knot, sep = "")) %>%
+  filter(survey_knot %in% consistent_knots$survey_knot) %>%
+  group_by(survey, variables, year, knot) %>%
+  summarise(tb = sum(unique(biomass)),
+            tpb = mean(pred)) %>%
+  group_by(survey, variables, year) %>%
+  summarise(total_biomass = sum(tb),
+            total_pred_biomass = sum(tpb)) %>%
+  gather(metric, value, contains("total")) %>%
+  group_by(survey, variables, metric) %>%
+  mutate(scaled_value = (value - mean(value)) / sd(value)) %>%
+  ungroup() %>%
+  ggplot(aes(year, scaled_value, color = metric)) +
+  geom_line() +
+  facet_grid(survey~ variables) +
+  ggsci::scale_color_igv(labels = c("Observed","Predicted"))
+
+# now with historic
+
+# skynet_data %>%
+#   filter(year <2014) %>%
+#   nrow()
+#
+# skynet_data %>%
+#   filter(survey %in% c("wcgbts", "ebsbts")) %>%
+#   group_by(survey, year, knot) %>%
+#   summarise(b = unique(biomass)) %>%
+#   group_by(survey, year) %>%
+#   summarise(tb = sum(b)) %>%
+#   group_by(survey) %>%
+#   mutate(scaled_value = (tb - mean(tb)) / sd(tb)) %>%
+#   ggplot(aes(year, scaled_value)) +
+#   geom_line() +
+#   facet_wrap(~survey)
+
+
+consistent_knots <-
+  skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("future"),
+         data_subset %in% c("skynet")) %>%
+  select(variables, data_subset, test_sets, training_data) %>%
+  unnest() %>%
+  filter(survey %in% c("wcgbts", "ebsbts")) %>%
+  mutate(survey_knot = paste(survey, knot, sep = "")) %>%
+  group_by(survey, survey_knot) %>%
+  summarise(nl = n_distinct(year)) %>%
+  group_by(survey) %>%
+  filter(nl == max(nl))
+
+train_historic_trend <- skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("future"),
+         data_subset %in% c("skynet")) %>%
+  select(variables, data_subset, test_sets, training_data) %>%
+  unnest() %>%
+  filter(survey %in% c("wcgbts", "ebsbts")) %>%
+  mutate(survey_knot = paste(survey, knot, sep = "")) %>%
+  filter(survey_knot %in% consistent_knots$survey_knot) %>%
+  group_by(survey, variables, year, knot) %>%
+  summarise(tb = unique(biomass),
+            tpb = mean(pred),
+            no = n_distinct(biomass),
+            np = n_distinct(pred)) %>%
+  group_by(survey, variables, year) %>%
+  summarise(total_biomass = sum(tb),
+            total_pred_biomass = sum(tpb)) %>%
+  gather(metric, value, contains("total")) %>%
+  ungroup() %>%
+  mutate(source = "Training")
+
+
+consistent_knots <-
+  skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("future"),
+         data_subset %in% c("skynet")) %>%
+  select(variables, data_subset, test_sets, test_data) %>%
+  unnest() %>%
+  filter(survey %in% c("wcgbts", "ebsbts")) %>%
+  mutate(survey_knot = paste(survey, knot, sep = "")) %>%
+  group_by(survey,survey_knot) %>%
+  summarise(nl = n_distinct(year)) %>%
+  group_by(survey) %>%
+  filter(nl == max(nl))
+
+test_historic_trend <- skynet_models %>%
+  filter(dep_var == "biomass", model == "ranger",
+         test_sets %in% c("future"),
+         data_subset %in% c("skynet")) %>%
+  select(variables, data_subset, test_sets, test_data) %>%
+  unnest() %>%
+  filter(survey %in% c("wcgbts","ebsbts")) %>%
+  mutate(survey_knot = paste(survey, knot, sep = "")) %>%
+  filter(survey_knot %in% consistent_knots$survey_knot) %>%
+  group_by(survey, variables, year, knot) %>%
+  summarise(tb = unique(biomass),
+            tpb = mean(pred),
+            no = n_distinct(biomass),
+            np = n_distinct(pred)) %>%
+  group_by(survey, variables, year) %>%
+  summarise(total_biomass = sum(tb),
+            total_pred_biomass = sum(tpb)) %>%
+  gather(metric, value, contains("total")) %>%
+  ungroup() %>%
+  mutate(source = "Testing")
+
+historic_testing_plot <- train_historic_trend %>%
+  bind_rows(test_historic_trend) %>%
+  group_by(metric, survey, variables) %>%
+  mutate(scaled_value = (value - mean(value)) / sd(value)) %>%
+  ungroup() %>%
+  ggplot(aes(year, scaled_value)) +
+  geom_ribbon(aes(year, ymin = -2, ymax = 2, fill = source), alpha = 0.2,
+              show.legend = FALSE) +
+  geom_line(aes(color = metric)) +
+  geom_point(aes(color = metric)) +
+  facet_grid(survey~ variables) +
+  scale_fill_viridis_d() +
+  ggsci::scale_color_startrek(labels = c("Observed","Predicted"),name = "") +
+theme(axis.text.x = element_text(size = 8)) +
+  labs(y = "Centered and Scaled Biomass", x= 'Year')
+
+
 # value of information ----------------------------------------------------
 
 #first with training
 
+# data_subset %in% c("skynet","skynet_25km","skynet_100km")) %>%
+
+
 voi_plot <- skynet_models %>%
   filter(dep_var == "biomass", model == "ranger",
          test_sets %in% c("random"),
-         data_subset %in% c("skynet","skynet_25km","skynet_100km")) %>%
+         data_subset %in% c("skynet")) %>%
   select(variables, data_subset, test_sets, r2_training) %>%
   spread(variables, r2_training) %>%
   mutate(delta_g_and_e = gfw_and_enviro - enviro_only,
@@ -900,7 +1139,7 @@ voi_plot <- skynet_models %>%
   select(-enviro_only, -gfw_and_enviro, -gfw_only) %>%
   gather(comparison, delta, delta_g_and_e, delta_g) %>%
   ggplot(aes(comparison, delta, fill = data_subset)) +
-  geom_col(position = "dodge", color = "black") +
+  geom_col(position = "dodge", color = "black", show.legend = FALSE) +
   geom_hline(aes(yintercept = 0)) +
   scale_x_discrete(labels = c("Effort vs Environment", "Effort and Evironment vs. Environment")) +
   coord_flip() +
@@ -913,11 +1152,10 @@ voi_plot <- skynet_models %>%
 # suggests that in general just enviro would be your best bet, how does that stand up
 # to testing data
 
-skynet_models$test_sets[skynet_models$test_sets == "historic"] <- "future"
 
 test_training_plot <- skynet_models %>%
   filter(dep_var == "biomass",
-         data_subset == "skynet_100km",
+         data_subset == "skynet",
          model %in% c(best_ml_model, 'structural'),
          test_sets %in% c("random","future","california")) %>%
   filter(!(model == "structural" & variables != "gfw_only")) %>%
@@ -1074,6 +1312,15 @@ gfw_plot <- gfw_map %>%
     guide = guide_colorbar(frame.colour = "black")
   ) +
   theme(legend.key.height = unit(1.5, "cm"))
+
+
+
+# abundance trends --------------------------------------------------------
+# per rays comment, question is can effort track both spatial abundance and overall abundance
+
+# could look at this visually just examining trends in total effort and total abundance from fig
+
+
 
 
 # save --------------------------------------------------------------------

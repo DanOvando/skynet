@@ -61,36 +61,42 @@ tune_pars <- FALSE # pre-tune machine learning models
 
 models <-
   c("ranger",
-    "bagged_mars",
-    "mars",
-    "gbm",
     "structural",
     "engine_power",
     "hours")
 
+# models <-
+#   c("ranger",
+#     "bagged_mars",
+#     "mars",
+#     "gbm",
+#     "structural",
+#     "engine_power",
+#     "hours")
+
 # models <- c("mars")
 
-vasterize <- F # run vast or load saved object
+vasterize <- FALSE # run vast or load saved object
 
-impute_missing <- T
+impute_missing <- TRUE
 
-plot_data <- F # plot covariates and maps
+plot_data <- FALSE # plot covariates and maps
 
-query_fishdata <- F # get trawl survey data or load saved
+query_fishdata <- FALSE # get trawl survey data or load saved
 
-query_gfw <- F # get gfw data or load saved
+query_gfw <- FALSE # get gfw data or load saved
 
-query_environmentals <- F # get environmental data or load saved
+query_environmentals <- FALSE # get environmental data or load saved
 
-query_mpas <- F # get mpa data or load saved
+query_mpas <- FALSE # get mpa data or load saved
 
-query_synonyms <- F # look up synonyms for each species
+query_synonyms <- FALSE # look up synonyms for each species
 
-query_coastal_map <- F # get coastal map or load
+query_coastal_map <- FALSE # get coastal map or load
 
-query_prices <- F # get exvessel price data for observed species
+query_prices <- FALSE # get exvessel price data for observed species
 
-round_environmentals <- T
+round_environmentals <- TRUE
 
 
 # set run options (how to run) ---------------------------------------------------------
@@ -99,17 +105,9 @@ raw_fish <- F
 
 dep_vars <- c("density", "lag_economic_density","biomass")
 
-fished_only <-
-  T # only include fished species in predictive model fitting
-
-unfished_only <- F # trial option fitting to unfished only
-
 no_wcghl <- TRUE # get rid of WCGHL in model fitting
 
 hack_zeros <- T # hack zeros into perfectly observed species
-
-survey_years_only <-
-  T # only include years that were actually surveyed
 
 include_all_species <- T # include all species in VAST
 
@@ -194,12 +192,40 @@ if (query_fishdata == T) {
   fish_data <- fishdata_names %>%
     mutate(survey_data = map(
       survey,
-      ~ download_catch_rates(.x, species_set = 50,
+      ~ download_catch_rates(.x, species_set = 40,
                              error_tol = 1e-2)
     ))
 
+
+  fillfoo <- function(survey, survey_data){
+
+
+    if (survey  == "AIBTS"){
+      area_swept_km2 <- 1
+    } else if (survey == "WCGBTS"){
+      area_swept_km2 <- survey_data$AreaSept_ha/1e2
+    } else {
+      area_swept_km2 <- 0.01
+    }
+
+    survey_data$AreaSwept_km2 <- area_swept_km2
+
+    if (is.null(survey_data$Vessel)){
+      survey_data$Vessel = "missing"
+    }
+    if (is.numeric(survey_data$Vessel)){
+      survey_data$Vessel <- as.character( survey_data$Vessel)
+    }
+
+    return(survey_data)
+  }
+
+
+  fish_data <- fish_data %>%
+    mutate(survey_data = map2(survey,survey_data,fillfoo))
+
   fish_data$survey_data <-
-    fish_data$survey_data %>% map(`[`, c("Sci", "Year", "TowID", "Lat", "Long", "Wt", "Num"))
+    fish_data$survey_data %>% map(`[`, c("Sci", "Year", "TowID", "Lat", "Long", "Wt", "Num","AreaSwept_km2","Vessel"))
 
   fish_data <- unnest(fish_data) %>%
     mutate(survey = tolower(survey))
@@ -843,7 +869,6 @@ subset_fish_data <- fish_data %>%
   dplyr::rename(Lon = Long,
                 Catch_KG = Wt,
                 spp = Sci) %>%
-  mutate(AreaSwept_km2 = 1, Vessel = "missing") %>%
   select(survey,
          survey_region,
          knots,
@@ -915,6 +940,7 @@ if (vasterize == T) {
 } else {
   load(file = here::here("data", "vast_fish.Rdata"))
 }
+print("ran vast")
 
 # build database ----------------------------------------------------------
 

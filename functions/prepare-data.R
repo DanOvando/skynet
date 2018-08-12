@@ -198,7 +198,7 @@ prepare_data <-
     mean_survey_prices <- total_fish_data %>%
       left_join(species_prices, by = "species") %>%
       group_by(survey) %>%
-      summarise(aggregate_price = sum(unique(mean_exvessel_price), na.rm = T))
+      summarise(aggregate_price = mean(unique(mean_exvessel_price), na.rm = T))
 
     total_fish_data <- total_fish_data %>%
       left_join(species_prices, by = "species")
