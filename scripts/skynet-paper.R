@@ -254,6 +254,24 @@ e_v_d_plot <- downscaled_performance %>%
   facet_wrap(~resolution)
 
 
+e_v_ed_plot <- downscaled_performance %>%
+  select(resolution, new_data) %>%
+  unnest() %>%
+  filter(agg_total_hours > 0,
+         resolution == 100) %>%
+  ggplot(aes((agg_total_engine_hours), (total_revenue), fill = approx_survey)) +
+  geom_point(alpha = 0.5, shape = 21,size = 2) +
+  labs(x = "Engine Hours", y = "Available Revenue (USD)",
+       caption = "Note log-10 scale of axes") +
+  scale_fill_viridis_d(name = "Survey Region") +
+  scale_color_viridis_d(name = "Survey Region") +
+  geom_abline(aes(intercept = 0, slope = 1),linetype = 2, alpha = 0.75) +
+  geom_smooth(method = "lm", aes(color = approx_survey), se = FALSE) +
+  scale_x_log10(labels = scales::comma) +
+  scale_y_log10(labels = scales::dollar) +
+  facet_wrap(~resolution)
+
+
 
 e_v_d_plot
 
@@ -372,7 +390,7 @@ ebsbts_biomass<- ram_biomass %>%
   filter(!str_detect(stocklong.x, "Gulf of Alaska")) %>%
   filter(scientificname %in% included_species) %>%
   group_by(year) %>%
-  summarise(total_biomass = sum(biomass, na.rm = T))
+  summarise(ram_biomass = sum(biomass, na.rm = T))
 
 ebsbts_effort <- gfw_data %>%
   filter(survey %in% c("ebsbts")) %>%
@@ -399,7 +417,7 @@ survey_biomass <- candidate_data %>%
   group_by(year, knot) %>%
   summarise(tb = unique(biomass)) %>%
   group_by(year) %>%
-  summarise(total_survey_biomass = sum(tb, na.rm = T))
+  summarise(survey_biomass = sum(tb, na.rm = T))
 
 ebsbts_cpue <- ebsbts_catch %>%
   left_join(ebsbts_effort, by = "year") %>%
@@ -418,7 +436,7 @@ ebsbts_trends <- ebsbts_cpue %>%
   filter(value > 0, str_detect(metric, "cpue|biomass")) %>%
   mutate(Index = ifelse(str_detect(metric, "cpue"), "CPUE", "Abudance")) %>%
   group_by(metric) %>%
-  mutate(scaled_value = value / max(value, na.rm = T)) %>%
+  mutate(scaled_value = (value - mean(value, na.rm = T)) / sd(value, na.rm = T)) %>%
   ungroup()
 
 metric_labels <- ebsbts_trends %>%
@@ -429,11 +447,11 @@ ebsbts_cpue_plot <- ebsbts_trends %>%
   ggplot() +
   geom_line(aes(year, scaled_value, color = Index, group = interaction(Index, metric)),size = 1.5) +
   geom_text_repel(data = metric_labels,
-                  aes(year, scaled_value, label = metric),
+                  aes(year + 0.25, scaled_value, label = metric),
                   alpha = 0.75,
                   arrow = arrow(length = unit(0.02, "npc")),size = 6,
                   force = 20) +
-  labs(title = "Eastern Bering Sea", x = "", y = "")
+  labs(title = "Eastern Bering Sea", x = "", y = "Centered and Scaled Index")
 
 # west coast
 
@@ -470,7 +488,7 @@ wc_biomass<- ram_biomass %>%
   filter(!str_detect(stocklong.x, "Gulf of Alaska")) %>%
   filter(scientificname %in% included_species) %>%
   group_by(year) %>%
-  summarise(total_biomass = sum(biomass, na.rm = T))
+  summarise(ram_biomass = sum(biomass, na.rm = T))
 
 wc_effort <- gfw_data %>%
   filter(survey %in% c("wcgbts")) %>%
@@ -497,7 +515,7 @@ wc_survey_biomass <- candidate_data %>%
   group_by(year, knot) %>%
   summarise(tb = unique(biomass)) %>%
   group_by(year) %>%
-  summarise(total_survey_biomass = sum(tb, na.rm = T))
+  summarise(survey_biomass = sum(tb, na.rm = T))
 
 
 wc_cpue <- wc_ram_catch %>%
@@ -509,7 +527,7 @@ wc_cpue <- wc_ram_catch %>%
 wc_cpue <- wc_ram_catch %>%
   left_join(wc_effort, by = "year") %>%
   left_join(wc_biomass, by = "year") %>%
-  left_join(survey_biomass, by = "year") %>%
+  left_join(wc_survey_biomass, by = "year") %>%
   left_join(wc_fao_catch, by = "year") %>%
   left_join(wc_nmfs_catch, by = "year") %>%
   mutate(ram_cpue = total_catch / total_effort,
@@ -523,7 +541,7 @@ wc_trends <- wc_cpue %>%
   filter(value > 0, str_detect(metric, "cpue|biomass")) %>%
   mutate(Index = ifelse(str_detect(metric, "cpue"), "CPUE", "Abudance")) %>%
   group_by(metric) %>%
-  mutate(scaled_value = value / max(value, na.rm = T)) %>%
+  mutate(scaled_value = (value - mean(value, na.rm = T)) / sd(value, na.rm = T)) %>%
   ungroup()
 
 metric_labels <- wc_trends %>%
@@ -534,11 +552,11 @@ wc_cpue_plot <- wc_trends %>%
   ggplot() +
   geom_line(aes(year, scaled_value, color = Index, group = interaction(Index, metric)),size = 1.5) +
   geom_text_repel(data = metric_labels,
-                  aes(year, scaled_value, label = metric),
+                  aes(year + .25, scaled_value, label = metric),
                   alpha = 0.75,
                   arrow = arrow(length = unit(0.02, "npc")),size = 6,
                   force = 20) +
-  labs(title = "US West Coast", x = "", y = "")
+  labs(title = "US West Coast", x = "", y = "Centered and Scaled Index")
 
 
 
@@ -769,16 +787,18 @@ ml_resolution_plot <- skynet_models %>%
   filter(model == "ranger",
          dep_var == "biomass",
          variables == "gfw_only",
-         test_sets %in% c("random","spatial"),
+         test_sets %in% c("random"),
          data_subset %in% c("skynet", "skynet_25km", "skynet_100km")) %>%
+  mutate(data_subset = fct_recode(data_subset,raw = "skynet", `25km^2` = "skynet_25km",`100km^2` = "skynet_100km")) %>%
   group_by(data_subset) %>%
   mutate(mean_r2_training = mean(r2_training)) %>%
   ungroup() %>%
   mutate(data_subset = fct_reorder(data_subset, (mean_r2_training))) %>%
   ggplot(aes(data_subset, r2_training, fill = test_sets)) +
-  geom_col(position = "dodge", color = "black") +
+  geom_col(position = "dodge", color = "black", show.legend = FALSE) +
   geom_hline(aes(yintercept = 0)) +
-  ggsci::scale_fill_simpsons()
+  ggsci::scale_fill_simpsons() +
+  labs(y = bquote(R^2), x = "Data Resolution")
 
 
 
@@ -1132,6 +1152,7 @@ voi_plot <- skynet_models %>%
   filter(dep_var == "biomass", model == "ranger",
          test_sets %in% c("random"),
          data_subset %in% c("skynet", "skynet_25km","skynet_100km")) %>%
+  mutate(data_subset = fct_recode(data_subset,raw = "skynet", `25km^2` = "skynet_25km",`100km^2` = "skynet_100km")) %>%
   select(variables, data_subset, test_sets, r2_training) %>%
   spread(variables, r2_training) %>%
   mutate(delta_g_and_e = gfw_and_enviro - enviro_only,
@@ -1139,7 +1160,7 @@ voi_plot <- skynet_models %>%
   select(-enviro_only, -gfw_and_enviro, -gfw_only) %>%
   gather(comparison, delta, delta_g_and_e, delta_g) %>%
   ggplot(aes(comparison, delta, fill = data_subset)) +
-  geom_col(position = "dodge", color = "black", show.legend = FALSE) +
+  geom_col(position = "dodge", color = "black", show.legend = TRUE) +
   geom_hline(aes(yintercept = 0)) +
   scale_x_discrete(labels = c("Effort vs Environment", "Effort and Evironment vs. Environment")) +
   coord_flip() +
@@ -1262,7 +1283,7 @@ revenue_map_plot <- fish_abundance %>%
   # scale_color_viridis(name =bquote("Density"~(ton/km^2)))+
   scale_color_viridis(
     trans = "log10",
-    name = bquote("Revenue Density" ~ (ton / km ^ 2)),
+    name = bquote("Revenue Density" ~ (USD/km ^ 2)),
     option = "A",
     guide = guide_colorbar(frame.colour = "black")
   ) +
