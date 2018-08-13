@@ -350,7 +350,7 @@ Based on this idea, we pulled globally estimates of chlorophyll concentrations (
 
 Comparing effort data alone vs environmental data alone, we see that the relative value of information of the effort data is in fact negative. Meaning, the environment-alone model substantially outperformed, in terms of training data R^2^, the effort-alone model. If the effort data by themselves are not as predicatively useful as environmental drivers, are the effort and environmental data together worth more than the sum of their parts? Our results suggest that in fact they are not; combining the effort data with the environmental data provides nearly identical performance to using just the environmental data (Fig.\@ref(fig:voi-plot)).
 
-```{r voi-plot, fig.cap="Differences in R2 of tuned random forest model with effort data relative to R2 obtained from only using environmental data (negative implies worse performance than environmental data only)"}
+```{r voi-plot, fig.cap="Differences in R2 of tuned random forest model with effort data relative to R2 obtained from only using environmental (env) data (negative implies worse performance than environmental data only)"}
 voi_plot
 ```
 ### Confrontation with Testing Data

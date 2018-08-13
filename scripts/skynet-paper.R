@@ -1137,7 +1137,7 @@ historic_testing_plot <- train_historic_trend %>%
   facet_grid(survey~ variables) +
   scale_fill_viridis_d() +
   ggsci::scale_color_startrek(labels = c("Observed","Predicted"),name = "") +
-theme(axis.text.x = element_text(size = 8)) +
+theme(axis.text.x = element_text(size = 8), panel.spacing = unit(1, "lines")) +
   labs(y = "Centered and Scaled Biomass", x= 'Year')
 
 
@@ -1162,7 +1162,7 @@ voi_plot <- skynet_models %>%
   ggplot(aes(comparison, delta, fill = data_subset)) +
   geom_col(position = "dodge", color = "black", show.legend = TRUE) +
   geom_hline(aes(yintercept = 0)) +
-  scale_x_discrete(labels = c("Effort vs Environment", "Effort and Evironment vs. Environment")) +
+  scale_x_discrete(labels = c("Effort vs Env", "Effort and Env vs. Env")) +
   coord_flip() +
   labs(y = bquote("Difference in"~R^2), x = "") +
   ggsci::scale_fill_startrek(name = "Data Resolution")
@@ -1186,7 +1186,7 @@ test_training_plot <- skynet_models %>%
   ggplot(aes(variables, r2)) +
   geom_line() +
   geom_point(aes(fill = `Split`),shape = 21, size = 4) +
-  labs(y = bquote(R^2),x = "Variables") +
+  labs(y = bquote(R^2),x = element_blank()) +
   ggsci::scale_fill_rickandmorty(labels = c("Testing", "Training")) +
   coord_flip() +
   facet_grid(test_sets~model)
